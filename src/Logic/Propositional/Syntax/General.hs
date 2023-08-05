@@ -81,6 +81,7 @@ import Data.Functor.Classes
 import Data.Functor.Foldable
 import Data.Functor.Foldable qualified as R
 import Data.Hashable (Hashable)
+import Data.String (IsString (..))
 import Data.Traversable (foldMapDefault)
 import GHC.Generics (Generic, Generic1)
 
@@ -428,6 +429,9 @@ conjunctives =
 data Literal a = Positive !a | Negative !a
   deriving (Show, Eq, Ord, Generic, Generic1, Functor, Foldable, Traversable)
   deriving anyclass (Hashable, NFData)
+
+instance (a ~ String) => IsString (Literal a) where
+  fromString = Positive
 
 negLit :: Literal a -> Literal a
 negLit = \case

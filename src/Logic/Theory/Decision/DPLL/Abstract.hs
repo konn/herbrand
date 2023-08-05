@@ -2,10 +2,7 @@
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DerivingVia #-}
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MonoLocalBinds #-}
-{-# LANGUAGE MultiWayIf #-}
-{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE UndecidableInstances #-}
 

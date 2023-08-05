@@ -27,8 +27,6 @@ import Control.Monad (guard)
 import Control.Monad.Trans.Maybe (MaybeT (..))
 import Control.Monad.Trans.Reader (ReaderT (..))
 import Control.Monad.Trans.Writer.CPS (runWriter, tell, writer)
-import Control.Parallel.Strategies
-import Data.Coerce (coerce)
 import Data.Foldable (foldl', foldr', foldrM)
 import Data.Function (fix)
 import Data.Functor (($>))
@@ -37,46 +35,16 @@ import Data.HashSet (HashSet)
 import Data.HashSet qualified as HS
 import Data.Hashable (Hashable)
 import Data.Strict (Pair (..))
-import Data.String
 import GHC.Generics (Generic, Generic1, Generically (..))
-import GHC.IsList
-
--- | Propositional formula in Conjunction Normal Form (__CNF__) with atomic formula @a@.
-newtype CNF a = CNF {cnfClauses :: [CNFClause a]}
-  deriving (Show, Eq, Ord, Generic, Generic1, Functor, Foldable, Traversable)
-  deriving anyclass (Wrapped, NFData)
-  deriving newtype (IsList)
-
--- | Each conjunctive clause in CNF formulae, i.e. disjunction of literals.
-newtype CNFClause a = CNFClause {clauseLits :: [Literal a]}
-  deriving (Show, Eq, Ord, Generic, Generic1, Functor, Foldable, Traversable)
-  deriving anyclass (Wrapped, NFData)
-  deriving newtype (IsList)
-
--- | A literal is mere a atomic formula or its negation.
-data Literal a = Positive !a | Negative !a
-  deriving (Show, Eq, Ord, Generic, Generic1, Functor, Foldable, Traversable)
-  deriving anyclass (Hashable, NFData)
-
-forceSpineCNF :: forall a. CNF a -> CNF a
-forceSpineCNF = flip using $ coerce $ evalList $ evalList $ rseq @(Literal a)
+import Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
 
 data Result a = Sat a | Unsat
   deriving (Show, Eq, Ord, Generic, Generic1, Functor, Foldable, Traversable)
   deriving anyclass (Hashable, NFData)
 
-data MonotoneHashSet a = MHS
-  { getHashSet :: !(HashSet a)
-  , size :: {-# UNPACK #-} !Int
-  }
-  deriving (Show, Eq, Ord, Generic)
-
 data Model a = Model {positive :: HashSet a, negative :: HashSet a}
   deriving (Show, Eq, Ord, Generic)
   deriving (Semigroup, Monoid) via Generically (Model a)
-
-instance (a ~ String) => IsString (Literal a) where
-  fromString = Positive
 
 solve :: (Hashable a) => CNF a -> Result (Model a)
 solve =
