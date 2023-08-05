@@ -307,7 +307,7 @@ pattern l :/\ r = Formula (l ::/\ r)
 (/\) :: Formula x a -> Formula x a -> Formula x a
 l /\ r = l :/\ r
 
-infixl 4 :\/, \/
+infixl 2 :\/, \/
 
 pattern (:\/) :: Formula x a -> Formula x a -> Formula x a
 pattern l :\/ r = Formula (l ::\/ r)
