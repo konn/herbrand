@@ -1,0 +1,195 @@
+{-# LANGUAGE GHC2021 #-}
+{-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE DerivingVia #-}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE MonoLocalBinds #-}
+{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE UndecidableInstances #-}
+
+module Logic.Theory.Decision.DPLL.Propositional (
+  CNF (..),
+  CNFClause (..),
+  Literal (..),
+  neg,
+  Model (..),
+  oneLiteralRule,
+  affirmativeNegative,
+  solve,
+) where
+
+import Control.Applicative
+import Control.DeepSeq
+import Control.Foldl qualified as L
+import Control.Lens
+import Control.Monad (guard)
+import Control.Monad.Trans.Maybe (MaybeT (..))
+import Control.Monad.Trans.Reader (ReaderT (..))
+import Control.Monad.Trans.Writer.CPS (runWriter, tell, writer)
+import Control.Parallel.Strategies
+import Data.Coerce (coerce)
+import Data.Foldable (foldl', foldr', foldrM)
+import Data.Function (fix)
+import Data.Functor (($>))
+import Data.Generics.Labels ()
+import Data.HashSet (HashSet)
+import Data.HashSet qualified as HS
+import Data.Hashable (Hashable)
+import Data.Monoid (First (..))
+import Data.Strict (Pair (..))
+import Data.String
+import GHC.Generics (Generic, Generic1, Generically (..))
+import GHC.IsList
+
+-- | Propositional formula in Conjunction Normal Form (__CNF__) with atomic formula @a@.
+newtype CNF a = CNF {cnfClauses :: [CNFClause a]}
+  deriving (Show, Eq, Ord, Generic, Generic1, Functor, Foldable, Traversable)
+  deriving anyclass (Wrapped, NFData)
+  deriving newtype (IsList)
+
+-- | Each conjunctive clause in CNF formulae, i.e. disjunction of literals.
+newtype CNFClause a = CNFClause {clauseLits :: [Literal a]}
+  deriving (Show, Eq, Ord, Generic, Generic1, Functor, Foldable, Traversable)
+  deriving anyclass (Wrapped, NFData)
+  deriving newtype (IsList)
+
+-- | A literal is mere a atomic formula or its negation.
+data Literal a = Positive !a | Negative !a
+  deriving (Show, Eq, Ord, Generic, Generic1, Functor, Foldable, Traversable)
+  deriving anyclass (Hashable, NFData)
+
+forceSpineCNF :: forall a. CNF a -> CNF a
+forceSpineCNF = flip using $ coerce $ evalList $ evalList $ rseq @(Literal a)
+
+data Result a = Sat a | Unsat
+  deriving (Show, Eq, Ord, Generic, Generic1, Functor, Foldable, Traversable)
+  deriving anyclass (Hashable, NFData)
+
+data MonotoneHashSet a = MHS
+  { getHashSet :: !(HashSet a)
+  , size :: {-# UNPACK #-} !Int
+  }
+  deriving (Show, Eq, Ord, Generic)
+
+data Model a = Model {positive :: HashSet a, negative :: HashSet a}
+  deriving (Show, Eq, Ord, Generic)
+  deriving (Semigroup, Monoid) via Generically (Model a)
+
+instance (a ~ String) => IsString (Literal a) where
+  fromString = Positive
+
+solve :: (Hashable a) => CNF a -> Result (Model a)
+solve =
+  uncurry ($>) . runWriter . fix \self fml -> do
+    fml' <-
+      fixedPointM
+        ( runMaybeT
+            . runReaderT
+              ( ReaderT (MaybeT . writer . oneLiteralRule)
+                  <|> ReaderT (MaybeT . writer . affirmativeNegative)
+              )
+        )
+        fml
+    case checkSat fml' of
+      Just resl -> pure resl
+      Nothing -> do
+        case foldMap (First . Just) fml' of
+          First Nothing -> pure Unsat
+          First (Just v) -> do
+            let posCl = runWriter (self $ assert (Positive v) fml')
+            case posCl of
+              (Sat (), model) -> Sat <$> tell model
+              (Unsat, _) -> self $ assert (Negative v) fml'
+
+assert :: Literal a -> CNF a -> CNF a
+assert l (CNF cs) = CNF $ CNFClause [l] : cs
+
+checkSat :: CNF a -> Maybe (Result ())
+checkSat (CNF []) = Just (Sat ())
+checkSat (CNF ls)
+  | any (null . clauseLits) ls = Just Unsat
+  | otherwise = Nothing
+
+fixedPointM :: (Monad m) => (a -> m (Maybe a)) -> a -> m a
+fixedPointM f = fix $ \self x -> do
+  maybe (pure x) self =<< f x
+
+neg :: Literal a -> Literal a
+neg (Positive a) = Negative a
+neg (Negative a) = Positive a
+
+data StrictFst a b = StrictFst !a b
+  deriving (Show, Eq, Ord, Generic)
+
+unLit :: Literal a -> a
+unLit (Positive a) = a
+unLit (Negative a) = a
+
+-- | 1-Literal Rule (Unit Propagation)
+oneLiteralRule :: (Hashable a) => CNF a -> (Maybe (CNF a), Model a)
+oneLiteralRule (CNF cls0) =
+  {-
+    NOTE: We must pay attention to where to use foldr' and foldl'.
+    In the construction of 'oneLit0' we use foldl' add (:), which makes
+    'oneLit0' reversed (compared to occurrence in cls0).
+
+    As we want to process first 1-literals first, we must use foldr for
+    consumption; i.e in the following operations:
+
+    1. filtering/trasforming existing clauses (i.e. generating cls')
+    2. picking of appropriate literal in model generation.
+  -}
+  let (oneLit0, cls') =
+        foldl'
+          ( \(ml, rst) ls ->
+              let ml' = maybe ml (: ml) do
+                    [l] <- pure $ clauseLits ls
+                    pure l
+               in (ml', maybe id (:) (foldrM prune ls oneLit0) rst)
+          )
+          ([], [])
+          cls0
+      prune !l (CNFClause lits) = do
+        guard $ l `notElem` HS.fromList lits
+        pure $ CNFClause $ filter (/= neg l) lits
+
+      ((positive :!: negative) :!: _) =
+        foldr'
+          ( \ !l ((accP :!: accN) :!: occ) ->
+              ( case l of
+                  _ | unLit l `HS.member` occ -> (accP :!: accN) :!: occ
+                  Positive a -> (HS.insert a accP :!: accN) :!: HS.insert a occ
+                  Negative a -> (accP :!: HS.insert a accN) :!: HS.insert a occ
+              )
+          )
+          mempty
+          oneLit0
+   in (forceSpineCNF (CNF cls') <$ guard (not $ null oneLit0), Model {..})
+
+{- |
+Affirmative-Negative Rule (Pure Literal Rule):
+if a literal occurs only postiviely or only negatively, we can set it to 'True' ('False', resp.).
+-}
+affirmativeNegative :: (Hashable a) => CNF a -> (Maybe (CNF a), Model a)
+affirmativeNegative (CNF cls0) =
+  let (StrictFst (poss :!: negs) rs) =
+        foldr'
+          ( \cls (StrictFst posNegs ans) ->
+              StrictFst (posNegs <> extractPosNeg cls) $
+                if HS.null $ HS.intersection pureLits $ HS.fromList $ clauseLits cls
+                  then cls : ans
+                  else ans
+          )
+          (StrictFst (HS.empty :!: HS.empty) [])
+          cls0
+      extractPosNeg =
+        L.fold
+          ( L.premap (\case Positive l -> Left l; Negative l -> Right l) $
+              (:!:) <$> L.handles _Left L.hashSet <*> L.handles _Right L.hashSet
+          )
+          . clauseLits
+      positive = poss `HS.difference` negs
+      negative = negs `HS.difference` poss
+      pureLits = HS.map Positive positive `HS.union` HS.map Negative negative
+   in (forceSpineCNF (CNF rs) <$ guard (not $ HS.null pureLits), Model {..})
