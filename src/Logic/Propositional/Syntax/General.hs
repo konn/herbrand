@@ -29,6 +29,7 @@ module Logic.Propositional.Syntax.General (
   conjunctives,
 
   -- * Smart contructors
+  neg,
   (==>),
   (/\),
   (\/),
@@ -295,6 +296,9 @@ pattern l :==> r = Formula (l ::==> r)
 
 pattern Impl :: XImpl x -> Formula x a -> Formula x a -> Formula x a
 pattern Impl x l r = Formula (ImplF x l r)
+
+neg :: (XNot x ~ NoExtField) => Formula x a -> Formula x a
+neg = Not NoExtField
 
 (==>) :: (XImpl x ~ NoExtField) => Formula x a -> Formula x a -> Formula x a
 l ==> r = l :==> r
