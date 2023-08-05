@@ -50,7 +50,7 @@ newtype CNFClause a = CNFClause {clauseLits :: [Literal a]}
 forceSpineCNF :: forall a. CNF a -> CNF a
 forceSpineCNF = flip using $ coerce $ evalList $ evalList $ rseq @(Literal a)
 
-fromFormulaOrd :: (Ord a, XTop x ~ XBot x) => Formula x a -> CNF a
+fromFormulaOrd :: (XTop x ~ XBot x, Ord a) => Formula x a -> CNF a
 fromFormulaOrd =
   CNF . fmap (CNFClause . Set.toList) . L.fold L.nub . do
     deMorgan >>> cata \case

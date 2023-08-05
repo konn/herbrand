@@ -13,6 +13,7 @@
 -- | The most general syntax of (classical and intuitionistic) propositional logic
 module Logic.Propositional.Syntax.General (
   Formula (Bot, Top, Atom, Not, Impl, (:==>), (:/\), (:\/)),
+  Full,
   _Formula,
   _Formula',
   NoExtField (..),
