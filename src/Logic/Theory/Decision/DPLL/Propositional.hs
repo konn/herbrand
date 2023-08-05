@@ -4,6 +4,7 @@
 {-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MonoLocalBinds #-}
+{-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -36,7 +37,6 @@ import Data.Generics.Labels ()
 import Data.HashSet (HashSet)
 import Data.HashSet qualified as HS
 import Data.Hashable (Hashable)
-import Data.Monoid (First (..))
 import Data.Strict (Pair (..))
 import Data.String
 import GHC.Generics (Generic, Generic1, Generically (..))
@@ -91,25 +91,33 @@ solve =
               )
         )
         fml
-    case checkSat fml' of
-      Just resl -> pure resl
-      Nothing -> do
-        case foldMap (First . Just) fml' of
-          First Nothing -> pure Unsat
-          First (Just v) -> do
-            let posCl = runWriter (self $ assert (Positive v) fml')
-            case posCl of
-              (Sat (), model) -> Sat <$> tell model
-              (Unsat, _) -> self $ assert (Negative v) fml'
+    {-
+      Criteria:
+
+        1. If the CNF doesn't have any clause, it is a tautology;
+        2. If any of the clauses is empty, it is false;
+        3. Otherwise, we choose an arbitrary atomic formula and do a case-analysis on it.
+
+      We use beautiful folding to check those conditions in a one-shot.
+    -}
+    let (isFalse :!: mv) =
+          L.fold
+            ( (:!:)
+                <$> L.any (null . clauseLits)
+                <*> L.handles folded L.head
+            )
+            $ cnfClauses fml'
+    case mv of
+      _ | isFalse -> pure Unsat
+      Nothing -> pure $ Sat ()
+      Just v -> do
+        let posCl = runWriter (self $ assert (Positive v) fml')
+        case posCl of
+          (Sat (), model) -> Sat <$> tell model
+          (Unsat, _) -> self $ assert (Negative v) fml'
 
 assert :: Literal a -> CNF a -> CNF a
 assert l (CNF cs) = CNF $ CNFClause [l] : cs
-
-checkSat :: CNF a -> Maybe (Result ())
-checkSat (CNF []) = Just (Sat ())
-checkSat (CNF ls)
-  | any (null . clauseLits) ls = Just Unsat
-  | otherwise = Nothing
 
 fixedPointM :: (Monad m) => (a -> m (Maybe a)) -> a -> m a
 fixedPointM f = fix $ \self x -> do
