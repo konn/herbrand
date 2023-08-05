@@ -53,10 +53,10 @@ deMorgan =
     NotF _ k -> k . flipPos
     l ::/\ r -> \case
       P -> l P :/\ r P
-      N -> l N :\/ l N
+      N -> l N :\/ r N
     l ::\/ r -> \case
       P -> l P :\/ r P
-      N -> l N :/\ l N
+      N -> l N :/\ r N
     ImplF _ l r -> \case
       P -> l N :\/ r P
       N -> l P :/\ r N
