@@ -22,6 +22,7 @@ description:         Please see the README on GitHub at <https://github.com/konn
 dependencies:
 - base >= 4.7 && < 5
 - algebraic-graphs
+- bifunctors
 - bytestring
 - lens
 - linear-base
@@ -31,6 +32,8 @@ dependencies:
 - distributive
 - dlist
 - filtrable
+- fmlist
+- foldable1-classes-compat
 - foldl
 - generic-lens
 - hashable

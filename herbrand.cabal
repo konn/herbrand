@@ -25,7 +25,11 @@ source-repository head
 
 library
   exposed-modules:
-      Logic.Theory.Decision.DPLL.Propositional
+      Logic.Propositional.SAT.DPLL
+      Logic.Propositional.Syntax.General
+      Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
+      Logic.Propositional.Syntax.Transformation.Claassical
+      Logic.Theory.Decision.DPLL.Abstract
   other-modules:
       Paths_herbrand
   hs-source-dirs:
@@ -34,6 +38,7 @@ library
   build-depends:
       algebraic-graphs
     , base >=4.7 && <5
+    , bifunctors
     , bytestring
     , containers
     , data-fix
@@ -41,6 +46,8 @@ library
     , distributive
     , dlist
     , filtrable
+    , fmlist
+    , foldable1-classes-compat
     , foldl
     , generic-lens
     , hashable
@@ -66,6 +73,7 @@ executable herbrand-exe
   build-depends:
       algebraic-graphs
     , base >=4.7 && <5
+    , bifunctors
     , bytestring
     , containers
     , data-fix
@@ -73,6 +81,8 @@ executable herbrand-exe
     , distributive
     , dlist
     , filtrable
+    , fmlist
+    , foldable1-classes-compat
     , foldl
     , generic-lens
     , hashable
@@ -100,6 +110,7 @@ test-suite herbrand-test
   build-depends:
       algebraic-graphs
     , base >=4.7 && <5
+    , bifunctors
     , bytestring
     , containers
     , data-fix
@@ -107,6 +118,8 @@ test-suite herbrand-test
     , distributive
     , dlist
     , filtrable
+    , fmlist
+    , foldable1-classes-compat
     , foldl
     , generic-lens
     , hashable

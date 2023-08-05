@@ -4,12 +4,11 @@
 {-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MonoLocalBinds #-}
-{-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE UndecidableInstances #-}
 
-module Logic.Theory.Decision.DPLL.Propositional (
+module Logic.Propositional.SAT.DPLL (
   CNF (..),
   CNFClause (..),
   Literal (..),
