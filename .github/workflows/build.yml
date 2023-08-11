@@ -62,7 +62,7 @@ jobs:
     - name: cabal configure
       run: |
         cabal v2-configure --enable-tests --enable-benchmarks
-        cabal updateupdate
+        cabal update
     - name: Build Dependencies
       run: | 
         cabal build --only-dependencies
