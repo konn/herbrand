@@ -19,13 +19,13 @@ jobs:
       id: cache-keys
       run: |
         PROJECT_HASH="${{hashFiles('cabal.project', 'cabal.project.freeze')}}"
-        echo "project=${PROJECT_HASH} >> ${GITHUB_OUTPUT}"
+        echo "project=${PROJECT_HASH}" >> "${GITHUB_OUTPUT}"
 
         PACKAGE_HASH="${{hashFiles('**/package.yaml', '**/*.cabal')}}"
-        echo "package=${PACKAGE_HASH} >> ${GITHUB_OUTPUT}"
+        echo "package=${PACKAGE_HASH}" >> "${GITHUB_OUTPUT}"
 
         SOURCE_HASH="${{hashFiles('**/*.hs', '**/*.lhs', '**/*.hsig', '**/*.hs-boot', '**/*.c', '**/*.h', '**/*.chs', '**/*.hsc')}}"
-        echo "source=${SOURCE_HASH} >> ${GITHUB_OUTPUT}"
+        echo "source=${SOURCE_HASH}" >> "${GITHUB_OUTPUT}"
 
         STORE_PREFIX="store-${{runner.os}}-${{env.ghc}}-"
         echo "store-prefix=${STORE_PREFIX}" >> "${GITHUB_OUTPUT}"
