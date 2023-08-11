@@ -79,5 +79,45 @@ tests:
     - -threaded
     - -rtsopts
     - -with-rtsopts=-N
+    build-tools:
+    - tasty-discover
     dependencies:
     - herbrand
+    - tasty
+    - falsify
+    - tasty-hunit
+    - tasty-quickcheck
+
+benchmarks:
+  herbrand-cnf-bench:
+    main:                cnf.hs
+    source-dirs:         bench
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    build-tools:
+    - tasty-discover
+    dependencies:
+    - herbrand
+    - tasty
+    - falsify
+    - tasty-bench
+    - tasty-bench-fit
+
+  herbrand-sat-bench:
+    main:                sat.hs
+    source-dirs:         bench
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    build-tools:
+    - tasty-discover
+    dependencies:
+    - herbrand
+    - tasty
+    - falsify
+    - tasty-bench
+    - tasty-bench-fit
+

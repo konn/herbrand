@@ -14,6 +14,7 @@
 module Logic.Propositional.Syntax.General (
   Formula (Bot, Top, Atom, Not, Impl, (:==>), (:/\), (:\/)),
   Full,
+  full,
   _Formula,
   _Formula',
   NoExtField (..),
@@ -70,6 +71,8 @@ module Logic.Propositional.Syntax.General (
   -- * Literals
   Literal (..),
   negLit,
+  idempLit,
+  toLit,
 ) where
 
 import Control.DeepSeq (NFData)
@@ -430,6 +433,10 @@ data Literal a = Positive !a | Negative !a
   deriving (Show, Eq, Ord, Generic, Generic1, Functor, Foldable, Traversable)
   deriving anyclass (Hashable, NFData)
 
+idempLit :: Literal (Literal a) -> Literal a
+idempLit (Positive a) = a
+idempLit (Negative a) = negLit a
+
 instance (a ~ String) => IsString (Literal a) where
   fromString = Positive
 
@@ -437,3 +444,18 @@ negLit :: Literal a -> Literal a
 negLit = \case
   Positive v -> Negative v
   Negative v -> Positive v
+
+full :: Formula e v -> Formula Full v
+full = cata \case
+  AtomF a -> Atom a
+  BotF _ -> Bot NoExtField
+  TopF _ -> Top NoExtField
+  NotF _ l -> Not NoExtField l
+  l ::/\ r -> l :/\ r
+  l ::\/ r -> l :\/ r
+  ImplF _ l r -> l :==> r
+
+toLit :: Formula e v -> Literal (Formula e v)
+toLit (Not _ (Not _ a)) = toLit a
+toLit (Not _ a) = Negative a
+toLit f = Positive f

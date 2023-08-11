@@ -8,7 +8,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE UndecidableInstances #-}
 
-module Logic.Propositional.SAT.DPLL (
+module Logic.Propositional.Classical.SAT.DPLL (
   CNF (..),
   CNFClause (..),
   Literal (..),
@@ -20,7 +20,6 @@ module Logic.Propositional.SAT.DPLL (
 ) where
 
 import Control.Applicative
-import Control.DeepSeq
 import Control.Foldl qualified as L
 import Control.Lens
 import Control.Monad (guard)
@@ -31,22 +30,14 @@ import Data.Foldable (foldl', foldr', foldrM)
 import Data.Function (fix)
 import Data.Functor (($>))
 import Data.Generics.Labels ()
-import Data.HashSet (HashSet)
 import Data.HashSet qualified as HS
 import Data.Hashable (Hashable)
 import Data.Strict (Pair (..))
-import GHC.Generics (Generic, Generic1, Generically (..))
+import GHC.Generics (Generic)
+import Logic.Propositional.Classical.SAT.Types
 import Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
 
-data Result a = Sat a | Unsat
-  deriving (Show, Eq, Ord, Generic, Generic1, Functor, Foldable, Traversable)
-  deriving anyclass (Hashable, NFData)
-
-data Model a = Model {positive :: HashSet a, negative :: HashSet a}
-  deriving (Show, Eq, Ord, Generic)
-  deriving (Semigroup, Monoid) via Generically (Model a)
-
-solve :: (Hashable a) => CNF a -> Result (Model a)
+solve :: (Hashable a) => CNF a -> SatResult (Model a)
 solve =
   uncurry ($>) . runWriter . fix \self fml -> do
     fml' <-
@@ -76,11 +67,11 @@ solve =
             $ cnfClauses fml'
     case mv of
       _ | isFalse -> pure Unsat
-      Nothing -> pure $ Sat ()
+      Nothing -> pure $ Satisfiable ()
       Just v -> do
         let posCl = runWriter (self $ assert (Positive v) fml')
         case posCl of
-          (Sat (), model) -> Sat <$> tell model
+          (Satisfiable (), model) -> Satisfiable <$> tell model
           (Unsat, _) -> self $ assert (Negative v) fml'
 
 assert :: Literal a -> CNF a -> CNF a

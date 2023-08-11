@@ -25,7 +25,9 @@ source-repository head
 
 library
   exposed-modules:
-      Logic.Propositional.SAT.DPLL
+      Logic.Propositional.Classical.SAT.DPLL
+      Logic.Propositional.Classical.SAT.Tableaux
+      Logic.Propositional.Classical.SAT.Types
       Logic.Propositional.Syntax.General
       Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
       Logic.Propositional.Syntax.Transformation.Claassical
@@ -107,6 +109,8 @@ test-suite herbrand-test
   hs-source-dirs:
       test
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
+  build-tool-depends:
+      tasty-discover:tasty-discover
   build-depends:
       algebraic-graphs
     , base >=4.7 && <5
@@ -117,6 +121,7 @@ test-suite herbrand-test
     , deepseq
     , distributive
     , dlist
+    , falsify
     , filtrable
     , fmlist
     , foldable1-classes-compat
@@ -130,6 +135,95 @@ test-suite herbrand-test
     , rec-def
     , recursion-schemes
     , strict
+    , tasty
+    , tasty-hunit
+    , tasty-quickcheck
+    , text
+    , transformers
+    , unordered-containers
+    , vector
+  default-language: Haskell2010
+
+benchmark herbrand-cnf-bench
+  type: exitcode-stdio-1.0
+  main-is: cnf.hs
+  other-modules:
+      Paths_herbrand
+  hs-source-dirs:
+      bench
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
+  build-tool-depends:
+      tasty-discover:tasty-discover
+  build-depends:
+      algebraic-graphs
+    , base >=4.7 && <5
+    , bifunctors
+    , bytestring
+    , containers
+    , data-fix
+    , deepseq
+    , distributive
+    , dlist
+    , falsify
+    , filtrable
+    , fmlist
+    , foldable1-classes-compat
+    , foldl
+    , generic-lens
+    , hashable
+    , herbrand
+    , lens
+    , linear-base
+    , parallel
+    , rec-def
+    , recursion-schemes
+    , strict
+    , tasty
+    , tasty-bench
+    , tasty-bench-fit
+    , text
+    , transformers
+    , unordered-containers
+    , vector
+  default-language: Haskell2010
+
+benchmark herbrand-sat-bench
+  type: exitcode-stdio-1.0
+  main-is: sat.hs
+  other-modules:
+      Paths_herbrand
+  hs-source-dirs:
+      bench
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
+  build-tool-depends:
+      tasty-discover:tasty-discover
+  build-depends:
+      algebraic-graphs
+    , base >=4.7 && <5
+    , bifunctors
+    , bytestring
+    , containers
+    , data-fix
+    , deepseq
+    , distributive
+    , dlist
+    , falsify
+    , filtrable
+    , fmlist
+    , foldable1-classes-compat
+    , foldl
+    , generic-lens
+    , hashable
+    , herbrand
+    , lens
+    , linear-base
+    , parallel
+    , rec-def
+    , recursion-schemes
+    , strict
+    , tasty
+    , tasty-bench
+    , tasty-bench-fit
     , text
     , transformers
     , unordered-containers
