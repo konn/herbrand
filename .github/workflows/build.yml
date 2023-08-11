@@ -1,0 +1,96 @@
+name: Build and Test
+on: 
+  push: {branches: ["main"]}
+  pull_request:
+
+
+jobs:
+  build:
+    env:
+      ghc: 9.4.6
+      cabal: 3.10.1.0
+    name: Build and Test
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        ref: ${{github.event.pull_request.head.sha || github.sha}}
+    - name: Calculate hash keys
+      id: cache-keys
+      run: |
+        PROJECT_HASH="${{hashFiles('cabal.project', 'cabal.project.freeze')}}"
+        echo "project=${PROJECT_HASH} >> ${GITHUB_OUTPUT}"
+
+        PACKAGE_HASH="${{hashFiles('**/package.yaml', '**/*.cabal')}}"
+        echo "package=${PACKAGE_HASH} >> ${GITHUB_OUTPUT}"
+
+        SOURCE_HASH="${{hashFiles('**/*.hs', '**/*.lhs', '**/*.hsig', '**/*.hs-boot', '**/*.c', '**/*.h', '**/*.chs', '**/*.hsc')}}"
+        echo "source=${SOURCE_HASH} >> ${GITHUB_OUTPUT}"
+
+        STORE_PREFIX="store-${{runner.os}}-${{env.ghc}}-"
+        echo "store-prefix=${STORE_PREFIX}" >> "${GITHUB_OUTPUT}"
+        STORE_KEY="${STORE_PREFIX}-${PROJECT_HASH}-${PACKAGE_HASH}"
+        echo "store=${STORE_KEY}" >> "${GITHUB_OUTPUT}"
+        STORE_RESTORE=<<$(cat <<EOF
+        ${STORE_PREFIX}-${PROJECT_HASH}-
+        ${STORE_PREFIX}-
+        EOF
+        )
+        echo "store-restore=${STORE_RESTORE}" >> "${GITHUB_OUTPUT}"
+
+        DIST_PREFIX="dist-${{runner.os}}-${{env.ghc}}-"
+        echo "dist-prefix=${DIST_PREFIX}" >> "${GITHUB_OUTPUT}"
+        DIST_KEY="${DIST_PREFIX}-${PROJECT_HASH}-${PACKAGE_HASH}-${SOURCE_HASH}"
+        echo "dist=${DIST_KEY}" >> "${GITHUB_OUTPUT}"
+        DIST_RESTORE=<<$(cat <<EOF
+        ${DIST_PREFIX}-${PROJECT_HASH}-${PACKAGE_HASH}-
+        ${DIST_PREFIX}-${PROJECT_HASH}-
+        ${DIST_PREFIX}-
+        EOF
+        )
+        echo "dist-restore=${DIST_RESTORE}" >> "${GITHUB_OUTPUT}"
+
+    - name: Setup Haskell
+      uses: haskell/actions/setup@v2
+      with:
+        enable-stack: false
+        cabal-version: ${{env.cabal}}
+        ghc-version: ${{env.ghc}}
+    - name: Restore ~/.cabal/store
+      uses: actions/cache/restore@v3
+      with:
+        path: ~/.cabal/store
+        key: ${{steps.cache-keys.store}}
+        restore-keys: ${{steps.cache-keys.store-restore}}
+    - name: Restore dist-newstyle
+      uses: actions/cache/restore@v3
+      with:
+        path: dist-newstyle
+        key: ${{steps.cache-keys.dist}}
+        restore-keys: ${{steps.cache-keys.dist-restore}}
+    - name: cabal configure
+      run: |
+        cabal v2-configure --enable-tests --enable-benchmarks
+    - name: Build Dependencies
+      run: | 
+        cabal build --only-dependencies
+    - name: Save ~/.cabal/store Cache
+      uses: actions/cache/save@v3
+      with:
+        path: ~/.cabal/store
+        key: ${{steps.cache-keys.store}}
+    - name: Build All
+      run: | 
+        cabal build
+    - name: Save dist-newstyle Cache
+      uses: actions/cache/save@v3
+      with:
+        path: dist-newstyle
+        key: ${{steps.cache-keys.dist}}
+    - name: Test
+      run: |
+        cabal test
+    - name: Benchmark
+      continue-on-error: true
+      run: |
+        cabal bench
