@@ -31,23 +31,14 @@ jobs:
         echo "store-prefix=${STORE_PREFIX}" >> "${GITHUB_OUTPUT}"
         STORE_KEY="${STORE_PREFIX}-${PROJECT_HASH}-${PACKAGE_HASH}"
         echo "store=${STORE_KEY}" >> "${GITHUB_OUTPUT}"
-        STORE_RESTORE=<<$(cat <<EOF
-        ${STORE_PREFIX}-${PROJECT_HASH}-
-        ${STORE_PREFIX}-
-        EOF
-        )
+        STORE_RESTORE="${STORE_PREFIX}-${PROJECT_HASH}-\n${STORE_PREFIX}-"
         echo "store-restore=${STORE_RESTORE}" >> "${GITHUB_OUTPUT}"
 
         DIST_PREFIX="dist-${{runner.os}}-${{env.ghc}}-"
         echo "dist-prefix=${DIST_PREFIX}" >> "${GITHUB_OUTPUT}"
         DIST_KEY="${DIST_PREFIX}-${PROJECT_HASH}-${PACKAGE_HASH}-${SOURCE_HASH}"
         echo "dist=${DIST_KEY}" >> "${GITHUB_OUTPUT}"
-        DIST_RESTORE=<<$(cat <<EOF
-        ${DIST_PREFIX}-${PROJECT_HASH}-${PACKAGE_HASH}-
-        ${DIST_PREFIX}-${PROJECT_HASH}-
-        ${DIST_PREFIX}-
-        EOF
-        )
+        DIST_RESTORE="${DIST_PREFIX}-${PROJECT_HASH}-${PACKAGE_HASH}-\n${DIST_PREFIX}-${PROJECT_HASH}-\n${DIST_PREFIX}-"
         echo "dist-restore=${DIST_RESTORE}" >> "${GITHUB_OUTPUT}"
 
     - name: Setup Haskell
