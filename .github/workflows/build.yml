@@ -47,7 +47,6 @@ jobs:
         enable-stack: false
         cabal-version: ${{env.cabal}}
         ghc-version: ${{env.ghc}}
-        cabal-update: true
     - name: Restore ~/.cabal/store
       uses: actions/cache/restore@v3
       with:
@@ -63,6 +62,7 @@ jobs:
     - name: cabal configure
       run: |
         cabal v2-configure --enable-tests --enable-benchmarks
+        cabal updateupdate
     - name: Build Dependencies
       run: | 
         cabal build --only-dependencies
