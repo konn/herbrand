@@ -81,7 +81,7 @@ jobs:
         key: ${{steps.cache-keys.outputs.dist}}
     - name: Test
       run: |
-        cabal test
+        cabal test --test-show-details always
     - name: Benchmark
       continue-on-error: true
       run: |
