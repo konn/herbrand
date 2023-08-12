@@ -12,10 +12,12 @@
 -- | Solves satisfiability with semantic Tabelaux
 module Logic.Propositional.Classical.SAT.Tableaux (
   prove,
+  solve,
   ProofResult (..),
 ) where
 
 import Control.Applicative
+import Control.Arrow ((>>>))
 import qualified Control.Foldl as L
 import Control.Lens (preview, (%~), (.~), (^.), _Just)
 import Control.Monad (guard)
@@ -51,7 +53,21 @@ closedWith Branch {..} (Positive (Atom a)) = Negative a `HS.member` model
 closedWith Branch {..} (Negative (Atom a)) = Positive a `HS.member` model
 closedWith Branch {..} fml = negLit fml `elem` branch || negLit fml `elem` stack
 
--- | Trying to refute formula by semantic tabelaux
+solve ::
+  ( Hashable v
+  , Hashable (XTop e)
+  , Hashable (XBot e)
+  , Hashable (XNot e)
+  , Hashable (XImpl e)
+  ) =>
+  Formula e v ->
+  SatResult (Model v)
+solve =
+  toLit >>> negLit >>> proveLit >>> \case
+    Proven -> Unsat
+    Refuted m -> Satisfiable m
+
+-- | Trying to Prove formula by semantic tabelaux
 prove ::
   forall e v.
   ( Hashable v
@@ -62,13 +78,24 @@ prove ::
   ) =>
   Formula e v ->
   ProofResult (Model v)
-prove =
+prove = proveLit . toLit
+
+proveLit ::
+  forall e v.
+  ( Hashable v
+  , Hashable (XTop e)
+  , Hashable (XBot e)
+  , Hashable (XNot e)
+  , Hashable (XImpl e)
+  ) =>
+  Literal (Formula e v) ->
+  ProofResult (Model v)
+proveLit =
   maybe Proven (Refuted . toModel)
     . go
     . Branch mempty mempty
     . pure
     . negLit
-    . toLit
   where
     go !branch = case branch ^. #stack of
       [] -> pure $ branch ^. #model
@@ -79,9 +106,9 @@ prove =
                 & #branch %~ (e :)
                 & #stack .~ s'
         case e of
-          Positive Top {} -> pure $ model b'
+          Positive Top {} -> go b'
           Positive Bot {} -> Nothing
-          Positive (Atom a) -> pure $ HS.insert (Positive a) $ model b'
+          Positive (Atom a) -> go $ b' & #model %~ HS.insert (Positive a)
           Positive (Impl _ l r) ->
             go (b' & #stack %~ (Negative l :))
               <|> go (b' & #stack %~ (Positive r :))
@@ -92,8 +119,8 @@ prove =
           Positive (Not _ phi) ->
             go $ branch & #stack .~ (Negative phi : s')
           Negative Top {} -> Nothing
-          Negative Bot {} -> pure $ model b'
-          Negative (Atom a) -> pure $ HS.insert (Negative a) $ model b'
+          Negative Bot {} -> go b'
+          Negative (Atom a) -> go $ b' & #model %~ HS.insert (Negative a)
           Negative (Not _ phi) ->
             go $ b' & #stack %~ (Positive phi :)
           Negative (Impl _ l r) ->
