@@ -142,8 +142,8 @@ affirmativeNegative (CNF cls0) =
   let (StrictFst (poss :!: negs) rs) =
         foldr'
           ( \cls (StrictFst posNegs ans) ->
-              StrictFst (posNegs <> extractPosNeg cls) $
-                if HS.null $ HS.intersection pureLits $ HS.fromList $ clauseLits cls
+              StrictFst (posNegs <> extractPosNeg cls)
+                $ if HS.null $ HS.intersection pureLits $ HS.fromList $ clauseLits cls
                   then cls : ans
                   else ans
           )
@@ -151,8 +151,10 @@ affirmativeNegative (CNF cls0) =
           cls0
       extractPosNeg =
         L.fold
-          ( L.premap (\case Positive l -> Left l; Negative l -> Right l) $
-              (:!:) <$> L.handles _Left L.hashSet <*> L.handles _Right L.hashSet
+          ( L.premap (\case Positive l -> Left l; Negative l -> Right l)
+              $ (:!:)
+              <$> L.handles _Left L.hashSet
+              <*> L.handles _Right L.hashSet
           )
           . clauseLits
       positive = poss `HS.difference` negs
