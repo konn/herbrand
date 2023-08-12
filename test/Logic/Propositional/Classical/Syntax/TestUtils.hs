@@ -1,5 +1,4 @@
 {-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TupleSections #-}
 
@@ -8,10 +7,18 @@ module Logic.Propositional.Classical.Syntax.TestUtils (
   testProverSemantics,
   genFormula,
   testSolverSemantics,
+  modelFor,
+  Arity,
+  Size,
 ) where
 
 import qualified Control.Foldl as L
+import Control.Lens (alaf, both, (%~))
+import qualified Data.FMList as FML
+import qualified Data.HashSet as HS
+import Data.Hashable (Hashable)
 import Data.Maybe
+import Data.Monoid (Ap (..))
 import Logic.Propositional.Classical.SAT.BruteForce
 import Logic.Propositional.Classical.SAT.Types
 import Logic.Propositional.Syntax.General
@@ -42,8 +49,8 @@ fullFormula vars = go
     go !sz
       | sz <= 0 = frequency baseCases
       | otherwise =
-          frequency $
-            map
+          frequency
+            $ map
               (1,)
               [ Not NoExtField <$> go (sz - 1)
               , Impl NoExtField <$> go (sz `quot` 2) <*> go (sz `quot` 2)
@@ -63,8 +70,9 @@ genFormula ar sz = do
   collect
     "# of maximum occurrence"
     [ L.fold
-        ( L.premap (,1 :: Int) $
-            L.fold (fromMaybe 0 <$> L.maximum) <$> L.foldByKeyMap L.sum
+        ( L.premap (,1 :: Int)
+            $ L.fold (fromMaybe 0 <$> L.maximum)
+            <$> L.foldByKeyMap L.sum
         )
         phi
     ]
@@ -92,10 +100,10 @@ testProverSemantics vs sz prove =
         case consis of
           Tautology -> assert $ P.expect Proven .$ ("answer", ans)
           _ ->
-            assert $
-              P.satisfies
+            assert
+              $ P.satisfies
                 ("Refuted", \case Refuted {} -> True; _ -> False)
-                .$ ("answer", ans)
+              .$ ("answer", ans)
     , testProperty "gives a correct counterexample" $ do
         (phi, consis) <- genFormula vs sz
         let phi' = case consis of
@@ -106,10 +114,10 @@ testProverSemantics vs sz prove =
           Proven -> testFailed "Expected a counterexample, but got Provable"
           Refuted m -> do
             info $ "Given counterexample: " <> show m
-            assert $
-              P.eq
-                .$ ("expected", Just False)
-                .$ ("answer", eval m phi')
+            assert
+              $ P.eq
+              .$ ("expected", Just False)
+              .$ ("answer", eval m phi')
     ]
 
 testSolverSemantics ::
@@ -125,13 +133,15 @@ testSolverSemantics vs sz solver =
         let ans = solver phi
         case consis of
           Inconsistent ->
-            assert $
-              P.eq .$ ("expected", Unsat) .$ ("answer", ans)
+            assert
+              $ P.eq
+              .$ ("expected", Unsat)
+              .$ ("answer", ans)
           _ ->
-            assert $
-              P.satisfies
+            assert
+              $ P.satisfies
                 ("Satisfiable", \case Satisfiable {} -> True; _ -> False)
-                .$ ("answer", ans)
+              .$ ("answer", ans)
     , testProperty "Gives a correct model" $ do
         (phi, consis) <- genFormula vs sz
 
@@ -150,8 +160,21 @@ testSolverSemantics vs sz solver =
           Unsat -> testFailed "Expected Satisfiable, but got Unsat"
           Satisfiable m -> do
             info $ "Given model: " <> show m
-            assert $
-              P.eq
-                .$ ("expected", Just True)
-                .$ ("answer", eval m phi')
+            assert
+              $ P.eq
+              .$ ("expected", Just True)
+              .$ ("answer", eval m phi')
     ]
+
+modelFor :: (Hashable v) => HS.HashSet v -> Gen (Model v)
+modelFor =
+  fmap (uncurry Model . (both %~ L.fold L.hashSet))
+    . alaf
+      Ap
+      foldMap
+      ( \v ->
+          choose
+            (pure (FML.singleton v, mempty))
+            (pure (mempty, FML.singleton v))
+      )
+    . HS.toList
