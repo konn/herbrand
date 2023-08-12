@@ -25,6 +25,7 @@ source-repository head
 
 library
   exposed-modules:
+      Logic.Propositional.Classical.SAT.BruteForce
       Logic.Propositional.Classical.SAT.DPLL
       Logic.Propositional.Classical.SAT.Tableaux
       Logic.Propositional.Classical.SAT.Types
@@ -38,7 +39,8 @@ library
       src
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
   build-depends:
-      algebraic-graphs
+      adjunctions
+    , algebraic-graphs
     , base >=4.7 && <5
     , bifunctors
     , bytestring
@@ -73,7 +75,8 @@ executable herbrand-exe
       app
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      algebraic-graphs
+      adjunctions
+    , algebraic-graphs
     , base >=4.7 && <5
     , bifunctors
     , bytestring
@@ -105,6 +108,8 @@ test-suite herbrand-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
+      Logic.Propositional.Classical.SAT.TableauxSpec
+      Logic.Propositional.Classical.Syntax.TestUtils
       Paths_herbrand
   hs-source-dirs:
       test
@@ -112,7 +117,8 @@ test-suite herbrand-test
   build-tool-depends:
       tasty-discover:tasty-discover
   build-depends:
-      algebraic-graphs
+      adjunctions
+    , algebraic-graphs
     , base >=4.7 && <5
     , bifunctors
     , bytestring
@@ -155,7 +161,8 @@ benchmark herbrand-cnf-bench
   build-tool-depends:
       tasty-discover:tasty-discover
   build-depends:
-      algebraic-graphs
+      adjunctions
+    , algebraic-graphs
     , base >=4.7 && <5
     , bifunctors
     , bytestring
@@ -198,7 +205,8 @@ benchmark herbrand-sat-bench
   build-tool-depends:
       tasty-discover:tasty-discover
   build-depends:
-      algebraic-graphs
+      adjunctions
+    , algebraic-graphs
     , base >=4.7 && <5
     , bifunctors
     , bytestring

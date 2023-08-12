@@ -441,6 +441,14 @@ instance (a ~ String) => IsString (Literal a) where
   fromString = Positive
 
 negLit :: Literal a -> Literal a
+{-# INLINE [1] negLit #-}
+
+{-# RULES
+"negLit/involutive" forall x.
+  negLit (negLit x) =
+    x
+  #-}
+
 negLit = \case
   Positive v -> Negative v
   Negative v -> Positive v
