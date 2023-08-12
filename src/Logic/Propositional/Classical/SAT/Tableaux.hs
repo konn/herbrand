@@ -62,10 +62,8 @@ solve ::
   ) =>
   Formula e v ->
   SatResult (Model v)
-solve =
-  toLit >>> negLit >>> proveLit >>> \case
-    Proven -> Unsat
-    Refuted m -> Satisfiable m
+{-# INLINE solve #-}
+solve = solveLit . toLit
 
 -- | Trying to Prove formula by semantic tabelaux
 prove ::
@@ -78,9 +76,13 @@ prove ::
   ) =>
   Formula e v ->
   ProofResult (Model v)
-prove = proveLit . toLit
+{-# INLINE prove #-}
+prove =
+  toLit >>> negLit >>> solveLit >>> \case
+    Satisfiable a -> Refuted a
+    Unsat -> Proven
 
-proveLit ::
+solveLit ::
   forall e v.
   ( Hashable v
   , Hashable (XTop e)
@@ -89,13 +91,13 @@ proveLit ::
   , Hashable (XImpl e)
   ) =>
   Literal (Formula e v) ->
-  ProofResult (Model v)
-proveLit =
-  maybe Proven (Refuted . toModel)
+  SatResult (Model v)
+{-# INLINE solveLit #-}
+solveLit =
+  maybe Unsat (Satisfiable . toModel)
     . go
     . Branch mempty mempty
     . pure
-    . negLit
   where
     go !branch = case branch ^. #stack of
       [] -> pure $ branch ^. #model
