@@ -10,10 +10,11 @@ module Logic.Propositional.Classical.Syntax.TestUtils (
   modelFor,
   Arity,
   Size,
+  testSolverSemanticsWith,
 ) where
 
 import qualified Control.Foldl as L
-import Control.Lens (alaf, both, (%~))
+import Control.Lens (alaf, both, (%~), _Just)
 import qualified Data.FMList as FML
 import qualified Data.HashSet as HS
 import Data.Hashable (Hashable)
@@ -125,7 +126,16 @@ testSolverSemantics ::
   Size ->
   (Formula Full Int -> SatResult (Model Int)) ->
   TestTree
-testSolverSemantics vs sz solver =
+testSolverSemantics = testSolverSemanticsWith Just
+
+testSolverSemanticsWith ::
+  (Show v) =>
+  (v -> Maybe Int) ->
+  Arity ->
+  Size ->
+  (Formula Full Int -> SatResult (Model v)) ->
+  TestTree
+testSolverSemanticsWith projVar vs sz solver =
   testGroup
     "behaves sematically correctly"
     [ testProperty "Gives a correct answer" $ do
@@ -136,12 +146,12 @@ testSolverSemantics vs sz solver =
             assert
               $ P.eq
               .$ ("expected", Unsat)
-              .$ ("answer", ans)
+              .$ ("answer", projModel projVar <$> ans)
           _ ->
             assert
               $ P.satisfies
                 ("Satisfiable", \case Satisfiable {} -> True; _ -> False)
-              .$ ("answer", ans)
+              .$ ("answer", projModel projVar <$> ans)
     , testProperty "Gives a correct model" $ do
         (phi, consis) <- genFormula vs sz
 
@@ -163,8 +173,15 @@ testSolverSemantics vs sz solver =
             assert
               $ P.eq
               .$ ("expected", Just True)
-              .$ ("answer", eval m phi')
+              .$ ("answer", eval (projModel projVar m) phi')
     ]
+
+projModel :: (v -> Maybe Int) -> Model v -> Model Int
+projModel proj m =
+  m
+    { positive = L.fold (L.premap proj $ L.handles _Just L.hashSet) $ positive m
+    , negative = L.fold (L.premap proj $ L.handles _Just L.hashSet) $ negative m
+    }
 
 modelFor :: (Hashable v) => HS.HashSet v -> Gen (Model v)
 modelFor =
