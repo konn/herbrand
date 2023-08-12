@@ -11,7 +11,6 @@ import Data.Maybe (fromMaybe)
 import Logic.Propositional.Classical.SAT.BruteForce
 import Logic.Propositional.Classical.SAT.Tableaux
 import Logic.Propositional.Classical.SAT.Types
-import Logic.Propositional.Classical.SAT.Types (eval)
 import Logic.Propositional.Classical.Syntax.TestUtils
 import Logic.Propositional.Syntax.General
 import qualified Test.Falsify.Generator as F
