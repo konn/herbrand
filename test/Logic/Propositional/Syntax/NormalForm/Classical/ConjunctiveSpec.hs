@@ -1,4 +1,3 @@
-{-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE TypeApplications #-}
 
 module Logic.Propositional.Syntax.NormalForm.Classical.ConjunctiveSpec (
@@ -46,7 +45,7 @@ test_fromFormulaFast =
           .$ ("cnf", fromSat $ Tableaux.solve $ toFormula @Full cnf)
     ]
 
-fromSat :: SatResult (Model (WithFresh Int)) -> S
+fromSat :: SatResult (Model v) -> S
 fromSat Satisfiable {} = Sat
 fromSat Unsat {} = Nosat
 
