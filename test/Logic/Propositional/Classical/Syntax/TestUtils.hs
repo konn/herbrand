@@ -11,6 +11,9 @@ module Logic.Propositional.Classical.Syntax.TestUtils (
   Arity,
   Size,
   testSolverSemanticsWith,
+  literal,
+  cnfGen,
+  projModel,
 ) where
 
 import qualified Control.Foldl as L
@@ -23,6 +26,7 @@ import Data.Monoid (Ap (..))
 import Logic.Propositional.Classical.SAT.BruteForce
 import Logic.Propositional.Classical.SAT.Types
 import Logic.Propositional.Syntax.General
+import Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
 import Test.Falsify.Generator
 import Test.Falsify.Predicate ((.$))
 import qualified Test.Falsify.Predicate as P
@@ -138,7 +142,7 @@ testSolverSemanticsWith ::
 testSolverSemanticsWith projVar vs sz solver =
   testGroup
     "behaves sematically correctly"
-    [ testProperty "Gives a correct answer" $ do
+    [ testProperty "Gives a correct decision" $ do
         (phi, consis) <- genFormula vs sz
         let ans = solver phi
         case consis of
@@ -175,6 +179,18 @@ testSolverSemanticsWith projVar vs sz solver =
               .$ ("expected", Just True)
               .$ ("answer", eval (projModel projVar m) phi')
     ]
+
+cnfGen :: Arity -> Size -> Size -> Gen (CNF Int)
+cnfGen ar numCls numLits =
+  CNF
+    <$> list
+      (R.between (0, numCls))
+      (CNFClause <$> list (R.between (0, numLits)) (literal ar))
+
+literal :: Arity -> Gen (Literal Int)
+literal a = choose (Positive <$> v) (Negative <$> v)
+  where
+    v = int (R.between (0, fromIntegral a - 1))
 
 projModel :: (v -> Maybe Int) -> Model v -> Model Int
 projModel proj m =
