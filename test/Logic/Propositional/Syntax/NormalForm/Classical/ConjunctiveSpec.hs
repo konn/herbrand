@@ -9,7 +9,7 @@ module Logic.Propositional.Syntax.NormalForm.Classical.ConjunctiveSpec (
 import qualified Control.Foldl as L
 import Data.Generics.Labels ()
 import Logic.Propositional.Classical.SAT.BruteForce (Consistency (..))
-import qualified Logic.Propositional.Classical.SAT.Tableaux as Tableaux
+import qualified Logic.Propositional.Classical.SAT.DPLL as DPLL
 import Logic.Propositional.Classical.SAT.Types (SatResult (..))
 import Logic.Propositional.Classical.SAT.Types hiding (Unsat)
 import Logic.Propositional.Classical.Syntax.TestUtils (Arity, Size, genFormula, modelFor)
@@ -31,18 +31,16 @@ test_fromFormulaFast =
   testGroup
     "fromFormulaFast"
     [ testProperty "preserves satisfiability" $ do
-        (fml, consis) <- genFormula 5 32
+        (fml, consis) <- genFormula 10 128
         let cnf = fromFormulaFast fml
         info $ "CNF: " <> show cnf
         -- NOTE: The CNF produced by 'fast' method is considerablly large.
-        -- This prevent us from using naïve brute-force solver; we use tableaux method,
-        -- as it is slightly faster than brute-force.
-        -- Other solvers relying on CNF representation, e.g. DPLL, cannot be used here
-        -- as it relies on the correctness of CNF transformation itself!
+        -- So we use DPLL solver on CNF here.
+        -- To make sure the validity of this tsst, the compleness of DPLL solver on CNFs must be tested directly, WITHOUT relying on any transformation from CNF.
         assert
           $ P.eq
           .$ ("original", fromConsis consis)
-          .$ ("cnf", fromSat $ Tableaux.solve $ toFormula @Full cnf)
+          .$ ("cnf", fromSat $ DPLL.solve cnf)
     ]
 
 fromSat :: SatResult (Model v) -> S
