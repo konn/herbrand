@@ -47,26 +47,26 @@ fullFormula vars = go
       , (vars, Atom <$> int (R.between (0, fromIntegral vars - 1)))
       ]
     go !sz
-      | sz <= 0 = frequency baseCases
+      | sz <= 1 = frequency baseCases
       | otherwise =
           frequency
             $ map
               (1,)
               [ Not NoExtField <$> go (sz - 1)
-              , Impl NoExtField <$> go (sz `quot` 2) <*> go (sz `quot` 2)
-              , (:/\) <$> go (sz `quot` 2) <*> go (sz `quot` 2)
-              , (:\/) <$> go (sz `quot` 2) <*> go (sz `quot` 2)
+              , Impl NoExtField <$> go ((sz - 1) `quot` 2) <*> go ((sz - 1) `quot` 2)
+              , (:/\) <$> go ((sz - 1) `quot` 2) <*> go ((sz - 1) `quot` 2)
+              , (:\/) <$> go ((sz - 1) `quot` 2) <*> go ((sz - 1) `quot` 2)
               ]
 
 genFormula :: Arity -> Size -> Property (Formula Full Int, Consistency Int)
-genFormula ar sz = do
-  arity <- gen $ integral $ R.between (1, ar)
-  collect "arity" [arity]
+genFormula varMax szMax = do
+  arity <- gen $ integral $ R.between (1, varMax)
 
-  size <- gen $ integral $ R.between (1, sz)
-  collect "size" [size]
+  sz <- gen $ integral $ R.between (1, szMax)
 
-  phi <- gen $ fullFormula arity size
+  phi <- gen $ fullFormula arity sz
+  collect "size" [size phi]
+  collect "arity" [HS.size $ L.fold L.hashSet phi]
   collect
     "# of maximum occurrence"
     [ L.fold

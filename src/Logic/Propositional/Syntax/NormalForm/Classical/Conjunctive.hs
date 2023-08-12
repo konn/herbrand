@@ -69,9 +69,7 @@ fromFormulaFast =
     . fmap (fmap Set.toList . L.fold @FML.FMList L.nub)
     . (\f -> evalRWS f () 0)
     . R.cata \case
-      AtomF a -> do
-        tell $ FML.singleton $ Set.singleton $ Positive $ Var a
-        pure $ Positive (Var a)
+      AtomF a -> pure $ Positive (Var a)
       TopF _ -> do
         e <- newFresh
         tell $ FML.singleton $ Set.singleton e
@@ -83,8 +81,8 @@ fromFormulaFast =
       NotF _ aSt -> do
         e <- aSt
         e' <- newFresh
-        tell $
-          FML.fromList
+        tell
+          $ FML.fromList
             [ Set.fromList [e, e']
             , Set.fromList [negLit e, negLit e']
             ]
@@ -93,8 +91,8 @@ fromFormulaFast =
         e1 <- l
         e2 <- r
         e' <- newFresh
-        tell $
-          FML.fromList
+        tell
+          $ FML.fromList
             [ Set.fromList [negLit e', negLit e1, e2]
             , Set.fromList [e', e1]
             , Set.fromList [e', negLit e2]
@@ -104,8 +102,8 @@ fromFormulaFast =
         e1 <- l
         e2 <- r
         e' <- newFresh
-        tell $
-          FML.fromList
+        tell
+          $ FML.fromList
             [ Set.fromList [negLit e', e1]
             , Set.fromList [negLit e', e2]
             , Set.fromList [e', negLit e1, negLit e2]
@@ -115,8 +113,8 @@ fromFormulaFast =
         e1 <- l
         e2 <- r
         e' <- newFresh
-        tell $
-          FML.fromList
+        tell
+          $ FML.fromList
             [ Set.fromList [negLit e', e1, e2]
             , Set.fromList [e', negLit e1]
             , Set.fromList [e', negLit e2]
@@ -179,9 +177,9 @@ Note that this does not do any semantic transformation except for
 mapping empty CNF and empty clause to ⊤ and ⊥.
 -}
 toFormula ::
-  (XBot x ~ NoExtField, XTop x ~ NoExtField) =>
+  (XBot x ~ NoExtField, XTop x ~ NoExtField, XNot x ~ NoExtField) =>
   CNF a ->
-  Formula x (Literal a)
+  Formula x a
 toFormula =
   maybe
     (⊤)
@@ -189,7 +187,10 @@ toFormula =
         . fmap
           ( maybe
               (⊥)
-              (foldl1 (\/) . fmap Atom)
+              ( foldl1 (\/) . fmap \case
+                  Positive a -> Atom a
+                  Negative a -> Not NoExtField (Atom a)
+              )
               . NE.nonEmpty
               . clauseLits
           )

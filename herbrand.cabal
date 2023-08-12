@@ -108,8 +108,10 @@ test-suite herbrand-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
+      Logic.Propositional.Classical.SAT.DPLLSpec
       Logic.Propositional.Classical.SAT.TableauxSpec
       Logic.Propositional.Classical.Syntax.TestUtils
+      Logic.Propositional.Syntax.NormalForm.Classical.ConjunctiveSpec
       Paths_herbrand
   hs-source-dirs:
       test

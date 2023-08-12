@@ -73,6 +73,7 @@ module Logic.Propositional.Syntax.General (
   negLit,
   idempLit,
   toLit,
+  size,
 ) where
 
 import Control.DeepSeq (NFData)
@@ -189,17 +190,24 @@ instance (Show a) => Show1 (FormulaF x a) where
   liftShowsPrec _ _ _ BotF {} = showString "⊥"
   liftShowsPrec _ _ d (AtomF a) = showsPrec d a
   liftShowsPrec showsF _ d (NotF _ f) =
-    showParen (d > 10) $
-      showString "Not " . showsF 11 f
+    showParen (d > 10)
+      $ showString "Not "
+      . showsF 11 f
   liftShowsPrec showsF _ d (ImplF _ l r) =
-    showParen (d > 0) $
-      showsF 1 l . showString " ==> " . showsF 0 r
+    showParen (d > 0)
+      $ showsF 1 l
+      . showString " ==> "
+      . showsF 0 r
   liftShowsPrec showsF _ d (l ::\/ r) =
-    showParen (d > 2) $
-      showsF 2 l . showString " \\/ " . showsF 2 r
+    showParen (d > 2)
+      $ showsF 2 l
+      . showString " \\/ "
+      . showsF 2 r
   liftShowsPrec showsF _ d (l ::/\ r) =
-    showParen (d > 3) $
-      showsF 3 l . showString " /\\ " . showsF 3 r
+    showParen (d > 3)
+      $ showsF 3 l
+      . showString " /\\ "
+      . showsF 3 r
 
 deriveBifunctor ''FormulaF
 deriveBifoldable ''FormulaF
@@ -467,3 +475,13 @@ toLit :: Formula e v -> Literal (Formula e v)
 toLit (Not _ (Not _ a)) = toLit a
 toLit (Not _ a) = Negative a
 toLit f = Positive f
+
+size :: Formula e v -> Word
+size = cata \case
+  AtomF {} -> 1
+  BotF {} -> 1
+  TopF {} -> 1
+  NotF _ l -> l + 1
+  ImplF _ l r -> l + 1 + r
+  l ::/\ r -> l + 1 + r
+  l ::\/ r -> l + 1 + r
