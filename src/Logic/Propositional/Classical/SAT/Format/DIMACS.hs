@@ -100,7 +100,7 @@ data CNFStatistics = CNFStatistics
   deriving anyclass (A.FromJSON, A.ToJSON)
 
 data Preamble = Preamble
-  { comment :: {-# UNPACK #-} !LBS8.ByteString
+  { comment :: !LBS8.ByteString
   , problem :: !Problem
   }
   deriving (Show, Eq, Ord, Generic)
@@ -125,11 +125,11 @@ newtype SATSetting = SATSetting {variables :: Word}
 
 data DIMACS
   = DIMACS_CNF
-      {-# UNPACK #-} !LBS8.ByteString
+      !LBS8.ByteString
       {-# UNPACK #-} !CNFSetting
       !(CNF Word)
   | DIMACS_SAT
-      {-# UNPACK #-} !LBS8.ByteString
+      !LBS8.ByteString
       {-# UNPACK #-} !SATSetting
       !(Formula Full Word)
   deriving (Show, Eq, Ord, Generic)
