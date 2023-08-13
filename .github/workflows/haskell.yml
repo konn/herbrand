@@ -9,7 +9,7 @@ jobs:
     env:
       ghc: 9.4.5
       cabal: 3.10.1.0
-    name: Build and Test
+    name: Build
     runs-on: ubuntu-latest
     outputs:
       benchmarks: ${{steps.list-bins.outputs.benchs}}
