@@ -31,7 +31,7 @@ jobs:
 
           const store_prefix = "store-${{runner.os}}-${{env.ghc}}"
           core.setOutput("store-prefix", store_prefix)
-          const store_key = `"${store_prefix}-${project_hash}-${package_hash}`
+          const store_key = `${store_prefix}-${project_hash}-${package_hash}`
           core.setOutput("store", store_key)
           const store_restore = [`${store_prefix}-${project_hash}-`, `${store_prefix}-`].join("\n")
           core.setOutput("store-restore", store_restore)
