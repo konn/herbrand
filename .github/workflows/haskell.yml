@@ -196,4 +196,4 @@ jobs:
       uses: actions/upload-artifact@v3
       with:
         path: bench-results/${{matrix.bench}}.svg
-        name: ${{matrix.bench}}.csv
+        name: ${{matrix.bench}}.svg
