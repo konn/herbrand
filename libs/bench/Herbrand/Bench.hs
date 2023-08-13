@@ -53,8 +53,10 @@ defaultMain b = do
   createDirectoryIfMissing True benchResultDir
   let opts' =
         changeOption
-          (Just . fromMaybe (CsvPath $ benchResultDir </> prog <.> "csv"))
-          opts
+          (Just . fromMaybe (SvgPath $ benchResultDir </> prog <.> "svg"))
+          $ changeOption
+            (Just . fromMaybe (CsvPath $ benchResultDir </> prog <.> "csv"))
+            opts
   case tryIngredients benchIngredients opts' bs of
     Nothing -> exitFailure
     Just mb -> mb >>= \ok -> if ok then exitSuccess else exitFailure
