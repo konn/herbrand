@@ -139,6 +139,7 @@ data DIMACS
 data FactoredFormula
   = Disj (FMList FactoredFormula)
   | Conj (FMList FactoredFormula)
+  | Imp FactoredFormula FactoredFormula
   | Neg FactoredFormula
   | Plain (Literal Word)
   deriving (Generic)
@@ -210,6 +211,7 @@ formatFactored = \case
   PlainF (Positive w) -> BB.wordDec w
   PlainF (Negative w) -> BB.char8 '-' <> BB.wordDec w
   NegF i -> "-(" <> i <> ")"
+  ImpF l r -> "imp(" <> l <> " " <> r <> ")"
   ConjF ns -> "*(" <> seps ns <> ")"
   DisjF ns -> "+(" <> seps ns <> ")"
 
@@ -219,14 +221,14 @@ seps =
     !isHead <- get
     if isHead then w <$ put False else pure $ " " <> w
 
-factorFormula :: (XNot n ~ NoExtField) => Formula n Word -> FactoredFormulaF (Formula n Word)
+factorFormula :: Formula n Word -> FactoredFormulaF (Formula n Word)
 factorFormula = \case
   Atom l -> PlainF (Positive l)
   Not _ (Atom l) -> PlainF (Negative l)
   Not _ l -> NegF l
   Bot {} -> DisjF mempty
   Top {} -> ConjF mempty
-  Impl _ l r -> DisjF $ Not NoExtField l `FML.cons` factor (.:\/) r
+  Impl _ l r -> ImpF l r
   l :/\ r -> ConjF $ factor (.:/\) l <> factor (.:/\) r
   l :\/ r -> DisjF $ factor (.:\/) l <> factor (.:\/) r
 
@@ -267,6 +269,7 @@ formulaP SATSetting {..} = go
         <|> (Not NoExtField <$ symbol "-" <*> go)
         <|> (ands <$ symbol "*" <*> parens (many go))
         <|> (ors <$ symbol "+" <*> parens (many go))
+        <|> (symbol "imp" *> parens (Impl NoExtField <$> go <*> go))
         <|> parens go
 
 ands :: [Formula Full Word] -> Formula Full Word
