@@ -1,13 +1,17 @@
 {-# LANGUAGE ApplicativeDo #-}
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE DisambiguateRecordFields #-}
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
@@ -24,6 +28,8 @@ module Logic.Propositional.Classical.SAT.Format.DIMACS (
   Problem (..),
   CNFSetting (..),
   SATSetting (..),
+  SATStatistics (..),
+  CNFStatistics (..),
 
   -- * Formatters
   formatDIMACS,
@@ -53,9 +59,10 @@ import Control.Applicative
 import Control.Arrow ((>>>))
 import Control.DeepSeq (NFData)
 import qualified Control.Foldl as L
-import Control.Lens (Prism', (^?))
+import Control.Lens (Prism', (^.), (^?))
 import Control.Monad (replicateM, when)
 import Control.Monad.Trans.State.Strict (evalState, get, put)
+import qualified Data.Aeson as A
 import Data.Attoparsec.ByteString.Char8 (Parser)
 import qualified Data.Attoparsec.ByteString.Char8 as Atto
 import qualified Data.Attoparsec.ByteString.Lazy as AttoL
@@ -66,16 +73,35 @@ import qualified Data.ByteString.Lazy.Char8 as LBS8
 import Data.FMList (FMList)
 import qualified Data.FMList as FML
 import Data.Foldable1 (foldl1')
+import Data.Function (on)
 import Data.Functor.Foldable
 import Data.Functor.Foldable.TH
+import Data.Generics.Labels ()
 import Data.Hashable (Hashable)
 import qualified Data.List.NonEmpty as NE
 import GHC.Generics
-import Logic.Propositional.Syntax.General
+import Logic.Propositional.Syntax.General as Fml
 import Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
 
+data SATStatistics = SATStatistics
+  { variables :: {-# UNPACK #-} !Word
+  , size :: {-# UNPACK #-} !Word
+  , height :: {-# UNPACK #-} !Word
+  }
+  deriving (Show, Eq, Ord, Generic)
+  deriving anyclass (A.FromJSON, A.ToJSON)
+
+data CNFStatistics = CNFStatistics
+  { variables :: {-# UNPACK #-} !Word
+  , clauses :: {-# UNPACK #-} !Word
+  , minClauseSize :: {-# UNPACK #-} !Word
+  , maxClauseSize :: {-# UNPACK #-} !Word
+  }
+  deriving (Show, Eq, Ord, Generic)
+  deriving anyclass (A.FromJSON, A.ToJSON)
+
 data Preamble = Preamble
-  { comment :: {-# UNPACK #-} !BS8.ByteString
+  { comment :: {-# UNPACK #-} !LBS8.ByteString
   , problem :: !Problem
   }
   deriving (Show, Eq, Ord, Generic)
@@ -100,11 +126,11 @@ newtype SATSetting = SATSetting {variables :: Word}
 
 data DIMACS
   = DIMACS_CNF
-      {-# UNPACK #-} !BS8.ByteString
+      {-# UNPACK #-} !LBS8.ByteString
       {-# UNPACK #-} !CNFSetting
       !(CNF Word)
   | DIMACS_SAT
-      {-# UNPACK #-} !BS8.ByteString
+      {-# UNPACK #-} !LBS8.ByteString
       {-# UNPACK #-} !SATSetting
       !(Formula Full Word)
   deriving (Show, Eq, Ord, Generic)
@@ -128,13 +154,35 @@ instance ToDIMACS DIMACS where
 instance (f ~ Full, Hashable w) => ToDIMACS (Formula f w) where
   toDIMACS f0 =
     let (f, VarStatistics variables) = compressVariables f0
-     in DIMACS_SAT "Herbrand" SATSetting {..} f
+        comment =
+          A.encode
+            SATStatistics
+              { variables
+              , size = Fml.size f
+              , height = Fml.height f
+              }
+     in DIMACS_SAT comment SATSetting {..} f
 
 instance (Hashable v) => ToDIMACS (CNF v) where
   toDIMACS f0 =
     let (f, VarStatistics variables) = compressVariables f0
-        clauses = L.fold L.genericLength $ cnfClauses f
-     in DIMACS_CNF "Herbrand" CNFSetting {..} f
+        stat = flip L.fold (cnfClauses f) do
+          clauses <- fromIntegral <$> L.length
+          (minClauseSize, maxClauseSize) <-
+            L.handles #_CNFClause
+              $ L.premap length
+              $ ((,) `on` maybe 0 fromIntegral)
+              <$> L.minimum
+              <*> L.maximum
+          pure CNFStatistics {..}
+        comment = A.encode stat
+     in DIMACS_CNF
+          comment
+          CNFSetting
+            { variables
+            , clauses = stat ^. #clauses
+            }
+          f
 
 formatDIMACS :: DIMACS -> BB.Builder
 formatDIMACS (DIMACS_CNF cmt CNFSetting {..} (CNF cls)) =
@@ -190,10 +238,10 @@ factor p = para $ \e -> case e ^? p of
   Nothing -> FML.singleton $ embed $ fst <$> e
   Just ((_, l), (_, r)) -> l <> r
 
-formatComment :: BS8.ByteString -> BB.Builder
+formatComment :: LBS8.ByteString -> BB.Builder
 formatComment =
-  BS8.lines
-    >>> foldMap ((<> BB.char8 '\n') . ("c " <>) . BB.byteString)
+  LBS8.lines
+    >>> foldMap ((<> BB.char8 '\n') . ("c " <>) . BB.lazyByteString)
 
 parseDIMACS :: BS8.ByteString -> Either String DIMACS
 parseDIMACS = Atto.parseOnly (Atto.skipSpace *> dimacsP)
@@ -229,7 +277,7 @@ ors = maybe (Bot NoExtField) (foldl1' (:\/)) . NE.nonEmpty
 
 preambleP :: Parser Preamble
 preambleP =
-  Preamble . BS8.unlines <$> many commentP <*> problemP
+  Preamble . LBS8.unlines . map LBS8.fromStrict <$> many commentP <*> problemP
 
 commentP :: Parser BS8.ByteString
 commentP =

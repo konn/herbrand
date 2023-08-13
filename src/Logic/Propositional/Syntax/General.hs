@@ -78,6 +78,7 @@ module Logic.Propositional.Syntax.General (
   size,
   compressVariables,
   VarStatistics (..),
+  height,
 ) where
 
 import Control.DeepSeq (NFData)
@@ -497,6 +498,16 @@ size = cata \case
   ImplF _ l r -> l + 1 + r
   l ::/\ r -> l + 1 + r
   l ::\/ r -> l + 1 + r
+
+height :: Formula e v -> Word
+height = cata \case
+  AtomF {} -> 0
+  BotF {} -> 0
+  TopF {} -> 0
+  NotF _ l -> l + 1
+  ImplF _ l r -> max l r + 1
+  l ::/\ r -> max l r + 1
+  l ::\/ r -> max l r + 1
 
 newtype VarStatistics = VarStatistics {maxVar :: Word}
   deriving (Show, Eq, Ord, Generic)

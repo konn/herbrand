@@ -43,6 +43,7 @@ library
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
   build-depends:
       adjunctions
+    , aeson
     , algebraic-graphs
     , attoparsec
     , base >=4.7 && <5
@@ -84,6 +85,7 @@ library herbrand-bench
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
   build-depends:
       adjunctions
+    , aeson
     , algebraic-graphs
     , attoparsec
     , base >=4.7 && <5
@@ -128,6 +130,7 @@ executable herbrand-exe
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       adjunctions
+    , aeson
     , algebraic-graphs
     , attoparsec
     , base >=4.7 && <5
@@ -176,6 +179,7 @@ test-suite herbrand-test
       tasty-discover:tasty-discover
   build-depends:
       adjunctions
+    , aeson
     , algebraic-graphs
     , attoparsec
     , base >=4.7 && <5
@@ -224,6 +228,7 @@ benchmark herbrand-cnf-bench
       tasty-discover:tasty-discover
   build-depends:
       adjunctions
+    , aeson
     , algebraic-graphs
     , attoparsec
     , base >=4.7 && <5
@@ -273,6 +278,7 @@ benchmark herbrand-sat-bench
       tasty-discover:tasty-discover
   build-depends:
       adjunctions
+    , aeson
     , algebraic-graphs
     , attoparsec
     , base >=4.7 && <5
