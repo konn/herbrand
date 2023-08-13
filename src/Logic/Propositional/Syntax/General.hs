@@ -10,6 +10,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE ViewPatterns #-}
 
 -- | The most general syntax of (classical and intuitionistic) propositional logic
 module Logic.Propositional.Syntax.General (
@@ -506,6 +507,6 @@ compressVariables :: (Traversable t, Hashable v) => t v -> (t Word, VarStatistic
 compressVariables =
   fmap (VarStatistics . S.fst) . flip runState (0 :!: mempty) . traverse \v ->
     gets (HM.lookup v . S.snd) >>= \case
-      Nothing -> state $ \(i :!: e) ->
-        (i + 1, (i + 1) :!: HM.insert v (i + 1) e)
+      Nothing -> state $ \(((+ 1) -> !i) :!: e) ->
+        (i, i :!: HM.insert v i e)
       Just i -> pure i
