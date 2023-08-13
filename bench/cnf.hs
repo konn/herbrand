@@ -19,13 +19,11 @@ main = do
         , bench "fast" $ nfAppIO (fmap fromFormulaFast) fml
         ]
     , withSats "medium" mediums $ \fml ->
-        [ bench "naive" $ nfAppIO (fmap fromFormulaNaive) fml
-        , bench "ord" $ nfAppIO (fmap fromFormulaOrd) fml
+        [ bench "ord" $ nfAppIO (fmap fromFormulaOrd) fml
         , bench "fast" $ nfAppIO (fmap fromFormulaFast) fml
         ]
     , withSats "large" larges $ \fml ->
-        [ bench "naive" $ nfAppIO (fmap fromFormulaNaive) fml
-        , bench "ord" $ nfAppIO (fmap fromFormulaOrd) fml
+        [ bench "ord" $ nfAppIO (fmap fromFormulaOrd) fml
         , bench "fast" $ nfAppIO (fmap fromFormulaFast) fml
         ]
     ]
