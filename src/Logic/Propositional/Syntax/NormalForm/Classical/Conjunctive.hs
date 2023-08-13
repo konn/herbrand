@@ -131,8 +131,6 @@ fromFormulaOrd =
       AtomF a -> pure $ Set.singleton a
       TopF {} -> mempty
       BotF {} -> pure mempty
-      NotF c _ -> noExtCon c
-      ImplF c _ _ -> noExtCon c
       l :/\$ r -> l <> r
       ls :\/$ rs ->
         -- Use distributive laws
@@ -147,8 +145,6 @@ fromFormulaNaive =
       AtomF a -> FML.singleton $ FML.singleton a
       TopF {} -> mempty
       BotF {} -> FML.singleton mempty
-      NotF c _ -> noExtCon c
-      ImplF c _ _ -> noExtCon c
       l :/\$ r -> l <> r
       ls :\/$ rs ->
         -- Use distributive laws
