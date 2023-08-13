@@ -97,10 +97,6 @@ jobs:
     - name: Test
       run: |
         cabal test --test-show-details always
-    - name: Benchmark
-      continue-on-error: true
-      run: |
-        cabal bench -j1
     - name: Collect binaries
       continue-on-error: true
       run: ./ci/collect-bins.sh artifacts
