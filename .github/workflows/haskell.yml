@@ -17,6 +17,7 @@ jobs:
         ref: ${{github.event.pull_request.head.sha || github.sha}}
     - name: Calculate hash keys
       id: cache-keys
+      shell: bash
       run: |
         PROJECT_HASH="${{hashFiles('cabal.project', 'cabal.project.freeze')}}"
         echo "project=${PROJECT_HASH}" >> "${GITHUB_OUTPUT}"
@@ -31,14 +32,14 @@ jobs:
         echo "store-prefix=${STORE_PREFIX}" >> "${GITHUB_OUTPUT}"
         STORE_KEY="${STORE_PREFIX}-${PROJECT_HASH}-${PACKAGE_HASH}"
         echo "store=${STORE_KEY}" >> "${GITHUB_OUTPUT}"
-        STORE_RESTORE="${STORE_PREFIX}-${PROJECT_HASH}-\n${STORE_PREFIX}-"
+        STORE_RESTORE="${STORE_PREFIX}-${PROJECT_HASH}-"$'\n'"${STORE_PREFIX}-"
         echo "store-restore=${STORE_RESTORE}" >> "${GITHUB_OUTPUT}"
 
         DIST_PREFIX="dist-${{runner.os}}-${{env.ghc}}"
         echo "dist-prefix=${DIST_PREFIX}" >> "${GITHUB_OUTPUT}"
         DIST_KEY="${DIST_PREFIX}-${PROJECT_HASH}-${PACKAGE_HASH}-${SOURCE_HASH}"
         echo "dist=${DIST_KEY}" >> "${GITHUB_OUTPUT}"
-        DIST_RESTORE="${DIST_PREFIX}-${PROJECT_HASH}-${PACKAGE_HASH}-\n${DIST_PREFIX}-${PROJECT_HASH}-\n${DIST_PREFIX}-"
+        DIST_RESTORE=${DIST_PREFIX}-${PROJECT_HASH}-${PACKAGE_HASH}-$'\n'${DIST_PREFIX}-${PROJECT_HASH}-$'\n'${DIST_PREFIX}-
         echo "dist-restore=${DIST_RESTORE}" >> "${GITHUB_OUTPUT}"
 
     - name: Setup Haskell
