@@ -22,6 +22,7 @@ description:         Please see the README on GitHub at <https://github.com/konn
 dependencies:
 - base >= 4.7 && < 5
 - adjunctions
+- attoparsec
 - algebraic-graphs
 - bifunctors
 - bytestring

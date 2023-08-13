@@ -27,6 +27,7 @@ library
   exposed-modules:
       Logic.Propositional.Classical.SAT.BruteForce
       Logic.Propositional.Classical.SAT.DPLL
+      Logic.Propositional.Classical.SAT.Format.DIMACS
       Logic.Propositional.Classical.SAT.Tableaux
       Logic.Propositional.Classical.SAT.Types
       Logic.Propositional.Syntax.General
@@ -41,6 +42,7 @@ library
   build-depends:
       adjunctions
     , algebraic-graphs
+    , attoparsec
     , base >=4.7 && <5
     , bifunctors
     , bytestring
@@ -77,6 +79,7 @@ executable herbrand-exe
   build-depends:
       adjunctions
     , algebraic-graphs
+    , attoparsec
     , base >=4.7 && <5
     , bifunctors
     , bytestring
@@ -121,6 +124,7 @@ test-suite herbrand-test
   build-depends:
       adjunctions
     , algebraic-graphs
+    , attoparsec
     , base >=4.7 && <5
     , bifunctors
     , bytestring
@@ -165,6 +169,7 @@ benchmark herbrand-cnf-bench
   build-depends:
       adjunctions
     , algebraic-graphs
+    , attoparsec
     , base >=4.7 && <5
     , bifunctors
     , bytestring
@@ -209,6 +214,7 @@ benchmark herbrand-sat-bench
   build-depends:
       adjunctions
     , algebraic-graphs
+    , attoparsec
     , base >=4.7 && <5
     , bifunctors
     , bytestring

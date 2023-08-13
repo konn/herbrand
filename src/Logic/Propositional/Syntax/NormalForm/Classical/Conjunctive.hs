@@ -43,13 +43,13 @@ import Prelude hiding (foldl1)
 -- | Propositional formula in Conjunction Normal Form (__CNF__) with atomic formula @a@.
 newtype CNF a = CNF {cnfClauses :: [CNFClause a]}
   deriving (Show, Eq, Ord, Generic, Generic1, Functor, Foldable, Traversable)
-  deriving anyclass (Wrapped, NFData)
+  deriving anyclass (Wrapped, NFData, Hashable)
   deriving newtype (IsList)
 
 -- | Each conjunctive clause in CNF formulae, i.e. disjunction of literals.
 newtype CNFClause a = CNFClause {clauseLits :: [Literal a]}
   deriving (Show, Eq, Ord, Generic, Generic1, Functor, Foldable, Traversable)
-  deriving anyclass (Wrapped, NFData)
+  deriving anyclass (Wrapped, NFData, Hashable)
   deriving newtype (IsList)
 
 data WithFresh a
