@@ -63,11 +63,11 @@ module Logic.Propositional.Syntax.General (
   _Top',
   _T',
   _Atom',
-  (.:==>),
+  (.==>$),
   _Impl',
-  (.:/\),
+  (./\$),
   _And',
-  (.:\/),
+  (.\/$),
   _Or',
 
   -- * Literals
@@ -136,8 +136,8 @@ data FormulaF x a fml
   | AtomF a
   | NotF (XNot x) fml
   | ImplF (XImpl x) fml fml
-  | fml ::/\ fml
-  | fml ::\/ fml
+  | fml :/\$ fml
+  | fml :\/$ fml
   deriving (Generic, Generic1, Functor, Foldable, Traversable)
 
 type role FormulaF nominal representational representational
@@ -189,9 +189,9 @@ pattern l ::==> r <- ImplF _ l r
 
 infixr 0 ::==>
 
-infixl 2 ::\/
+infixl 2 :\/$
 
-infixl 3 ::/\
+infixl 3 :/\$
 
 instance (Show a, Show t) => Show (FormulaF x a t) where
   showsPrec = showsPrec1
@@ -209,12 +209,12 @@ instance (Show a) => Show1 (FormulaF x a) where
       $ showsF 1 l
       . showString " ==> "
       . showsF 0 r
-  liftShowsPrec showsF _ d (l ::\/ r) =
+  liftShowsPrec showsF _ d (l :\/$ r) =
     showParen (d > 2)
       $ showsF 2 l
       . showString " \\/ "
       . showsF 2 r
-  liftShowsPrec showsF _ d (l ::/\ r) =
+  liftShowsPrec showsF _ d (l :/\$ r) =
     showParen (d > 3)
       $ showsF 3 l
       . showString " /\\ "
@@ -331,7 +331,7 @@ l ==> r = l :==> r
 infixl 3 :/\, /\
 
 pattern (:/\) :: Formula x a -> Formula x a -> Formula x a
-pattern l :/\ r = Formula (l ::/\ r)
+pattern l :/\ r = Formula (l :/\$ r)
 
 (/\) :: Formula x a -> Formula x a -> Formula x a
 l /\ r = l :/\ r
@@ -339,7 +339,7 @@ l /\ r = l :/\ r
 infixl 2 :\/, \/
 
 pattern (:\/) :: Formula x a -> Formula x a -> Formula x a
-pattern l :\/ r = Formula (l ::\/ r)
+pattern l :\/ r = Formula (l :\/$ r)
 
 (\/) :: Formula x a -> Formula x a -> Formula x a
 l \/ r = l :\/ r
@@ -384,20 +384,20 @@ _Atom = prism' Atom \case
   Atom a -> Just a
   _ -> Nothing
 
-_And', (.:/\) :: Prism' (FormulaF x a t) (t, t)
-(.:/\) = prism' (uncurry (::/\)) \case
-  a ::/\ b -> Just (a, b)
+_And', (./\$) :: Prism' (FormulaF x a t) (t, t)
+(./\$) = prism' (uncurry (:/\$)) \case
+  a :/\$ b -> Just (a, b)
   _ -> Nothing
-_And' = (.:/\)
+_And' = (./\$)
 
-_Or', (.:\/) :: Prism' (FormulaF x a t) (t, t)
-(.:\/) = prism' (uncurry (::\/)) \case
-  a ::\/ b -> Just (a, b)
+_Or', (.\/$) :: Prism' (FormulaF x a t) (t, t)
+(.\/$) = prism' (uncurry (:\/$)) \case
+  a :\/$ b -> Just (a, b)
   _ -> Nothing
-_Or' = (.:\/)
+_Or' = (.\/$)
 
-(.:==>) :: (XImpl x ~ NoExtField) => Prism' (FormulaF x a t) (t, t)
-(.:==>) = prism' (uncurry $ ImplF NoExtField) \case
+(.==>$) :: (XImpl x ~ NoExtField) => Prism' (FormulaF x a t) (t, t)
+(.==>$) = prism' (uncurry $ ImplF NoExtField) \case
   a ::==> b -> Just (a, b)
   _ -> Nothing
 
@@ -436,7 +436,7 @@ are not a disjunction.
 disjunctives :: Formula x a -> [Formula x a]
 disjunctives =
   DL.toList . R.para \case
-    (_, l) ::\/ (_, r) -> l <> r
+    (_, l) :\/$ (_, r) -> l <> r
     f -> DL.singleton $ (fst <$> f) ^. _Formula
 
 {- |
@@ -446,7 +446,7 @@ are not a disjunction.
 conjunctives :: Formula x a -> [Formula x a]
 conjunctives =
   DL.toList . R.para \case
-    (_, l) ::/\ (_, r) -> l <> r
+    (_, l) :/\$ (_, r) -> l <> r
     f -> DL.singleton $ (fst <$> f) ^. _Formula
 
 -- | A literal is mere a atomic formula or its negation.
@@ -480,8 +480,8 @@ full = cata \case
   BotF _ -> Bot NoExtField
   TopF _ -> Top NoExtField
   NotF _ l -> Not NoExtField l
-  l ::/\ r -> l :/\ r
-  l ::\/ r -> l :\/ r
+  l :/\$ r -> l :/\ r
+  l :\/$ r -> l :\/ r
   ImplF _ l r -> l :==> r
 
 toLit :: Formula e v -> Literal (Formula e v)
@@ -496,8 +496,8 @@ size = cata \case
   TopF {} -> 1
   NotF _ l -> l + 1
   ImplF _ l r -> l + 1 + r
-  l ::/\ r -> l + 1 + r
-  l ::\/ r -> l + 1 + r
+  l :/\$ r -> l + 1 + r
+  l :\/$ r -> l + 1 + r
 
 height :: Formula e v -> Word
 height = cata \case
@@ -506,8 +506,8 @@ height = cata \case
   TopF {} -> 0
   NotF _ l -> l + 1
   ImplF _ l r -> max l r + 1
-  l ::/\ r -> max l r + 1
-  l ::\/ r -> max l r + 1
+  l :/\$ r -> max l r + 1
+  l :\/$ r -> max l r + 1
 
 newtype VarStatistics = VarStatistics {maxVar :: Word}
   deriving (Show, Eq, Ord, Generic)

@@ -98,7 +98,7 @@ fromFormulaFast =
             , Set.fromList [e', negLit e2]
             ]
         pure e'
-      l ::/\ r -> do
+      l :/\$ r -> do
         e1 <- l
         e2 <- r
         e' <- newFresh
@@ -109,7 +109,7 @@ fromFormulaFast =
             , Set.fromList [e', negLit e1, negLit e2]
             ]
         pure e'
-      l ::\/ r -> do
+      l :\/$ r -> do
         e1 <- l
         e2 <- r
         e' <- newFresh
@@ -133,8 +133,8 @@ fromFormulaOrd =
       BotF {} -> pure mempty
       NotF c _ -> noExtCon c
       ImplF c _ _ -> noExtCon c
-      l ::/\ r -> l <> r
-      ls ::\/ rs ->
+      l :/\$ r -> l <> r
+      ls :\/$ rs ->
         -- Use distributive laws
         foldMap
           (foldMap (fmap FML.singleton . (<>)) rs)
@@ -149,8 +149,8 @@ fromFormulaNaive =
       BotF {} -> FML.singleton mempty
       NotF c _ -> noExtCon c
       ImplF c _ _ -> noExtCon c
-      l ::/\ r -> l <> r
-      ls ::\/ rs ->
+      l :/\$ r -> l <> r
+      ls :\/$ rs ->
         -- Use distributive laws
         foldMap
           ( \l ->

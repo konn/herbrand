@@ -228,8 +228,8 @@ factorFormula = \case
   Bot {} -> DisjF mempty
   Top {} -> ConjF mempty
   Impl _ l r -> ImpF l r
-  l :/\ r -> ConjF $ factor (.:/\) l <> factor (.:/\) r
-  l :\/ r -> DisjF $ factor (.:\/) l <> factor (.:\/) r
+  l :/\ r -> ConjF $ factor (./\$) l <> factor (./\$) r
+  l :\/ r -> DisjF $ factor (.\/$) l <> factor (.\/$) r
 
 factor ::
   (forall x. Prism' (FormulaF n e x) (x, x)) ->

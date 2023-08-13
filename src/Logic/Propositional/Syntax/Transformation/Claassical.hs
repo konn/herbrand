@@ -51,10 +51,10 @@ deMorgan =
     BotF x -> posNeg (Bot x) (Top x)
     AtomF f -> posNeg (Atom $ Positive f) (Atom $ Negative f)
     NotF _ k -> k . flipPos
-    l ::/\ r -> \case
+    l :/\$ r -> \case
       P -> l P :/\ r P
       N -> l N :\/ r N
-    l ::\/ r -> \case
+    l :\/$ r -> \case
       P -> l P :\/ r P
       N -> l N :/\ r N
     ImplF _ l r -> \case
@@ -93,5 +93,5 @@ eliminateImpl = cata \case
   NotF _ r -> Not NoExtField r
   ImplF _ l r ->
     Not NoExtField l :\/ r
-  l ::/\ r -> l :/\ r
-  l ::\/ r -> l :\/ r
+  l :/\$ r -> l :/\ r
+  l :\/$ r -> l :\/ r

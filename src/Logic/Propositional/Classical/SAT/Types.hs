@@ -45,12 +45,12 @@ eval Model {..} = cata \case
   TopF {} -> Just True
   NotF _ a -> not <$> a
   ImplF _ l r -> orM (not <$> l) r
-  l ::\/ r -> orM l r
-  Just False ::/\ _ -> Just False
-  Just True ::/\ r -> r
-  _ ::/\ Just False -> Just False
-  l ::/\ Just True -> l
-  l ::/\ r -> (&&) <$> l <*> r
+  l :\/$ r -> orM l r
+  Just False :/\$ _ -> Just False
+  Just True :/\$ r -> r
+  _ :/\$ Just False -> Just False
+  l :/\$ Just True -> l
+  l :/\$ r -> (&&) <$> l <*> r
 
 orM :: Maybe Bool -> Maybe Bool -> Maybe Bool
 orM (Just True) _ = Just True
