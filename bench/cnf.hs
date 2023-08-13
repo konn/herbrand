@@ -7,6 +7,7 @@ import Control.Exception (evaluate)
 import Herbrand.Bench
 import Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
 import Test.Tasty (Timeout (..), localOption)
+import Test.Tasty.ExpectedFailure
 
 main :: IO ()
 main = do
@@ -20,19 +21,23 @@ main = do
         , bench "fast" $ nfAppIO (fmap fromFormulaFast) fml
         ]
     , withSats "medium" mediums $ \fml ->
-        [ localOption (Timeout (5 * 10 ^ (6 :: Int)) "5s")
+        [ expectFailBecause "O(n^2)"
+            $ localOption (Timeout (5 * 10 ^ (6 :: Int)) "5s")
             $ bench "naive"
             $ nfAppIO (fmap fromFormulaNaive) fml
-        , localOption (Timeout (5 * 10 ^ (6 :: Int)) "5s")
+        , expectFailBecause "O(n^2)"
+            $ localOption (Timeout (5 * 10 ^ (6 :: Int)) "5s")
             $ bench "ord"
             $ nfAppIO (fmap fromFormulaOrd) fml
         , bench "fast" $ nfAppIO (fmap fromFormulaFast) fml
         ]
     , withSats "large" larges $ \fml ->
-        [ localOption (Timeout (5 * 10 ^ (6 :: Int)) "5s")
+        [ expectFailBecause "O(n^2)"
+            $ localOption (Timeout (5 * 10 ^ (6 :: Int)) "5s")
             $ bench "naive"
             $ nfAppIO (fmap fromFormulaNaive) fml
-        , localOption (Timeout (5 * 10 ^ (6 :: Int)) "5s")
+        , expectFailBecause "O(n^2)"
+            $ localOption (Timeout (5 * 10 ^ (6 :: Int)) "5s")
             $ bench "ord"
             $ nfAppIO (fmap fromFormulaOrd) fml
         , bench "fast" $ nfAppIO (fmap fromFormulaFast) fml

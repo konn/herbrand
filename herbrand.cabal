@@ -317,6 +317,7 @@ benchmark herbrand-cnf-bench
     , tasty
     , tasty-bench
     , tasty-bench-fit
+    , tasty-expected-failure
     , text
     , transformers
     , unordered-containers
@@ -369,6 +370,7 @@ benchmark herbrand-sat-bench
     , tasty
     , tasty-bench
     , tasty-bench-fit
+    , tasty-expected-failure
     , text
     , transformers
     , unordered-containers

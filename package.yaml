@@ -139,6 +139,7 @@ benchmarks:
     - falsify
     - tasty-bench
     - tasty-bench-fit
+    - tasty-expected-failure
 
   herbrand-sat-bench:
     main:                sat.hs
@@ -158,3 +159,4 @@ benchmarks:
     - falsify
     - tasty-bench
     - tasty-bench-fit
+    - tasty-expected-failure
