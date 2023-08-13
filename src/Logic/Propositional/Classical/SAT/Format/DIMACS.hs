@@ -37,9 +37,11 @@ module Logic.Propositional.Classical.SAT.Format.DIMACS (
 
   -- * Parsers
   parseDIMACS,
-  parseCNF,
-  parseSAT,
   parseDIMACSLazy,
+  parseCNF,
+  parseCNFLazy,
+  parseSAT,
+  parseSATLazy,
 
   -- ** Parsers
   dimacsP,
@@ -66,6 +68,7 @@ import Control.Lens (Lens', Prism', lens, (^.), (^?))
 import Control.Monad (replicateM, when)
 import Control.Monad.Trans.State.Strict (evalState, get, put)
 import qualified Data.Aeson as A
+import Data.Attoparsec.ByteString ((<?>))
 import Data.Attoparsec.ByteString.Char8 (Parser)
 import qualified Data.Attoparsec.ByteString.Char8 as Atto
 import qualified Data.Attoparsec.ByteString.Lazy as AttoL
@@ -263,9 +266,25 @@ parseCNF =
       SATProblem {} -> fail "Expected CNF format, but got SAT"
       CNFProblem cnf -> (comment,cnf,) <$> cnfBodyP cnf
 
+parseCNFLazy :: LBS8.ByteString -> Either String (LBS8.ByteString, CNFSetting, CNF Word)
+parseCNFLazy =
+  AttoL.parseOnly $ Atto.skipSpace *> do
+    Preamble {..} <- preambleP
+    case problem of
+      SATProblem {} -> fail "Expected CNF format, but got SAT"
+      CNFProblem cnf -> (comment,cnf,) <$> cnfBodyP cnf
+
 parseSAT :: BS8.ByteString -> Either String (LBS8.ByteString, SATSetting, Formula Full Word)
 parseSAT =
   Atto.parseOnly $ Atto.skipSpace *> do
+    Preamble {..} <- preambleP
+    case problem of
+      SATProblem cnf -> (comment,cnf,) <$> formulaP cnf
+      CNFProblem {} -> fail "Expected SAT format, but got CNF"
+
+parseSATLazy :: LBS8.ByteString -> Either String (LBS8.ByteString, SATSetting, Formula Full Word)
+parseSATLazy =
+  AttoL.parseOnly $ Atto.skipSpace *> do
     Preamble {..} <- preambleP
     case problem of
       SATProblem cnf -> (comment,cnf,) <$> formulaP cnf
@@ -285,18 +304,18 @@ dimacsP = do
     CNFProblem cnf -> DIMACS_CNF comment cnf <$> cnfBodyP cnf
 
 parens :: Parser a -> Parser a
-parens p = symbol "(" *> p <* ")"
+parens p = (symbol "(" *> p <* symbol ")") <?> "parens"
 
 formulaP :: SATSetting -> Parser (Formula Full Word)
 formulaP SATSetting {..} = go
   where
     go =
-      (Atom <$> varP variables)
+      parens go
+        <|> (Atom <$> varP variables)
         <|> (neg <$ symbol "-" <*> go)
         <|> (ands <$ symbol "*" <*> parens (many go))
         <|> (ors <$ symbol "+" <*> parens (many go))
         <|> (symbol "imp" *> parens ((==>) <$> go <*> go))
-        <|> parens go
 
 ands :: [Formula Full Word] -> Formula Full Word
 ands = maybe (⊤) (foldl1' (:/\)) . NE.nonEmpty
@@ -319,25 +338,31 @@ lexeme :: Parser a -> Parser a
 lexeme p = p <* Atto.skipSpace
 
 symbol :: BS8.ByteString -> Parser BS8.ByteString
-symbol = lexeme . Atto.string
+symbol str =
+  lexeme (Atto.string str)
+    <?> ("Symbol `" <> BS8.unpack str <> "'")
 
 number :: Parser Word
-number = lexeme Atto.decimal
+number = lexeme Atto.decimal <?> "number"
 
 litP :: Word -> Parser (Literal Word)
-litP vs = Negative <$ symbol "-" <*> varP vs <|> Positive <$> varP vs
+litP vs =
+  (Negative <$ Atto.try (symbol "-") <*> varP vs <|> Positive <$> varP vs)
+    <?> "literal"
 
 cnfBodyP :: CNFSetting -> Parser (CNF Word)
 cnfBodyP sett@CNFSetting {..} =
   CNF <$> replicateM (fromIntegral clauses) (clauseP sett)
 
 varP :: Word -> Parser Word
-varP i = do
-  n <- number
-  when (n < 1)
-    $ fail ("Variable out of bound: " <> show n <> " < 1")
-  when (i < n) $ fail ("Variable out of bound: " <> show n <> " > " <> show i)
-  pure n
+varP i =
+  ( do
+      n <- number
+      when (n < 1) $ fail ("Variable out of bound: " <> show n <> " < 1")
+      when (i < n) $ fail ("Variable out of bound: " <> show n <> " > " <> show i)
+      pure n
+  )
+    <?> "var"
 
 clauseP :: CNFSetting -> Parser (CNFClause Word)
 clauseP CNFSetting {..} = CNFClause <$> many (litP variables) <* terminate
