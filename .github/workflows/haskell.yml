@@ -154,7 +154,7 @@ jobs:
           echo ""
           echo "----"
 
-          if [ "${FAIL}" -eq 0]; then
+          if [ "${FAIL}" -eq 0 ]; then
             echo "All ${TOTAL} tests passed."
           else
             echo "${FAIL} out of ${TOTAL} tests FAILED"'!'
