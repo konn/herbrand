@@ -20,19 +20,19 @@ main = do
         , bench "fast" $ nfAppIO (fmap fromFormulaFast) fml
         ]
     , withSats "medium" mediums $ \fml ->
-        [ localOption (Timeout (10 * 10 ^ (6 :: Int)) "10s")
+        [ localOption (Timeout (5 * 10 ^ (6 :: Int)) "5s")
             $ bench "naive"
             $ nfAppIO (fmap fromFormulaNaive) fml
-        , localOption (Timeout (10 * 10 ^ (6 :: Int)) "10s")
+        , localOption (Timeout (5 * 10 ^ (6 :: Int)) "5s")
             $ bench "ord"
             $ nfAppIO (fmap fromFormulaOrd) fml
         , bench "fast" $ nfAppIO (fmap fromFormulaFast) fml
         ]
     , withSats "large" larges $ \fml ->
-        [ localOption (Timeout (10 * 10 ^ (6 :: Int)) "10s")
+        [ localOption (Timeout (5 * 10 ^ (6 :: Int)) "5s")
             $ bench "naive"
             $ nfAppIO (fmap fromFormulaNaive) fml
-        , localOption (Timeout (10 * 10 ^ (6 :: Int)) "10s")
+        , localOption (Timeout (5 * 10 ^ (6 :: Int)) "5s")
             $ bench "ord"
             $ nfAppIO (fmap fromFormulaOrd) fml
         , bench "fast" $ nfAppIO (fmap fromFormulaFast) fml
