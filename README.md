@@ -10,3 +10,4 @@
 - R. Mesquita: "[_hegg: Fast equality saturation in Haskell_](https://github.com/alt-romes/hegg)".
 - H. Nabeshima and T. Soh: "[__高速 SAT ソルバーの原理__ (_Principles of Modern SAT Solvers_)](https://www.jstage.jst.go.jp/article/jjsai/25/1/25_68/_article/-char/ja/)".
 - K. Iwanuma and H. Nabeshima: [__SMT: 個別理論を取り扱うSAT技術__ (_SMT: Satisfiability Modulo Theories_)](https://www.jstage.jst.go.jp/article/jjsai/25/1/25_86/_article/-char/ja/).
+- H. H. Hoos and T. Stützle: "[_SATLib_](https://www.cs.ubc.ca/~hoos/SATLIB/benchm.html)".
