@@ -84,8 +84,8 @@ internal-libraries:
 
 executables:
   gen-sat:
-    main:                gen-sat/Main.hs
-    source-dirs:         app
+    main:                Main.hs
+    source-dirs:         app/gen-sat
     ghc-options:
     - -O2
     dependencies:
