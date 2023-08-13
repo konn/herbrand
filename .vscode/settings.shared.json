@@ -3,5 +3,6 @@
     "commands": [
       { "cmd": "hpack", "isAsync": true, "match": "(package\\.yaml|\\.l?hs)$" }
     ]
-  }
+  },
+  "haskell.formattingProvider": "fourmolu"
 }
