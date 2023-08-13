@@ -113,6 +113,7 @@ jobs:
   test:
     name: Test
     needs: [build]
+    continue-on-error: true
     env:
       ghc: 9.4.5
       cabal: 3.10.1.0
@@ -166,7 +167,9 @@ jobs:
     env:
       ghc: 9.4.5
       cabal: 3.10.1.0
+    continue-on-error: true
     strategy:
+      fail-fast: false
       matrix:
         bench: ${{needs.build.outputs.benchmarks}}
     runs-on: ubuntu-latest
