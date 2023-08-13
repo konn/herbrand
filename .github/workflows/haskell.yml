@@ -61,7 +61,7 @@ jobs:
         restore-keys: ${{steps.cache-keys.outputs.dist-restore}}
     - name: cabal configure
       run: |
-        cabal v2-configure --enable-tests --enable-benchmarks
+        cabal v2-configure --enable-tests --enable-benchmarks --enable-optimisation=2
         cabal update
     - name: Build Dependencies
       run: | 
