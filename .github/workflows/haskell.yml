@@ -27,7 +27,7 @@ jobs:
               [[]]
             ).slice(1,-1).map(e => e.concat("").join('-'))
 
-            return {key: comps.join("\n"), restore: fallbacks.join("\n")}
+            return {key: comps.join("-"), restore: fallbacks.join("\n")}
           }
           const project_hash = await glob.hashFiles('cabal.project', 'cabal.project.freeze')
           core.setOutput('project', project_hash)
