@@ -1,6 +1,4 @@
-{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE TupleSections #-}
 
 module Logic.Propositional.Classical.Syntax.TestUtils (
   fullFormula,
