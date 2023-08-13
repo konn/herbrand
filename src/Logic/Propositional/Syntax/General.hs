@@ -504,8 +504,8 @@ newtype VarStatistics = VarStatistics {maxVar :: Word}
 -- | Compresses variable into 1-origin natural numbers
 compressVariables :: (Traversable t, Hashable v) => t v -> (t Word, VarStatistics)
 compressVariables =
-  fmap (VarStatistics . subtract 1 . S.fst) . flip runState (1 :!: mempty) . traverse \v ->
+  fmap (VarStatistics . S.fst) . flip runState (0 :!: mempty) . traverse \v ->
     gets (HM.lookup v . S.snd) >>= \case
       Nothing -> state $ \(i :!: e) ->
-        (i, (i + 1) :!: HM.insert v i e)
+        (i + 1, (i + 1) :!: HM.insert v (i + 1) e)
       Just i -> pure i
