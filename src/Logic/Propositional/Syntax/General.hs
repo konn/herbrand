@@ -134,13 +134,13 @@ Propositional formula with proposition variable @a@
 See also: 'FormulaF' for use with recursion schemes
 -}
 data Formula x a
-  = Top (XTop x)
-  | Bot (XBot x)
-  | Atom a
-  | Not (XNot x) (Formula x a)
-  | Impl (XImpl x) (Formula x a) (Formula x a)
-  | (Formula x a) :/\ (Formula x a)
-  | (Formula x a) :\/ (Formula x a)
+  = Top !(XTop x)
+  | Bot !(XBot x)
+  | Atom !a
+  | Not !(XNot x) !(Formula x a)
+  | Impl !(XImpl x) !(Formula x a) !(Formula x a)
+  | !(Formula x a) :/\ !(Formula x a)
+  | !(Formula x a) :\/ !(Formula x a)
   deriving (Generic, Generic1, Foldable, Functor, Traversable)
 
 deriving instance
