@@ -9,9 +9,21 @@ import Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
 
 main :: IO ()
 main = do
-  !targs <- evaluate . force =<< findSatsIn "data/formula-to-cnf"
+  !smalls <- evaluate . force =<< findSatsIn "data/formula-to-cnf/small"
+  !mediums <- evaluate . force =<< findSatsIn "data/formula-to-cnf/medium"
+  !larges <- evaluate . force =<< findSatsIn "data/formula-to-cnf/large"
   defaultMain
-    [ withSats "All" targs $ \fml ->
+    [ withSats "small" smalls $ \fml ->
+        [ bench "naive" $ nfAppIO (fmap fromFormulaNaive) fml
+        , bench "ord" $ nfAppIO (fmap fromFormulaOrd) fml
+        , bench "fast" $ nfAppIO (fmap fromFormulaFast) fml
+        ]
+    , withSats "medium" mediums $ \fml ->
+        [ bench "naive" $ nfAppIO (fmap fromFormulaNaive) fml
+        , bench "ord" $ nfAppIO (fmap fromFormulaOrd) fml
+        , bench "fast" $ nfAppIO (fmap fromFormulaFast) fml
+        ]
+    , withSats "large" larges $ \fml ->
         [ bench "naive" $ nfAppIO (fmap fromFormulaNaive) fml
         , bench "ord" $ nfAppIO (fmap fromFormulaOrd) fml
         , bench "fast" $ nfAppIO (fmap fromFormulaFast) fml
