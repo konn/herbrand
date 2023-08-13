@@ -23,6 +23,7 @@
 module Logic.Propositional.Classical.SAT.Format.DIMACS (
   -- * Basic Types
   DIMACS (..),
+  commentL,
   ToDIMACS (..),
   Preamble (..),
   Problem (..),
@@ -61,7 +62,7 @@ import Control.Applicative
 import Control.Arrow ((>>>))
 import Control.DeepSeq (NFData)
 import qualified Control.Foldl as L
-import Control.Lens (Prism', (^.), (^?))
+import Control.Lens (Lens', Prism', lens, (^.), (^?))
 import Control.Monad (replicateM, when)
 import Control.Monad.Trans.State.Strict (evalState, get, put)
 import qualified Data.Aeson as A
@@ -101,6 +102,13 @@ data CNFStatistics = CNFStatistics
   }
   deriving (Show, Eq, Ord, Generic)
   deriving anyclass (A.FromJSON, A.ToJSON)
+
+commentL :: Lens' DIMACS LBS8.ByteString
+commentL = lens
+  \case DIMACS_CNF c _ _ -> c; DIMACS_SAT c _ _ -> c
+  \case
+    DIMACS_CNF _ s v -> \c -> DIMACS_CNF c s v
+    DIMACS_SAT _ s v -> \c -> DIMACS_SAT c s v
 
 data Preamble = Preamble
   { comment :: !LBS8.ByteString

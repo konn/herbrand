@@ -186,8 +186,11 @@ executable gen-sat
     , containers
     , data-fix
     , deepseq
+    , directory
     , distributive
     , dlist
+    , falsify
+    , filepath
     , filtrable
     , fmlist
     , foldable1-classes-compat
@@ -200,6 +203,7 @@ executable gen-sat
     , linear-base
     , optparse-applicative
     , parallel
+    , parser-combinators
     , rec-def
     , recursion-schemes
     , semigroupoids
