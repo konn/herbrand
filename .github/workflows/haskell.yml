@@ -17,6 +17,7 @@ jobs:
         ref: ${{github.event.pull_request.head.sha || github.sha}}
     - name: Calculate hash keys
       uses: actions/github-script@v6
+      id: cache-keys
       with:
         script: |
           const project_hash = glob.hashFiles('cabal.project', 'cabal.project.freeze')
