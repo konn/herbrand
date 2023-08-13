@@ -14,7 +14,7 @@
 
 -- | The most general syntax of (classical and intuitionistic) propositional logic
 module Logic.Propositional.Syntax.General (
-  Formula (Bot, Top, Atom, Not, Impl, (:==>), (:/\), (:\/)),
+  Formula (..),
   Full,
   full,
   _Formula,
@@ -54,6 +54,8 @@ module Logic.Propositional.Syntax.General (
   _Or,
 
   -- * Recusion functors
+
+  -- | Underlying representation of 'Formula', to be used for recursion schemes.
   FormulaF (.., (::==>)),
 
   -- ** Prisms
@@ -85,17 +87,16 @@ import Control.DeepSeq (NFData)
 import Control.Lens
 import Control.Monad.Trans.State.Strict (gets, runState, state)
 import Data.Bifunctor.TH
-import Data.Bitraversable (Bitraversable (..))
 import Data.DList qualified as DL
 import Data.Functor.Classes
 import Data.Functor.Foldable
 import Data.Functor.Foldable qualified as R
+import Data.Functor.Foldable.TH
 import Data.HashMap.Strict qualified as HM
 import Data.Hashable (Hashable)
 import Data.Strict.Tuple (Pair (..))
 import Data.Strict.Tuple qualified as S
 import Data.String (IsString (..))
-import Data.Traversable (foldMapDefault)
 import GHC.Generics (Generic, Generic1)
 
 data NoExtField = NoExtField
@@ -128,19 +129,69 @@ type instance XNot Full = NoExtField
 type instance XImpl Full = NoExtField
 
 {- |
-Underlying representation of 'Formula', to be used for recursion schemes.
+Propositional formula with proposition variable @a@
+
+See also: 'FormulaF' for use with recursion schemes
 -}
-data FormulaF x a fml
-  = TopF (XTop x)
-  | BotF (XBot x)
-  | AtomF a
-  | NotF (XNot x) fml
-  | ImplF (XImpl x) fml fml
-  | fml :/\$ fml
-  | fml :\/$ fml
-  deriving (Generic, Generic1, Functor, Foldable, Traversable)
+data Formula x a
+  = Top (XTop x)
+  | Bot (XBot x)
+  | Atom a
+  | Not (XNot x) (Formula x a)
+  | Impl (XImpl x) (Formula x a) (Formula x a)
+  | (Formula x a) :/\ (Formula x a)
+  | (Formula x a) :\/ (Formula x a)
+  deriving (Generic, Generic1, Foldable, Functor, Traversable)
+
+deriving instance
+  ( Eq (XTop x)
+  , Eq (XBot x)
+  , Eq (XNot x)
+  , Eq (XImpl x)
+  , Eq a
+  ) =>
+  Eq (Formula x a)
+
+deriving instance
+  ( Ord (XTop x)
+  , Ord (XBot x)
+  , Ord (XNot x)
+  , Ord (XImpl x)
+  , Ord a
+  ) =>
+  Ord (Formula x a)
+
+deriving anyclass instance
+  ( Hashable (XTop x)
+  , Hashable (XBot x)
+  , Hashable (XNot x)
+  , Hashable (XImpl x)
+  , Hashable a
+  ) =>
+  Hashable (Formula x a)
+
+deriving anyclass instance
+  ( NFData (XTop x)
+  , NFData (XBot x)
+  , NFData (XNot x)
+  , NFData (XImpl x)
+  , NFData a
+  ) =>
+  NFData (Formula x a)
+
+type role Formula nominal representational
+
+infixl 3 :/\
+
+infixl 2 :\/
+
+makeBaseFunctor ''Formula
 
 type role FormulaF nominal representational representational
+
+deriving instance Generic (FormulaF x e t)
+
+deriving instance Generic1 (FormulaF x e)
 
 deriving instance
   ( Eq (XTop x)
@@ -224,89 +275,14 @@ deriveBifunctor ''FormulaF
 deriveBifoldable ''FormulaF
 deriveBitraversable ''FormulaF
 
-{- |
-Propositional formula with proposition variable @a@
-
-See also: 'FormulaF' for use with recursion schemes
--}
-newtype Formula x a = Formula {unFormula :: FormulaF x a (Formula x a)}
-  deriving (Generic)
-
-type role Formula nominal representational
-
-deriving instance
-  ( Eq (XTop x)
-  , Eq (XBot x)
-  , Eq (XNot x)
-  , Eq (XImpl x)
-  , Eq a
-  ) =>
-  Eq (Formula x a)
-
-deriving instance
-  ( Ord (XTop x)
-  , Ord (XBot x)
-  , Ord (XNot x)
-  , Ord (XImpl x)
-  , Ord a
-  ) =>
-  Ord (Formula x a)
-
-deriving anyclass instance
-  ( Hashable (XTop x)
-  , Hashable (XBot x)
-  , Hashable (XNot x)
-  , Hashable (XImpl x)
-  , Hashable a
-  ) =>
-  Hashable (Formula x a)
-
-deriving anyclass instance
-  ( NFData (XTop x)
-  , NFData (XBot x)
-  , NFData (XNot x)
-  , NFData (XImpl x)
-  , NFData a
-  ) =>
-  NFData (Formula x a)
-
 instance (Show a) => Show (Formula x a) where
-  showsPrec d = showsPrec1 d . unFormula
+  showsPrec d = showsPrec1 d . project
 
 _Formula :: Iso (FormulaF x a (Formula x a)) (FormulaF x b (Formula x b)) (Formula x a) (Formula x b)
-_Formula = coerced
+_Formula = iso embed project
 
 _Formula' :: Iso' (FormulaF x a (Formula x a)) (Formula x a)
-_Formula' = coerced
-
-type instance Base (Formula x a) = FormulaF x a
-
-instance Recursive (Formula x a) where
-  project = unFormula
-
-instance Corecursive (Formula x a) where
-  embed = Formula
-
-instance Functor (Formula x) where
-  fmap f (Formula x) = Formula (bimap f (fmap f) x)
-
-instance Foldable (Formula x) where
-  foldMap = foldMapDefault
-
-instance Traversable (Formula x) where
-  traverse f (Formula x) = Formula <$> bitraverse f (traverse f) x
-
-pattern Top :: XTop x -> Formula x a
-pattern Top x = Formula (TopF x)
-
-pattern Bot :: XBot x -> Formula x a
-pattern Bot x = Formula (BotF x)
-
-pattern Atom :: a -> Formula x a
-pattern Atom a = Formula (AtomF a)
-
-pattern Not :: XNot x -> Formula x a -> Formula x a
-pattern Not x args = Formula (NotF x args)
+_Formula' = iso embed project
 
 (⊥) :: (XBot x ~ NoExtField) => Formula x a
 (⊥) = Bot NoExtField
@@ -317,10 +293,7 @@ pattern Not x args = Formula (NotF x args)
 infixr 0 :==>, ==>
 
 pattern (:==>) :: (XImpl x ~ NoExtField) => () => Formula x a -> Formula x a -> Formula x a
-pattern l :==> r = Formula (l ::==> r)
-
-pattern Impl :: XImpl x -> Formula x a -> Formula x a -> Formula x a
-pattern Impl x l r = Formula (ImplF x l r)
+pattern l :==> r = Impl NoExtField l r
 
 neg :: (XNot x ~ NoExtField) => Formula x a -> Formula x a
 neg = Not NoExtField
@@ -328,25 +301,15 @@ neg = Not NoExtField
 (==>) :: (XImpl x ~ NoExtField) => Formula x a -> Formula x a -> Formula x a
 l ==> r = l :==> r
 
-infixl 3 :/\, /\
-
-pattern (:/\) :: Formula x a -> Formula x a -> Formula x a
-pattern l :/\ r = Formula (l :/\$ r)
+infixl 3 /\
 
 (/\) :: Formula x a -> Formula x a -> Formula x a
 l /\ r = l :/\ r
 
-infixl 2 :\/, \/
-
-pattern (:\/) :: Formula x a -> Formula x a -> Formula x a
-pattern l :\/ r = Formula (l :\/$ r)
+infixl 2 \/
 
 (\/) :: Formula x a -> Formula x a -> Formula x a
 l \/ r = l :\/ r
-
-{-# COMPLETE Bot, Top, Atom, Not, (:==>), (:/\), (:\/) :: Formula #-}
-
-{-# COMPLETE Bot, Top, Atom, Not, Impl, (:/\), (:\/) :: Formula #-}
 
 _And, (./\) :: Prism' (Formula x a) (Formula x a, Formula x a)
 (./\) = prism' (uncurry (/\)) \case
