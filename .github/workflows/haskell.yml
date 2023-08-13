@@ -97,4 +97,4 @@ jobs:
     - name: Benchmark
       continue-on-error: true
       run: |
-        cabal bench
+        cabal bench -j1
