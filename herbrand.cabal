@@ -81,7 +81,7 @@ library herbrand-bench
   autogen-modules:
       Paths_herbrand
   hs-source-dirs:
-      bench/lib
+      libs/bench
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
   build-depends:
       adjunctions
@@ -119,15 +119,62 @@ library herbrand-bench
     , vector
   default-language: Haskell2010
 
-executable herbrand-exe
-  main-is: Main.hs
+library herbrand-test-utils
+  exposed-modules:
+      Herbrand.Test
+  other-modules:
+      Paths_herbrand
+  autogen-modules:
+      Paths_herbrand
+  hs-source-dirs:
+      libs/test
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
+  build-depends:
+      adjunctions
+    , aeson
+    , algebraic-graphs
+    , attoparsec
+    , base >=4.7 && <5
+    , bifunctors
+    , bytestring
+    , containers
+    , data-fix
+    , deepseq
+    , directory
+    , distributive
+    , dlist
+    , falsify
+    , filepath
+    , filtrable
+    , fmlist
+    , foldable1-classes-compat
+    , foldl
+    , generic-lens
+    , hashable
+    , herbrand
+    , lens
+    , linear-base
+    , parallel
+    , rec-def
+    , recursion-schemes
+    , semigroupoids
+    , strict
+    , tasty
+    , text
+    , transformers
+    , unordered-containers
+    , vector
+  default-language: Haskell2010
+
+executable gen-sat
+  main-is: gen-sat/Main.hs
   other-modules:
       Paths_herbrand
   autogen-modules:
       Paths_herbrand
   hs-source-dirs:
       app
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -O2
   build-depends:
       adjunctions
     , aeson
@@ -148,8 +195,10 @@ executable herbrand-exe
     , generic-lens
     , hashable
     , herbrand
+    , herbrand-test-utils
     , lens
     , linear-base
+    , optparse-applicative
     , parallel
     , rec-def
     , recursion-schemes
@@ -174,7 +223,7 @@ test-suite herbrand-test
       Paths_herbrand
   hs-source-dirs:
       test
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N -O2
   build-tool-depends:
       tasty-discover:tasty-discover
   build-depends:
@@ -198,6 +247,7 @@ test-suite herbrand-test
     , generic-lens
     , hashable
     , herbrand
+    , herbrand-test-utils
     , lens
     , linear-base
     , parallel
@@ -223,7 +273,7 @@ benchmark herbrand-cnf-bench
       Paths_herbrand
   hs-source-dirs:
       bench
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints "-with-rtsopts=-A32m -T" -fproc-alignment=64
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints "-with-rtsopts=-A32m -T" -fproc-alignment=64 -O2
   build-tool-depends:
       tasty-discover:tasty-discover
   build-depends:
@@ -273,7 +323,7 @@ benchmark herbrand-sat-bench
       Paths_herbrand
   hs-source-dirs:
       bench
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints "-with-rtsopts=-A32m -T" -fproc-alignment=64
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints "-with-rtsopts=-A32m -T" -fproc-alignment=64 -O2
   build-tool-depends:
       tasty-discover:tasty-discover
   build-depends:

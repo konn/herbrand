@@ -66,23 +66,32 @@ library:
 
 internal-libraries:
   herbrand-bench:
-    source-dirs: bench/lib
+    source-dirs: libs/bench
     dependencies:
     - directory
     - filepath
     - tasty
     - tasty-bench
 
-executables:
-  herbrand-exe:
-    main:                Main.hs
-    source-dirs:         app
-    ghc-options:
-    - -threaded
-    - -rtsopts
-    - -with-rtsopts=-N
+  herbrand-test-utils:
+    source-dirs: libs/test
     dependencies:
     - herbrand
+    - directory
+    - filepath
+    - tasty
+    - falsify
+
+executables:
+  gen-sat:
+    main:                gen-sat/Main.hs
+    source-dirs:         app
+    ghc-options:
+    - -O2
+    dependencies:
+    - herbrand
+    - herbrand-test-utils
+    - optparse-applicative
 
 tests:
   herbrand-test:
@@ -92,10 +101,12 @@ tests:
     - -threaded
     - -rtsopts
     - -with-rtsopts=-N
+    - -O2
     build-tools:
     - tasty-discover
     dependencies:
     - herbrand
+    - herbrand-test-utils
     - tasty
     - falsify
     - tasty-hunit
@@ -108,6 +119,7 @@ benchmarks:
     ghc-options:
     - '"-with-rtsopts=-A32m -T"'
     - -fproc-alignment=64
+    - -O2
     build-tools:
     - tasty-discover
     dependencies:
@@ -124,6 +136,7 @@ benchmarks:
     ghc-options:
     - '"-with-rtsopts=-A32m -T"'
     - -fproc-alignment=64
+    - -O2
     build-tools:
     - tasty-discover
     dependencies:

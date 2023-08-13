@@ -15,6 +15,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
@@ -35,6 +36,8 @@ module Logic.Propositional.Classical.SAT.Format.DIMACS (
 
   -- * Parsers
   parseDIMACS,
+  parseCNF,
+  parseSAT,
   parseDIMACSLazy,
 
   -- ** Parsers
@@ -243,6 +246,22 @@ formatComment :: LBS8.ByteString -> BB.Builder
 formatComment =
   LBS8.lines
     >>> foldMap ((<> BB.char8 '\n') . ("c " <>) . BB.lazyByteString)
+
+parseCNF :: BS8.ByteString -> Either String (LBS8.ByteString, CNFSetting, CNF Word)
+parseCNF =
+  Atto.parseOnly $ Atto.skipSpace *> do
+    Preamble {..} <- preambleP
+    case problem of
+      SATProblem {} -> fail "Expected CNF format, but got SAT"
+      CNFProblem cnf -> (comment,cnf,) <$> cnfBodyP cnf
+
+parseSAT :: BS8.ByteString -> Either String (LBS8.ByteString, SATSetting, Formula Full Word)
+parseSAT =
+  Atto.parseOnly $ Atto.skipSpace *> do
+    Preamble {..} <- preambleP
+    case problem of
+      SATProblem cnf -> (comment,cnf,) <$> formulaP cnf
+      CNFProblem {} -> fail "Expected SAT format, but got CNF"
 
 parseDIMACS :: BS8.ByteString -> Either String DIMACS
 parseDIMACS = Atto.parseOnly (Atto.skipSpace *> dimacsP)
