@@ -84,7 +84,8 @@ library herbrand-bench
       libs/bench
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
   build-depends:
-      adjunctions
+      Glob
+    , adjunctions
     , aeson
     , algebraic-graphs
     , attoparsec
@@ -104,11 +105,13 @@ library herbrand-bench
     , foldl
     , generic-lens
     , hashable
+    , herbrand
     , lens
     , linear-base
     , parallel
     , rec-def
     , recursion-schemes
+    , safe-exceptions
     , semigroupoids
     , strict
     , tasty
@@ -291,9 +294,11 @@ benchmark herbrand-cnf-bench
     , containers
     , data-fix
     , deepseq
+    , directory
     , distributive
     , dlist
     , falsify
+    , filepath
     , filtrable
     , fmlist
     , foldable1-classes-compat
@@ -341,9 +346,11 @@ benchmark herbrand-sat-bench
     , containers
     , data-fix
     , deepseq
+    , directory
     , distributive
     , dlist
     , falsify
+    , filepath
     , filtrable
     , fmlist
     , foldable1-classes-compat

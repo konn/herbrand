@@ -1,14 +1,26 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 module Herbrand.Bench (
   defaultMain,
   benchResultDir,
+  withSats,
+  findSatsIn,
   module Test.Tasty.Bench,
 ) where
 
+import Control.Exception.Safe (throwString)
+import Control.Lens hiding ((<.>))
+import qualified Data.ByteString.Lazy as LBS
+import Data.List (sortOn)
 import Data.Maybe (fromMaybe)
+import Logic.Propositional.Classical.SAT.Format.DIMACS
+import Logic.Propositional.Syntax.General
 import System.Directory
 import System.Environment
 import System.Exit
 import System.FilePath
+import System.FilePath.Glob
+import Test.Tasty (withResource)
 import Test.Tasty.Bench hiding (defaultMain)
 import Test.Tasty.Ingredients
 import Test.Tasty.Options
@@ -16,6 +28,22 @@ import Test.Tasty.Runners
 
 benchResultDir :: FilePath
 benchResultDir = "bench-results"
+
+findSatsIn :: FilePath -> IO [FilePath]
+findSatsIn dir =
+  sortOn takeFileName <$> globDir1 "**.sat" dir
+
+withSats :: String -> [FilePath] -> (IO (Formula Full Word) -> [Benchmark]) -> Benchmark
+withSats name chs act =
+  bgroup
+    name
+    [ withResource
+      (either throwString (pure . view _3) . parseSATLazy =<< LBS.readFile inp)
+      mempty
+      $ bgroup (takeFileName inp)
+      . act
+    | inp <- chs
+    ]
 
 defaultMain :: [Benchmark] -> IO ()
 defaultMain b = do

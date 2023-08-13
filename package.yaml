@@ -68,8 +68,11 @@ internal-libraries:
   herbrand-bench:
     source-dirs: libs/bench
     dependencies:
+    - herbrand
     - directory
     - filepath
+    - Glob
+    - safe-exceptions
     - tasty
     - tasty-bench
 
@@ -130,6 +133,8 @@ benchmarks:
     dependencies:
     - herbrand
     - herbrand-bench
+    - directory
+    - filepath
     - tasty
     - falsify
     - tasty-bench
@@ -147,8 +152,9 @@ benchmarks:
     dependencies:
     - herbrand
     - herbrand-bench
+    - directory
+    - filepath
     - tasty
     - falsify
     - tasty-bench
     - tasty-bench-fit
-
