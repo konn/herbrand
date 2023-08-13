@@ -42,6 +42,7 @@ dependencies:
 - parallel
 - recursion-schemes
 - rec-def
+- semigroupoids
 - strict
 - transformers
 - text

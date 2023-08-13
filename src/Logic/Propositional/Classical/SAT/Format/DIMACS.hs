@@ -1,10 +1,18 @@
 {-# LANGUAGE ApplicativeDo #-}
+{-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeOperators #-}
 
 module Logic.Propositional.Classical.SAT.Format.DIMACS (
   -- * Basic Types
@@ -13,6 +21,9 @@ module Logic.Propositional.Classical.SAT.Format.DIMACS (
   Problem (..),
   CNFSetting (..),
   SATSetting (..),
+
+  -- * Formatters
+  formatDIMACS,
 
   -- * Parsers
   parseDIMACS,
@@ -36,14 +47,22 @@ module Logic.Propositional.Classical.SAT.Format.DIMACS (
 ) where
 
 import Control.Applicative
+import Control.Arrow ((>>>))
 import Control.DeepSeq (NFData)
+import Control.Lens (Prism', (^?))
 import Control.Monad (replicateM, when)
 import Data.Attoparsec.ByteString.Char8 (Parser)
 import qualified Data.Attoparsec.ByteString.Char8 as Atto
 import qualified Data.Attoparsec.ByteString.Lazy as AttoL
 import qualified Data.Attoparsec.Combinator as Atto
+import qualified Data.ByteString.Builder as BB
 import qualified Data.ByteString.Char8 as BS8
 import qualified Data.ByteString.Lazy.Char8 as LBS8
+import Data.FMList (FMList)
+import qualified Data.FMList as FML
+import Data.Foldable1 (foldl1')
+import Data.Functor.Foldable
+import Data.Functor.Foldable.TH
 import Data.Hashable (Hashable)
 import qualified Data.List.NonEmpty as NE
 import GHC.Generics
@@ -86,6 +105,68 @@ data DIMACS
   deriving (Show, Eq, Ord, Generic)
   deriving anyclass (NFData, Hashable)
 
+data FactoredFormula
+  = Disj (FMList FactoredFormula)
+  | Conj (FMList FactoredFormula)
+  | Neg FactoredFormula
+  | Plain (Literal Word)
+  deriving (Generic)
+
+makeBaseFunctor ''FactoredFormula
+
+formatDIMACS :: DIMACS -> BB.Builder
+formatDIMACS (DIMACS_CNF cmt CNFSetting {..} (CNF cls)) =
+  formatComment cmt
+    <> ("p " <> BB.wordDec variables <> " " <> BB.wordDec clauses <> "\n")
+    <> foldMap
+      ( \(CNFClause lits) ->
+          foldMap
+            ( \case
+                Positive w -> BB.wordDec w <> " "
+                Negative w -> "-" <> BB.wordDec w <> " "
+            )
+            lits
+            <> "0\n"
+      )
+      cls
+formatDIMACS (DIMACS_SAT cmt SATSetting {..} fml) =
+  formatComment cmt
+    <> ("p " <> BB.wordDec variables <> "\n")
+    <> refold formatFactored factorFormula fml
+    <> "\n"
+
+formatFactored :: FactoredFormulaF BB.Builder -> BB.Builder
+formatFactored = \case
+  PlainF (Positive w) -> BB.wordDec w
+  PlainF (Negative w) -> BB.char8 '-' <> BB.wordDec w
+  NegF i -> "-(" <> i <> ")"
+  ConjF ns -> "*(" <> foldMap (<> " ") ns <> ")"
+  DisjF ns -> "+(" <> foldMap (<> " ") ns <> ")"
+
+factorFormula :: (XNot n ~ NoExtField) => Formula n Word -> FactoredFormulaF (Formula n Word)
+factorFormula = \case
+  Atom l -> PlainF (Positive l)
+  Not _ (Atom l) -> PlainF (Negative l)
+  Not _ l -> NegF l
+  Bot {} -> DisjF mempty
+  Top {} -> ConjF mempty
+  Impl _ l r -> DisjF $ Not NoExtField l `FML.cons` factor (.:\/) r
+  l :/\ r -> ConjF $ factor (.:/\) l <> factor (.:/\) r
+  l :\/ r -> DisjF $ factor (.:\/) l <> factor (.:\/) r
+
+factor ::
+  (forall x. Prism' (FormulaF n e x) (x, x)) ->
+  Formula n e ->
+  FMList (Formula n e)
+factor p = para $ \e -> case e ^? p of
+  Nothing -> FML.singleton $ embed $ fst <$> e
+  Just ((_, l), (_, r)) -> l <> r
+
+formatComment :: BS8.ByteString -> BB.Builder
+formatComment =
+  BS8.lines
+    >>> foldMap ((<> BB.char8 '\n') . ("c " <>) . BB.byteString)
+
 parseDIMACS :: BS8.ByteString -> Either String DIMACS
 parseDIMACS = Atto.parseOnly (Atto.skipSpace *> dimacsP)
 
@@ -113,10 +194,10 @@ formulaP SATSetting {..} = go
         <|> parens go
 
 ands :: [Formula Full Word] -> Formula Full Word
-ands = maybe (Top NoExtField) (foldr1 (:/\)) . NE.nonEmpty
+ands = maybe (Top NoExtField) (foldl1' (:/\)) . NE.nonEmpty
 
 ors :: [Formula Full Word] -> Formula Full Word
-ors = maybe (Bot NoExtField) (foldr1 (:\/)) . NE.nonEmpty
+ors = maybe (Bot NoExtField) (foldl1' (:\/)) . NE.nonEmpty
 
 preambleP :: Parser Preamble
 preambleP =
