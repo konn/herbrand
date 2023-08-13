@@ -1,22 +1,26 @@
 {-# LANGUAGE ApplicativeDo #-}
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 
 module Logic.Propositional.Classical.SAT.Format.DIMACS (
   -- * Basic Types
   DIMACS (..),
+  ToDIMACS (..),
   Preamble (..),
   Problem (..),
   CNFSetting (..),
@@ -49,8 +53,10 @@ module Logic.Propositional.Classical.SAT.Format.DIMACS (
 import Control.Applicative
 import Control.Arrow ((>>>))
 import Control.DeepSeq (NFData)
+import qualified Control.Foldl as L
 import Control.Lens (Prism', (^?))
 import Control.Monad (replicateM, when)
+import Control.Monad.Trans.State.Strict (evalState, get, put)
 import Data.Attoparsec.ByteString.Char8 (Parser)
 import qualified Data.Attoparsec.ByteString.Char8 as Atto
 import qualified Data.Attoparsec.ByteString.Lazy as AttoL
@@ -114,6 +120,41 @@ data FactoredFormula
 
 makeBaseFunctor ''FactoredFormula
 
+class ToDIMACS a where
+  toDIMACS :: a -> DIMACS
+
+instance ToDIMACS DIMACS where
+  toDIMACS = id
+
+instance ToDIMACS (Formula Full Word) where
+  toDIMACS f =
+    let mminMax = uncurry (liftA2 (,)) $ L.fold ((,) <$> L.minimum <*> L.maximum) f
+     in case mminMax of
+          Nothing -> DIMACS_SAT "Herbrand: no variables" SATSetting {variables = 0} f
+          Just (!mn, !mx) ->
+            let (variables, shift)
+                  | mn > 0 = (mx, mn)
+                  | otherwise =
+                      ( fromIntegral $ abs @Int (fromIntegral mn - 1)
+                      , shift + mx
+                      )
+             in DIMACS_SAT "Herbrand" SATSetting {..} $ (+ shift) <$> f
+
+instance ToDIMACS (CNF Word) where
+  toDIMACS f =
+    let mminMax = uncurry (liftA2 (,)) $ L.fold ((,) <$> L.minimum <*> L.maximum) f
+        clauses = L.fold L.genericLength $ cnfClauses f
+     in case mminMax of
+          Nothing -> DIMACS_CNF "Herbrand: no variables" CNFSetting {variables = 0, ..} f
+          Just (!mn, !mx) ->
+            let (variables, shift)
+                  | mn > 0 = (mx, mn)
+                  | otherwise =
+                      ( fromIntegral $ abs @Int (fromIntegral mn - 1)
+                      , shift + mx
+                      )
+             in DIMACS_CNF "Herbrand" CNFSetting {..} $ (+ shift) <$> f
+
 formatDIMACS :: DIMACS -> BB.Builder
 formatDIMACS (DIMACS_CNF cmt CNFSetting {..} (CNF cls)) =
   formatComment cmt
@@ -140,8 +181,14 @@ formatFactored = \case
   PlainF (Positive w) -> BB.wordDec w
   PlainF (Negative w) -> BB.char8 '-' <> BB.wordDec w
   NegF i -> "-(" <> i <> ")"
-  ConjF ns -> "*(" <> foldMap (<> " ") ns <> ")"
-  DisjF ns -> "+(" <> foldMap (<> " ") ns <> ")"
+  ConjF ns -> "*(" <> seps ns <> ")"
+  DisjF ns -> "+(" <> seps ns <> ")"
+
+seps :: FMList BB.Builder -> BB.Builder
+seps =
+  flip evalState True . FML.foldMapA \w -> do
+    !isHead <- get
+    if isHead then w <$ put False else pure $ " " <> w
 
 factorFormula :: (XNot n ~ NoExtField) => Formula n Word -> FactoredFormulaF (Formula n Word)
 factorFormula = \case
