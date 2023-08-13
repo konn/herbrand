@@ -265,17 +265,17 @@ formulaP SATSetting {..} = go
   where
     go =
       (Atom <$> varP variables)
-        <|> (Not NoExtField <$ symbol "-" <*> go)
+        <|> (neg <$ symbol "-" <*> go)
         <|> (ands <$ symbol "*" <*> parens (many go))
         <|> (ors <$ symbol "+" <*> parens (many go))
-        <|> (symbol "imp" *> parens (Impl NoExtField <$> go <*> go))
+        <|> (symbol "imp" *> parens ((==>) <$> go <*> go))
         <|> parens go
 
 ands :: [Formula Full Word] -> Formula Full Word
-ands = maybe (Top NoExtField) (foldl1' (:/\)) . NE.nonEmpty
+ands = maybe (⊤) (foldl1' (:/\)) . NE.nonEmpty
 
 ors :: [Formula Full Word] -> Formula Full Word
-ors = maybe (Bot NoExtField) (foldl1' (:\/)) . NE.nonEmpty
+ors = maybe (⊥) (foldl1' (:\/)) . NE.nonEmpty
 
 preambleP :: Parser Preamble
 preambleP =

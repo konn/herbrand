@@ -189,7 +189,7 @@ toFormula =
               (⊥)
               ( foldl1 (\/) . fmap \case
                   Positive a -> Atom a
-                  Negative a -> Not NoExtField (Atom a)
+                  Negative a -> neg $ Atom a
               )
               . NE.nonEmpty
               . clauseLits

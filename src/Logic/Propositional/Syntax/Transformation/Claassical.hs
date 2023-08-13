@@ -90,8 +90,7 @@ eliminateImpl = cata \case
   AtomF a -> Atom a
   TopF x -> Top x
   BotF x -> Bot x
-  NotF _ r -> Not NoExtField r
-  ImplF _ l r ->
-    Not NoExtField l :\/ r
+  NotF _ r -> neg r
+  ImplF _ l r -> neg l :\/ r
   l :/\$ r -> l :/\ r
   l :\/$ r -> l :\/ r

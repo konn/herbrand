@@ -47,8 +47,8 @@ fullFormula ::
 fullFormula vars = go
   where
     baseCases =
-      [ (1, pure $ Bot NoExtField)
-      , (1, pure $ Top NoExtField)
+      [ (1, pure (⊥))
+      , (1, pure (⊤))
       , (vars, Atom <$> int (R.between (0, fromIntegral vars - 1)))
       ]
     go !sz
@@ -57,10 +57,10 @@ fullFormula vars = go
           frequency
             $ map
               (1,)
-              [ Not NoExtField <$> go (sz - 1)
-              , Impl NoExtField <$> go ((sz - 1) `quot` 2) <*> go ((sz - 1) `quot` 2)
-              , (:/\) <$> go ((sz - 1) `quot` 2) <*> go ((sz - 1) `quot` 2)
-              , (:\/) <$> go ((sz - 1) `quot` 2) <*> go ((sz - 1) `quot` 2)
+              [ neg <$> go (sz - 1)
+              , (==>) <$> go ((sz - 1) `quot` 2) <*> go ((sz - 1) `quot` 2)
+              , (/\) <$> go ((sz - 1) `quot` 2) <*> go ((sz - 1) `quot` 2)
+              , (\/) <$> go ((sz - 1) `quot` 2) <*> go ((sz - 1) `quot` 2)
               ]
 
 genFormula :: Arity -> Size -> Property (Formula Full Int, Consistency Int)
@@ -112,7 +112,7 @@ testProverSemantics vs sz prove =
     , testProperty "gives a correct counterexample" $ do
         (phi, consis) <- genFormula vs sz
         let phi' = case consis of
-              Tautology -> Not NoExtField phi
+              Tautology -> neg phi
               _ -> phi
         info $ "Refutable formula: " <> show phi'
         case prove phi' of
@@ -167,7 +167,7 @@ testSolverSemanticsWith projVar vs sz solver =
               Inconsistent -> "Unsatisfiable"
           ]
         let phi' = case consis of
-              Inconsistent -> Not NoExtField phi
+              Inconsistent -> neg phi
               _ -> phi
         info $ "Satsifiable Formula: " <> show phi'
         case solver phi' of

@@ -440,8 +440,8 @@ negLit = \case
 full :: Formula e v -> Formula Full v
 full = cata \case
   AtomF a -> Atom a
-  BotF _ -> Bot NoExtField
-  TopF _ -> Top NoExtField
+  BotF _ -> (⊥)
+  TopF _ -> (⊤)
   NotF _ l -> Not NoExtField l
   l :/\$ r -> l :/\ r
   l :\/$ r -> l :\/ r
