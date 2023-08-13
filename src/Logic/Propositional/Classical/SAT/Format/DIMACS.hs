@@ -158,7 +158,7 @@ instance ToDIMACS (CNF Word) where
 formatDIMACS :: DIMACS -> BB.Builder
 formatDIMACS (DIMACS_CNF cmt CNFSetting {..} (CNF cls)) =
   formatComment cmt
-    <> ("p " <> BB.wordDec variables <> " " <> BB.wordDec clauses <> "\n")
+    <> ("p cnf " <> BB.wordDec variables <> " " <> BB.wordDec clauses <> "\n")
     <> foldMap
       ( \(CNFClause lits) ->
           foldMap
@@ -172,7 +172,7 @@ formatDIMACS (DIMACS_CNF cmt CNFSetting {..} (CNF cls)) =
       cls
 formatDIMACS (DIMACS_SAT cmt SATSetting {..} fml) =
   formatComment cmt
-    <> ("p " <> BB.wordDec variables <> "\n")
+    <> ("p sat " <> BB.wordDec variables <> "\n")
     <> refold formatFactored factorFormula fml
     <> "\n"
 
