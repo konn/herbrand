@@ -280,7 +280,7 @@ benchmark herbrand-cnf-bench
       Paths_herbrand
   hs-source-dirs:
       bench
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints "-with-rtsopts=-A32m -T" -fproc-alignment=64 -O2
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints "-with-rtsopts=-A32m -T --nonmoving-gc" -fproc-alignment=64 -O2
   build-tool-depends:
       tasty-discover:tasty-discover
   build-depends:
@@ -332,7 +332,7 @@ benchmark herbrand-sat-bench
       Paths_herbrand
   hs-source-dirs:
       bench
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints "-with-rtsopts=-A32m -T" -fproc-alignment=64 -O2
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints "-with-rtsopts=-A32m -T --nonmoving-gc" -fproc-alignment=64 -O2
   build-tool-depends:
       tasty-discover:tasty-discover
   build-depends:

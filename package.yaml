@@ -125,7 +125,7 @@ benchmarks:
     main:                cnf.hs
     source-dirs:         bench
     ghc-options:
-    - '"-with-rtsopts=-A32m -T"'
+    - '"-with-rtsopts=-A32m -T --nonmoving-gc"'
     - -fproc-alignment=64
     - -O2
     build-tools:
@@ -144,7 +144,7 @@ benchmarks:
     main:                sat.hs
     source-dirs:         bench
     ghc-options:
-    - '"-with-rtsopts=-A32m -T"'
+    - '"-with-rtsopts=-A32m -T --nonmoving-gc"'
     - -fproc-alignment=64
     - -O2
     build-tools:
