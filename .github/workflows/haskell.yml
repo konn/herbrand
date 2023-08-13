@@ -94,9 +94,7 @@ jobs:
       with:
         path: dist-newstyle
         key: ${{steps.cache-keys.outputs.dist}}
-    - name: Test
-      run: |
-        cabal test --test-show-details always
+
     - name: Collect binaries
       continue-on-error: true
       run: ./ci/collect-bins.sh artifacts
@@ -112,6 +110,56 @@ jobs:
         echo "benchs=$(jq -cMnR '[inputs]' <artifacts/benchs.list)" >>"${GITHUB_OUTPUT}"
         echo "tests=$(jq -cMnR '[inputs]' <artifacts/tests.list)" >>"${GITHUB_OUTPUT}"
 
+  test:
+    name: Test
+    needs: [build]
+    env:
+      ghc: 9.4.5
+      cabal: 3.10.1.0
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          ref: ${{github.event.pull_request.head.sha || github.sha}}
+      - name: Download artifacts
+        id: download
+        uses: actions/download-artifact@v3
+      - name: Decompress
+        run: tar xaf artifacts/artifacts.tar.zst
+      - name: Run Tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOTAL=0
+          SUCCESS=0
+          FAIL=1
+          while read -r TEST; do
+            TOTAL=$((TOTAL + 1))
+            echo "--------"
+            echo "Running: ${TEST}"
+            set +e
+            ./artifacts/tests/"${TEST}"
+            RESL=$?
+            set -e
+            if [ ${RESL} -eq 0 ]; then
+              SUCCESS=$((SUCCESS + 1))
+              echo "Result: Successed"
+            else
+              FAIL=$((FAIL + 1))
+              echo 'Result: FAILED!'
+            fi
+          done <./artifacts/tests.list
+
+          echo ""
+          echo "----"
+
+          if [ "${FAIL}" -eq 0]; then
+            echo "All ${TOTAL} tests passed."
+          else
+            echo "${FAIL} out of ${TOTAL} tests FAILED"'!'
+            exit 1
+          fi
+      
   bench:
     name: Benchrmark
     needs: [build]
