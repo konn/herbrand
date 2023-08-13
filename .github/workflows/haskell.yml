@@ -20,13 +20,13 @@ jobs:
       id: cache-keys
       with:
         script: |
-          const project_hash = glob.hashFiles('cabal.project', 'cabal.project.freeze')
+          const project_hash = await glob.hashFiles('cabal.project', 'cabal.project.freeze')
           core.setOutput('project', project_hash)
 
-          const package_hash = glob.hashFiles('**/package.yaml', '**/*.cabal')
+          const package_hash = await glob.hashFiles('**/package.yaml', '**/*.cabal')
           core.setOutput('package', package_hash)
 
-          const source_hash = glob.hashFiles('**/*.hs', '**/*.lhs', '**/*.hsig', '**/*.hs-boot', '**/*.c', '**/*.h', '**/*.chs', '**/*.hsc')
+          const source_hash = await glob.hashFiles('**/*.hs', '**/*.lhs', '**/*.hsig', '**/*.hs-boot', '**/*.c', '**/*.h', '**/*.chs', '**/*.hsc')
           core.setOutput('source', source_hash)
 
           const store_prefix = "store-${{runner.os}}-${{env.ghc}}"
