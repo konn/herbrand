@@ -20,6 +20,15 @@ jobs:
       id: cache-keys
       with:
         script: |
+          function build_keys(comps) {
+            const fallbacks = comps.reduce(
+              (accum, cur) => 
+                  [accum[0].concat([cur])].concat(accum),
+              [[]]
+            ).slice(1,-1).map(e => e.concat("").join('-'))
+
+            return {key: comps.join("\n"), restore: fallbacks.join("\n")}
+          }
           const project_hash = await glob.hashFiles('cabal.project', 'cabal.project.freeze')
           core.setOutput('project', project_hash)
 
@@ -31,21 +40,18 @@ jobs:
 
           const store_prefix = "store-${{runner.os}}-${{env.ghc}}"
           core.setOutput("store-prefix", store_prefix)
-          const store_key = `${store_prefix}-${project_hash}-${package_hash}`
-          core.setOutput("store", store_key)
-          const store_restore = [`${store_prefix}-${project_hash}-`, `${store_prefix}-`].join("\n")
-          core.setOutput("store-restore", store_restore)
+          const store_keys = build_keys([store_prefix, project_hash, package_hash])
+          core.setOutput("store", store_keys.key)
+          core.setOutput("store-restore", store_keys.restore)
 
           const dist_prefix = "dist-${{runner.os}}-${{env.ghc}}"
           core.setOutput("dist-prefix", dist_prefix)
-          const dist_key = `${dist_prefix}-${project_hash}-${package_hash}-${source_hash}`
-          core.setOutput('dist', dist_key)
-          const dist_restore = [
-            `${dist_prefix}-${project_hash}-${package_hash}-`,
-            `${dist_prefix}-${project_hash}-`,
-            `${dist_prefix}-`
-          ].join("\n")
-          core.setOutput('dist-restore', dist_restore)
+          const dist_key_comps = [
+            dist_prefix, project_hash, package_hash, source_hash
+          ]
+          const dist_keys = build_keys(dist_key_comps)
+          core.setOutput('dist', dist_keys.key)
+          core.setOutput('dist-restore', dist_keys.restore)
 
     - name: Setup Haskell
       uses: haskell/actions/setup@v2
