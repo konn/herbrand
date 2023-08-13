@@ -11,6 +11,9 @@ jobs:
       cabal: 3.10.1.0
     name: Build and Test
     runs-on: ubuntu-latest
+    outputs:
+      benchmarks: ${{steps.list-bins.outputs.benchs}}
+      tests: ${{steps.list-bins.outputs.tests}}
     steps:
     - uses: actions/checkout@v3
       with:
@@ -98,3 +101,45 @@ jobs:
       continue-on-error: true
       run: |
         cabal bench -j1
+    - name: Collect binaries
+      continue-on-error: true
+      run: ./ci/collect-bins.sh artifacts
+    - name: Upload Aritracts
+      uses: actions/upload-artifact@v3
+      with:
+        path: artifacts.tar.zst
+        name: artifacts
+    - name: List Binaries
+      id: list-bins
+      shell: bash
+      run: |
+        echo "benchs=$(jq -cMnR '[inputs]' <artifacts/benchs.list)" >>"${GITHUB_OUTPUT}"
+        echo "tests=$(jq -cMnR '[inputs]' <artifacts/tests.list)" >>"${GITHUB_OUTPUT}"
+
+  bench:
+    name: Benchrmark
+    needs: [build]
+    env:
+      ghc: 9.4.5
+      cabal: 3.10.1.0
+    strategy:
+      matrix:
+        bench: ${{needs.build.outputs.benchmarks}}
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        ref: ${{github.event.pull_request.head.sha || github.sha}}
+    - name: Download artifacts
+      id: download
+      uses: actions/download-artifact@v3
+    - name: Decompress
+      run: tar xaf artifacts/artifacts.tar.zst
+    - name: Run Benchmark (${{matrix.bench}})
+      run: |
+        "./artifacts/benchs/${{matrix.bench}}"
+    - name: Upload CSV
+      uses: actions/upload-artifact@v3
+      with:
+        path: bench-results/${{matrix.bench}}.csv
+        name: ${{matrix.bench}}.csv
