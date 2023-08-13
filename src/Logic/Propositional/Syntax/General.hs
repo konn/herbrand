@@ -507,5 +507,5 @@ compressVariables =
   fmap (VarStatistics . subtract 1 . S.fst) . flip runState (1 :!: mempty) . traverse \v ->
     gets (HM.lookup v . S.snd) >>= \case
       Nothing -> state $ \(i :!: e) ->
-        (i, (i + 1) :!: e)
+        (i, (i + 1) :!: HM.insert v i e)
       Just i -> pure i
