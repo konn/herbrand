@@ -63,6 +63,15 @@ ghc-options:
 library:
   source-dirs: src
 
+internal-libraries:
+  herbrand-bench:
+    source-dirs: bench/lib
+    dependencies:
+    - directory
+    - filepath
+    - tasty
+    - tasty-bench
+
 executables:
   herbrand-exe:
     main:                Main.hs
@@ -96,13 +105,13 @@ benchmarks:
     main:                cnf.hs
     source-dirs:         bench
     ghc-options:
-    - -threaded
-    - -rtsopts
-    - -with-rtsopts=-N
+    - '"-with-rtsopts=-A32m -T"'
+    - -fproc-alignment=64
     build-tools:
     - tasty-discover
     dependencies:
     - herbrand
+    - herbrand-bench
     - tasty
     - falsify
     - tasty-bench
@@ -112,13 +121,13 @@ benchmarks:
     main:                sat.hs
     source-dirs:         bench
     ghc-options:
-    - -threaded
-    - -rtsopts
-    - -with-rtsopts=-N
+    - '"-with-rtsopts=-A32m -T"'
+    - -fproc-alignment=64
     build-tools:
     - tasty-discover
     dependencies:
     - herbrand
+    - herbrand-bench
     - tasty
     - falsify
     - tasty-bench

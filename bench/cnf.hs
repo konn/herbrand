@@ -1,4 +1,8 @@
 module Main (main) where
 
+import Herbrand.Bench
+
 main :: IO ()
-main = putStrLn "Not implemented yet"
+main =
+  defaultMain
+    []

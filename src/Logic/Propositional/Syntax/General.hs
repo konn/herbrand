@@ -5,6 +5,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE RoleAnnotations #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -74,17 +75,23 @@ module Logic.Propositional.Syntax.General (
   idempLit,
   toLit,
   size,
+  compressVariables,
+  VarStatistics (..),
 ) where
 
 import Control.DeepSeq (NFData)
 import Control.Lens
+import Control.Monad.Trans.State.Strict (gets, runState, state)
 import Data.Bifunctor.TH
 import Data.Bitraversable (Bitraversable (..))
 import Data.DList qualified as DL
 import Data.Functor.Classes
 import Data.Functor.Foldable
 import Data.Functor.Foldable qualified as R
+import Data.HashMap.Strict qualified as HM
 import Data.Hashable (Hashable)
+import Data.Strict.Tuple (Pair (..))
+import Data.Strict.Tuple qualified as S
 import Data.String (IsString (..))
 import Data.Traversable (foldMapDefault)
 import GHC.Generics (Generic, Generic1)
@@ -130,6 +137,8 @@ data FormulaF x a fml
   | fml ::/\ fml
   | fml ::\/ fml
   deriving (Generic, Generic1, Functor, Foldable, Traversable)
+
+type role FormulaF nominal representational representational
 
 deriving instance
   ( Eq (XTop x)
@@ -220,6 +229,8 @@ See also: 'FormulaF' for use with recursion schemes
 -}
 newtype Formula x a = Formula {unFormula :: FormulaF x a (Formula x a)}
   deriving (Generic)
+
+type role Formula nominal representational
 
 deriving instance
   ( Eq (XTop x)
@@ -485,3 +496,16 @@ size = cata \case
   ImplF _ l r -> l + 1 + r
   l ::/\ r -> l + 1 + r
   l ::\/ r -> l + 1 + r
+
+newtype VarStatistics = VarStatistics {maxVar :: Word}
+  deriving (Show, Eq, Ord, Generic)
+  deriving anyclass (NFData, Hashable)
+
+-- | Compresses variable into 1-origin natural numbers
+compressVariables :: (Traversable t, Hashable v) => t v -> (t Word, VarStatistics)
+compressVariables =
+  fmap (VarStatistics . subtract 1 . S.fst) . flip runState (1 :!: mempty) . traverse \v ->
+    gets (HM.lookup v . S.snd) >>= \case
+      Nothing -> state $ \(i :!: e) ->
+        (i, (i + 1) :!: e)
+      Just i -> pure i

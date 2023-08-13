@@ -7,7 +7,6 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
@@ -77,7 +76,7 @@ import Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
 
 data Preamble = Preamble
   { comment :: {-# UNPACK #-} !BS8.ByteString
-  , problem :: {-# UNPACK #-} !Problem
+  , problem :: !Problem
   }
   deriving (Show, Eq, Ord, Generic)
   deriving anyclass (NFData, Hashable)
@@ -103,11 +102,11 @@ data DIMACS
   = DIMACS_CNF
       {-# UNPACK #-} !BS8.ByteString
       {-# UNPACK #-} !CNFSetting
-      {-# UNPACK #-} !(CNF Word)
+      !(CNF Word)
   | DIMACS_SAT
       {-# UNPACK #-} !BS8.ByteString
       {-# UNPACK #-} !SATSetting
-      {-# UNPACK #-} !(Formula Full Word)
+      !(Formula Full Word)
   deriving (Show, Eq, Ord, Generic)
   deriving anyclass (NFData, Hashable)
 
@@ -126,34 +125,16 @@ class ToDIMACS a where
 instance ToDIMACS DIMACS where
   toDIMACS = id
 
-instance ToDIMACS (Formula Full Word) where
-  toDIMACS f =
-    let mminMax = uncurry (liftA2 (,)) $ L.fold ((,) <$> L.minimum <*> L.maximum) f
-     in case mminMax of
-          Nothing -> DIMACS_SAT "Herbrand: no variables" SATSetting {variables = 0} f
-          Just (!mn, !mx) ->
-            let (variables, shift)
-                  | mn > 0 = (mx, mn)
-                  | otherwise =
-                      ( fromIntegral $ abs @Int (fromIntegral mn - 1)
-                      , shift + mx
-                      )
-             in DIMACS_SAT "Herbrand" SATSetting {..} $ (+ shift) <$> f
+instance (f ~ Full, Hashable w) => ToDIMACS (Formula f w) where
+  toDIMACS f0 =
+    let (f, VarStatistics variables) = compressVariables f0
+     in DIMACS_SAT "Herbrand" SATSetting {..} f
 
-instance ToDIMACS (CNF Word) where
-  toDIMACS f =
-    let mminMax = uncurry (liftA2 (,)) $ L.fold ((,) <$> L.minimum <*> L.maximum) f
+instance (Hashable v) => ToDIMACS (CNF v) where
+  toDIMACS f0 =
+    let (f, VarStatistics variables) = compressVariables f0
         clauses = L.fold L.genericLength $ cnfClauses f
-     in case mminMax of
-          Nothing -> DIMACS_CNF "Herbrand: no variables" CNFSetting {variables = 0, ..} f
-          Just (!mn, !mx) ->
-            let (variables, shift)
-                  | mn > 0 = (mx, mn)
-                  | otherwise =
-                      ( fromIntegral $ abs @Int (fromIntegral mn - 1)
-                      , shift + mx
-                      )
-             in DIMACS_CNF "Herbrand" CNFSetting {..} $ (+ shift) <$> f
+     in DIMACS_CNF "Herbrand" CNFSetting {..} f
 
 formatDIMACS :: DIMACS -> BB.Builder
 formatDIMACS (DIMACS_CNF cmt CNFSetting {..} (CNF cls)) =

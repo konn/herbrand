@@ -1,4 +1,4 @@
-cabal-version: 1.12
+cabal-version: 2.0
 
 -- This file has been generated from package.yaml by hpack version 0.35.2.
 --
@@ -36,6 +36,8 @@ library
       Logic.Theory.Decision.DPLL.Abstract
   other-modules:
       Paths_herbrand
+  autogen-modules:
+      Paths_herbrand
   hs-source-dirs:
       src
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
@@ -70,9 +72,56 @@ library
     , vector
   default-language: Haskell2010
 
+library herbrand-bench
+  exposed-modules:
+      Herbrand.Bench
+  other-modules:
+      Paths_herbrand
+  autogen-modules:
+      Paths_herbrand
+  hs-source-dirs:
+      bench/lib
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
+  build-depends:
+      adjunctions
+    , algebraic-graphs
+    , attoparsec
+    , base >=4.7 && <5
+    , bifunctors
+    , bytestring
+    , containers
+    , data-fix
+    , deepseq
+    , directory
+    , distributive
+    , dlist
+    , filepath
+    , filtrable
+    , fmlist
+    , foldable1-classes-compat
+    , foldl
+    , generic-lens
+    , hashable
+    , lens
+    , linear-base
+    , parallel
+    , rec-def
+    , recursion-schemes
+    , semigroupoids
+    , strict
+    , tasty
+    , tasty-bench
+    , text
+    , transformers
+    , unordered-containers
+    , vector
+  default-language: Haskell2010
+
 executable herbrand-exe
   main-is: Main.hs
   other-modules:
+      Paths_herbrand
+  autogen-modules:
       Paths_herbrand
   hs-source-dirs:
       app
@@ -117,6 +166,8 @@ test-suite herbrand-test
       Logic.Propositional.Classical.SAT.TableauxSpec
       Logic.Propositional.Classical.Syntax.TestUtils
       Logic.Propositional.Syntax.NormalForm.Classical.ConjunctiveSpec
+      Paths_herbrand
+  autogen-modules:
       Paths_herbrand
   hs-source-dirs:
       test
@@ -164,9 +215,11 @@ benchmark herbrand-cnf-bench
   main-is: cnf.hs
   other-modules:
       Paths_herbrand
+  autogen-modules:
+      Paths_herbrand
   hs-source-dirs:
       bench
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints "-with-rtsopts=-A32m -T" -fproc-alignment=64
   build-tool-depends:
       tasty-discover:tasty-discover
   build-depends:
@@ -189,6 +242,7 @@ benchmark herbrand-cnf-bench
     , generic-lens
     , hashable
     , herbrand
+    , herbrand-bench
     , lens
     , linear-base
     , parallel
@@ -210,9 +264,11 @@ benchmark herbrand-sat-bench
   main-is: sat.hs
   other-modules:
       Paths_herbrand
+  autogen-modules:
+      Paths_herbrand
   hs-source-dirs:
       bench
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints "-with-rtsopts=-A32m -T" -fproc-alignment=64
   build-tool-depends:
       tasty-discover:tasty-discover
   build-depends:
@@ -235,6 +291,7 @@ benchmark herbrand-sat-bench
     , generic-lens
     , hashable
     , herbrand
+    , herbrand-bench
     , lens
     , linear-base
     , parallel
