@@ -79,7 +79,6 @@ import qualified Data.ByteString.Lazy.Char8 as LBS8
 import Data.FMList (FMList)
 import qualified Data.FMList as FML
 import Data.Foldable1 (foldl1')
-import Data.Function (on)
 import Data.Functor.Foldable
 import Data.Functor.Foldable.TH
 import Data.Generics.Labels ()
@@ -102,6 +101,7 @@ data CNFStatistics = CNFStatistics
   , clauses :: {-# UNPACK #-} !Word
   , minClauseSize :: {-# UNPACK #-} !Word
   , maxClauseSize :: {-# UNPACK #-} !Word
+  , totalLiterals :: {-# UNPACK #-} !Word
   }
   deriving (Show, Eq, Ord, Generic)
   deriving anyclass (A.FromJSON, A.ToJSON)
@@ -182,12 +182,13 @@ instance (Hashable v) => ToDIMACS (CNF v) where
     let (f, VarStatistics variables) = compressVariables f0
         stat = flip L.fold (cnfClauses f) do
           clauses <- fromIntegral <$> L.length
-          (minClauseSize, maxClauseSize) <-
+          (minClauseSize, maxClauseSize, totalLiterals) <-
             L.handles #_CNFClause
               $ L.premap length
-              $ ((,) `on` maybe 0 fromIntegral)
-              <$> L.minimum
-              <*> L.maximum
+              $ (,,)
+              <$> (maybe 0 fromIntegral <$> L.minimum)
+              <*> (maybe 0 fromIntegral <$> L.maximum)
+              <*> (fromIntegral <$> L.sum)
           pure CNFStatistics {..}
         comment = A.encode stat
      in DIMACS_CNF

@@ -84,12 +84,12 @@ genFormula varMax szMax = do
     ]
   pure (phi, consis)
 
-cnfGen :: Arity -> Size -> Size -> Gen (CNF Int)
+cnfGen :: Arity -> Size -> R.Range Size -> Gen (CNF Int)
 cnfGen ar numCls numLits =
   CNF
     <$> list
       (R.between (0, numCls))
-      (CNFClause <$> list (R.between (0, numLits)) (literal ar))
+      (CNFClause <$> list numLits (literal ar))
 
 literal :: Arity -> Gen (Literal Int)
 literal a = choose (Positive <$> v) (Negative <$> v)

@@ -17,6 +17,7 @@ import Logic.Propositional.Syntax.General
 import Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
 import Test.Falsify.Predicate ((.$))
 import qualified Test.Falsify.Predicate as P
+import Test.Falsify.Range (withOrigin)
 import Test.Tasty
 import Test.Tasty.Falsify
 
@@ -27,7 +28,7 @@ test_solve =
     [ testGroup
         "solve (CNF input)"
         [ testProperty "Gives a correct decision" $ do
-            cnf <- gen $ cnfGen 10 10 10
+            cnf <- gen $ cnfGen 10 10 ((0, 10) `withOrigin` 5)
             collectCNF cnf
             let ans = solve cnf
             case classifyFormula $ toFormula @Full cnf of
@@ -42,7 +43,7 @@ test_solve =
                     ("Satisfiable", \case Satisfiable {} -> True; _ -> False)
                   .$ ("answer", ans)
         , testProperty "Gives a correct model" $ do
-            cnf <- gen $ cnfGen 10 10 10
+            cnf <- gen $ cnfGen 10 10 ((0, 10) `withOrigin` 5)
             collectCNF cnf
 
             case solve cnf of
