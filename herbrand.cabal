@@ -116,6 +116,7 @@ library herbrand-bench
     , strict
     , tasty
     , tasty-bench
+    , tasty-expected-failure
     , text
     , transformers
     , unordered-containers

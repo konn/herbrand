@@ -6,6 +6,7 @@ module Herbrand.Bench (
   withSats,
   findSatsIn,
   module Test.Tasty.Bench,
+  allowFailureBecause,
 ) where
 
 import Control.Exception.Safe (throwString)
@@ -22,6 +23,7 @@ import System.FilePath
 import System.FilePath.Glob
 import Test.Tasty (withResource)
 import Test.Tasty.Bench hiding (defaultMain)
+import Test.Tasty.ExpectedFailure (wrapTest)
 import Test.Tasty.Ingredients
 import Test.Tasty.Options
 import Test.Tasty.Runners
@@ -60,3 +62,15 @@ defaultMain b = do
   case tryIngredients benchIngredients opts' bs of
     Nothing -> exitFailure
     Just mb -> mb >>= \ok -> if ok then exitSuccess else exitFailure
+
+allowFailureBecause :: String -> TestTree -> TestTree
+allowFailureBecause reason = wrapTest $ fmap change
+  where
+    change r
+      | resultSuccessful r = r
+      | otherwise =
+          r
+            { resultOutcome = Success
+            , resultDescription = resultDescription r <> " (allowed failure)"
+            , resultShortDescription = resultShortDescription r <> " (allowed failure: " <> reason <> ")"
+            }

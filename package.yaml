@@ -75,6 +75,7 @@ internal-libraries:
     - safe-exceptions
     - tasty
     - tasty-bench
+    - tasty-expected-failure
 
   herbrand-test-utils:
     source-dirs: libs/test
