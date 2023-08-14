@@ -25,8 +25,9 @@ source-repository head
 
 library
   exposed-modules:
-      Data.Buffer.Mutable.Linear
+      Data.Vector.Mutable.Linear.Extra
       Logic.Propositional.Classical.SAT.BruteForce
+      Logic.Propositional.Classical.SAT.CDCL
       Logic.Propositional.Classical.SAT.DPLL
       Logic.Propositional.Classical.SAT.Format.DIMACS
       Logic.Propositional.Classical.SAT.Tableaux
@@ -34,11 +35,8 @@ library
       Logic.Propositional.Syntax.General
       Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
       Logic.Propositional.Syntax.Transformation.Claassical
-      Logic.Theory.Decision.DPLL.Abstract
   other-modules:
-      Paths_herbrand
-  autogen-modules:
-      Paths_herbrand
+      Logic.Propositional.Classical.SAT.CDCL.Types
   hs-source-dirs:
       src
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
@@ -73,6 +71,7 @@ library
     , transformers
     , unordered-containers
     , vector
+    , vector-th-unbox
   default-language: Haskell2010
 
 library herbrand-bench

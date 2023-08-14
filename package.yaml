@@ -62,9 +62,12 @@ ghc-options:
 
 library:
   source-dirs: src
+  other-modules:
+  - Logic.Propositional.Classical.SAT.CDCL.Types
   dependencies:
   - mutable-containers
   - linear-base
+  - vector-th-unbox
 
 internal-libraries:
   herbrand-bench:
