@@ -88,9 +88,9 @@ neg (Negative a) = Positive a
 data StrictFst a b = StrictFst !a b
   deriving (Show, Eq, Ord, Generic)
 
-unLit :: Literal a -> a
-unLit (Positive a) = a
-unLit (Negative a) = a
+litVar :: Literal a -> a
+litVar (Positive a) = a
+litVar (Negative a) = a
 
 -- | 1-Literal Rule (Unit Propagation)
 oneLiteralRule :: (Hashable a) => CNF a -> (Maybe (CNF a), Model a)
@@ -124,7 +124,7 @@ oneLiteralRule (CNF cls0) =
         foldr'
           ( \ !l ((accP :!: accN) :!: occ) ->
               ( case l of
-                  _ | unLit l `HS.member` occ -> (accP :!: accN) :!: occ
+                  _ | litVar l `HS.member` occ -> (accP :!: accN) :!: occ
                   Positive a -> (HS.insert a accP :!: accN) :!: HS.insert a occ
                   Negative a -> (accP :!: HS.insert a accN) :!: HS.insert a occ
               )
