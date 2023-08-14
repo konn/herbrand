@@ -22,7 +22,7 @@ module Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive (
 import Control.Arrow ((>>>))
 import Control.DeepSeq (NFData)
 import Control.Lens
-import Control.Monad.Trans.RWS.CPS (RWST, evalRWS, get, modify, state, tell)
+import Control.Monad.Trans.RWS.CPS (RWST, evalRWS, state, tell)
 import Control.Parallel.Strategies (evalList, rseq, using)
 import Data.Coerce (coerce)
 import Data.FMList qualified as FML
