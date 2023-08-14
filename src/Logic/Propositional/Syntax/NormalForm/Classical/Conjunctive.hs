@@ -22,7 +22,6 @@ module Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive (
 
 import Control.Arrow ((>>>))
 import Control.DeepSeq (NFData)
-import Control.Foldl qualified as L
 import Control.Lens
 import Control.Monad.Trans.RWS.CPS (RWST, evalRWS, get, modify, tell)
 import Control.Parallel.Strategies (evalList, rseq, using)
@@ -33,7 +32,6 @@ import Data.Functor.Foldable (cata)
 import Data.Functor.Foldable qualified as R
 import Data.Hashable (Hashable)
 import Data.List.NonEmpty qualified as NE
-import Data.Set qualified as Set
 import GHC.Exts (IsList)
 import GHC.Generics (Generic, Generic1)
 import Logic.Propositional.Syntax.General
@@ -61,30 +59,30 @@ data WithFresh a
 forceSpineCNF :: forall a. CNF a -> CNF a
 forceSpineCNF = flip using $ coerce $ evalList $ evalList $ rseq @(Literal a)
 
-fromFormulaFast :: (Ord a) => Formula x a -> CNF (WithFresh a)
+fromFormulaFast :: Formula x a -> CNF (WithFresh a)
 fromFormulaFast =
   CNF
     . coerce
     . uncurry ((:) . pure)
-    . fmap (fmap Set.toList . L.fold @FML.FMList L.nub)
+    . fmap (FML.toList . fmap FML.toList)
     . (\f -> evalRWS f () 0)
     . R.cata \case
       AtomF a -> pure $ Positive (Var a)
       TopF _ -> do
         e <- newFresh
-        tell $ FML.singleton $ Set.singleton e
+        tell $ FML.singleton $ FML.singleton e
         pure e
       BotF _ -> do
         e <- newFresh
-        tell $ FML.singleton $ Set.singleton $ negLit e
+        tell $ FML.singleton $ FML.singleton $ negLit e
         pure e
       NotF _ aSt -> do
         e <- aSt
         e' <- newFresh
         tell
           $ FML.fromList
-            [ Set.fromList [e, e']
-            , Set.fromList [negLit e, negLit e']
+            [ FML.fromList [e, e']
+            , FML.fromList [negLit e, negLit e']
             ]
         pure e'
       ImplF _ l r -> do
@@ -93,9 +91,9 @@ fromFormulaFast =
         e' <- newFresh
         tell
           $ FML.fromList
-            [ Set.fromList [negLit e', negLit e1, e2]
-            , Set.fromList [e', e1]
-            , Set.fromList [e', negLit e2]
+            [ FML.fromList [negLit e', negLit e1, e2]
+            , FML.fromList [e', e1]
+            , FML.fromList [e', negLit e2]
             ]
         pure e'
       l :/\$ r -> do
@@ -104,9 +102,9 @@ fromFormulaFast =
         e' <- newFresh
         tell
           $ FML.fromList
-            [ Set.fromList [negLit e', e1]
-            , Set.fromList [negLit e', e2]
-            , Set.fromList [e', negLit e1, negLit e2]
+            [ FML.fromList [negLit e', e1]
+            , FML.fromList [negLit e', e2]
+            , FML.fromList [e', negLit e1, negLit e2]
             ]
         pure e'
       l :\/$ r -> do
@@ -115,27 +113,27 @@ fromFormulaFast =
         e' <- newFresh
         tell
           $ FML.fromList
-            [ Set.fromList [negLit e', e1, e2]
-            , Set.fromList [e', negLit e1]
-            , Set.fromList [e', negLit e2]
+            [ FML.fromList [negLit e', e1, e2]
+            , FML.fromList [e', negLit e1]
+            , FML.fromList [e', negLit e2]
             ]
         pure e'
 
 newFresh :: (Monad m) => RWST () w Word m (Literal (WithFresh a))
 newFresh = Positive . Fresh <$> get <* modify (+ 1)
 
-fromFormulaOrd :: (XTop x ~ XBot x, Ord a) => Formula x a -> CNF a
+fromFormulaOrd :: (XTop x ~ XBot x) => Formula x a -> CNF a
 fromFormulaOrd =
-  CNF . fmap (CNFClause . Set.toList) . L.fold L.nub . do
+  CNF . FML.toList . fmap (CNFClause . FML.toList) . do
     deMorgan >>> cata \case
-      AtomF a -> pure $ Set.singleton a
+      AtomF a -> FML.singleton $ FML.singleton a
       TopF {} -> mempty
       BotF {} -> pure mempty
       l :/\$ r -> l <> r
       ls :\/$ rs ->
         -- Use distributive laws
         foldMap
-          (foldMap (fmap FML.singleton . (<>)) rs)
+          (foldMap (fmap pure . (<>)) rs)
           ls
 
 fromFormulaNaive :: (XTop x ~ XBot x) => Formula x a -> CNF a
