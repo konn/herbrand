@@ -11,10 +11,10 @@ import Test.Tasty (Timeout (..), localOption)
 
 main :: IO ()
 main = do
-  !tinys <- evaluate . force =<< findSatsIn "data/sat/tiny"
-  !smalls <- evaluate . force =<< findSatsIn "data/sat/small"
-  !mediums <- evaluate . force =<< findSatsIn "data/sat/medium"
-  !larges <- evaluate . force =<< findSatsIn "data/sat/large"
+  !tinys <- evaluate . force =<< findCnfsIn "data/sat/tiny"
+  !smalls <- evaluate . force =<< findCnfsIn "data/sat/small"
+  !mediums <- evaluate . force =<< findCnfsIn "data/sat/medium"
+  !larges <- evaluate . force =<< findCnfsIn "data/sat/large"
   defaultMain
     [ bgroup
         "solve"
