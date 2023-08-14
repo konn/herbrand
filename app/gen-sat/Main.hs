@@ -28,7 +28,7 @@ data FormulaSize = FormulaSize
 
 data Options = Options
   { output :: !FilePath
-  , name :: !String
+  , name :: !(Maybe String)
   , formSize :: !FormulaSize
   , count :: !Word
   }
@@ -45,13 +45,13 @@ optsP = Opt.info (p <**> Opt.helper) $ Opt.progDesc "Generate formula(e) of spec
           <> Opt.metavar "OUT_DIR"
           <> Opt.help "Output dir"
       name <-
-        Opt.strOption
+        Opt.optional
+          $ Opt.strOption
           $ Opt.long "name"
           <> Opt.short 'N'
           <> Opt.metavar "NAME"
           <> Opt.showDefault
-          <> Opt.value "formula"
-          <> Opt.help "Base name of output value. Each formula will be saved as `<OUT_DIR>/<NAME>_%i.sat`, where `%i` is 0-origin number."
+          <> Opt.help "Base name of output value. Each formula will be saved as `<OUT_DIR>/<NAME>-%i.sat`, where `%i` is 0-origin number. If omitted, saved as `<OUT_DIR>/%i.sat`."
       count <-
         Opt.option Opt.auto
           $ Opt.long "count"
@@ -86,7 +86,7 @@ main = do
     fml <- sample $ fullFormula variables size
     let dimacs = toDIMACS fml
         stat = A.decode @SATStatistics $ dimacs ^. commentL
-        dest = output </> name <> "-" <> show i <> ".sat"
+        dest = output </> maybe "" (<> "-") name <> show i <> ".sat"
     BB.writeFile dest $ formatDIMACS dimacs
     putStrLn $ "Written: " <> dest <> " (" <> show stat <> ")"
     self $ i + 1
