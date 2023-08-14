@@ -11,13 +11,18 @@ import Test.Tasty (Timeout (..), localOption)
 
 main :: IO ()
 main = do
+  !tinys <- evaluate . force =<< findSatsIn "data/sat/tiny"
   !smalls <- evaluate . force =<< findSatsIn "data/sat/small"
   !mediums <- evaluate . force =<< findSatsIn "data/sat/medium"
   !larges <- evaluate . force =<< findSatsIn "data/sat/large"
   defaultMain
     [ bgroup
         "solve"
-        [ withCnfs "small" smalls $ \fml ->
+        [ withCnfs "tiny" tinys $ \fml ->
+            [ bench "tableaux" $ nfAppIO (fmap $ Tableaux.solve . snd) fml
+            , bench "DPLL" $ nfAppIO (fmap $ DPLL.solve . fst) fml
+            ]
+        , withCnfs "small" smalls $ \fml ->
             [ bench "tableaux" $ nfAppIO (fmap $ Tableaux.solve . snd) fml
             , bench "DPLL" $ nfAppIO (fmap $ DPLL.solve . fst) fml
             ]
