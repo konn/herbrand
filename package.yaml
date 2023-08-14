@@ -65,8 +65,9 @@ library:
   other-modules:
   - Logic.Propositional.Classical.SAT.CDCL.Types
   dependencies:
-  - mutable-containers
+  - bitvec
   - linear-base
+  - linear-generics
   - vector-th-unbox
 
 internal-libraries:

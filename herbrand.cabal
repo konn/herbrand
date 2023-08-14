@@ -25,6 +25,8 @@ source-repository head
 
 library
   exposed-modules:
+      Data.HashMap.Mutable.Linear.Extra
+      Data.Unrestricted.Linear.Orphans
       Data.Vector.Mutable.Linear.Extra
       Logic.Propositional.Classical.SAT.BruteForce
       Logic.Propositional.Classical.SAT.CDCL
@@ -47,6 +49,7 @@ library
     , attoparsec
     , base >=4.7 && <5
     , bifunctors
+    , bitvec
     , bytestring
     , containers
     , data-fix
@@ -61,7 +64,7 @@ library
     , hashable
     , lens
     , linear-base
-    , mutable-containers
+    , linear-generics
     , parallel
     , rec-def
     , recursion-schemes

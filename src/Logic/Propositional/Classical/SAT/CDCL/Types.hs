@@ -1,5 +1,6 @@
 {-# LANGUAGE GHC2021 #-}
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE LinearTypes #-}
@@ -17,6 +18,9 @@
 module Logic.Propositional.Classical.SAT.CDCL.Types (
   withCDLLState,
   CDLLState (..),
+  Valuation,
+  Clauses,
+  WatchMap,
   stepsL,
   clausesL,
   watchMapL,
@@ -35,7 +39,6 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
 
   -- * Variable
   Variable (..),
-  -- clausesL,
   litVarL,
   encodeLit,
   decodeLit,
@@ -45,6 +48,7 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   ClauseId (..),
   U.Vector (V_VarId, V_ClauseId, V_Step, V_DecideLevel),
   U.MVector (MV_VarId, MV_ClauseId, MV_Step, MV_DecideLevel),
+  PropResult (..),
 ) where
 
 import Control.DeepSeq (NFData)
@@ -52,6 +56,7 @@ import Control.Foldl qualified as L
 import Control.Lens (Lens', Prism', imapAccumL, lens, prism')
 import Control.Monad (guard)
 import Control.Optics.Linear qualified as LinLens
+import Data.Bit (Bit (..))
 import Data.Bits ((.&.), (.|.))
 import Data.Generics.Labels ()
 import Data.HashMap.Mutable.Linear qualified as LHM
@@ -62,42 +67,45 @@ import Data.Map.Strict qualified as Map
 import Data.Strict.Tuple (Pair)
 import Data.Strict.Tuple qualified as S
 import Data.Unrestricted.Linear (Ur)
+import Data.Unrestricted.Linear.Orphans ()
 import Data.Vector.Mutable.Linear qualified as LV
 import Data.Vector.Unboxed qualified as U
 import Data.Vector.Unboxed.Deriving (derivingUnbox)
 import GHC.Generics (Generic)
+import Generics.Linear qualified as L
+import Generics.Linear.TH (deriveGeneric)
 import Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
 import Prelude.Linear qualified as L
 import Prelude.Linear qualified as PL
 
 newtype VarId = VarId {unVarId :: Word}
   deriving (Show, Eq, Ord, Generic)
-  deriving newtype (NFData, Hashable, Num, Enum)
+  deriving newtype (NFData, Hashable, Num, Enum, PL.Consumable, PL.Dupable, PL.Movable)
 
 derivingUnbox "VarId" [t|VarId -> Word|] [|unVarId|] [|VarId|]
 
 newtype ClauseId = ClauseId {unClauseId :: Word}
   deriving (Show, Eq, Ord, Generic)
-  deriving newtype (NFData, Hashable, Num, Enum)
+  deriving newtype (NFData, Hashable, Num, Enum, PL.Consumable, PL.Dupable, PL.Movable)
 
 derivingUnbox "ClauseId" [t|ClauseId -> Word|] [|unClauseId|] [|ClauseId|]
 
 newtype DecideLevel = DecideLevel {unDecideLevel :: Word}
   deriving (Show, Eq, Ord, Generic)
-  deriving newtype (NFData, Hashable, Num, Enum, Integral, Real)
+  deriving newtype (NFData, Hashable, Num, Enum, Integral, Real, PL.Consumable, PL.Dupable, PL.Movable)
 
 derivingUnbox "DecideLevel" [t|DecideLevel -> Word|] [|unDecideLevel|] [|DecideLevel|]
 
 newtype Step = Step {unStep :: Word}
   deriving (Show, Eq, Ord, Generic)
-  deriving newtype (NFData, Hashable, Num, Enum, Integral, Real)
+  deriving newtype (NFData, Hashable, Num, Enum, Integral, Real, PL.Consumable, PL.Dupable, PL.Movable)
 
 derivingUnbox "Step" [t|Step -> Word|] [|unStep|] [|Step|]
 
 -- | Up to 32-bit
 newtype Lit = Lit {runLit :: Word}
   deriving (Eq, Ord)
-  deriving newtype (Hashable, NFData)
+  deriving newtype (Hashable, NFData, PL.Consumable, PL.Dupable, PL.Movable)
 
 {-# COMPLETE PosL, NegL :: Lit #-}
 
@@ -166,16 +174,22 @@ data Clause = Clause
   }
   deriving (Show, Eq, Ord, Generic)
 
+type Valuation = LHM.HashMap VarId Variable
+
+type WatchMap = LHM.HashMap VarId IntSet
+
+type Clauses = LV.Vector Clause
+
 data CDLLState where
   CDLLState ::
     -- | Level-wise maximum steps
     {-# UNPACK #-} !(LV.Vector Step) %1 ->
     -- | Clauses
-    {-# UNPACK #-} !(LV.Vector Clause) %1 ->
+    {-# UNPACK #-} !Clauses %1 ->
     -- | Watches
-    {-# UNPACK #-} !(LHM.HashMap VarId IntSet) %1 ->
+    {-# UNPACK #-} !WatchMap %1 ->
     -- | Valuations
-    {-# UNPACK #-} !(LHM.HashMap VarId Variable) %1 ->
+    {-# UNPACK #-} !Valuation %1 ->
     CDLLState
 
 stepsL :: LinLens.Lens' CDLLState (LV.Vector Step)
@@ -188,12 +202,12 @@ clausesL :: LinLens.Lens' CDLLState (LV.Vector Clause)
 clausesL = LinLens.lens \(CDLLState ss cs ws vs) ->
   (cs, \cs -> CDLLState ss cs ws vs)
 
-watchMapL :: LinLens.Lens' CDLLState (LHM.HashMap VarId IntSet)
+watchMapL :: LinLens.Lens' CDLLState WatchMap
 {-# INLINE watchMapL #-}
 watchMapL = LinLens.lens \(CDLLState ss cs ws vs) ->
   (ws, \ws -> CDLLState ss cs ws vs)
 
-variablesL :: LinLens.Lens' CDLLState (LHM.HashMap VarId Variable)
+variablesL :: LinLens.Lens' CDLLState Valuation
 {-# INLINE variablesL #-}
 variablesL = LinLens.lens \(CDLLState ss cs ws vs) -> (vs, CDLLState ss cs ws)
 
@@ -238,3 +252,37 @@ buildClause i watches xs =
         watches
   , Clause {lits = U.fromList xs, watched1 = 0, watched2 = 1}
   )
+
+deriveGeneric ''CDLLState
+
+deriving via L.Generically CDLLState instance PL.Consumable CDLLState
+
+deriving via L.Generically CDLLState instance PL.Dupable CDLLState
+
+data PropResult
+  = Unit {-# UNPACK #-} !Lit !ClauseId
+  | Conflict !(Maybe Lit) !ClauseId
+  | NoProc
+  deriving (Show, Eq, Ord, Generic)
+
+deriveGeneric ''PropResult
+
+deriving via L.Generically PropResult instance PL.Consumable PropResult
+
+deriving via L.Generically PropResult instance PL.Dupable PropResult
+
+deriving via L.Generically PropResult instance PL.Movable PropResult
+
+deriveGeneric ''Variable
+
+deriving via L.Generically Variable instance PL.Consumable Variable
+
+deriving via L.Generically Variable instance PL.Dupable Variable
+
+deriving via L.Generically Variable instance PL.Movable Variable
+
+derivingUnbox
+  "Variable"
+  [t|Variable -> (Bit, DecideLevel, Step, ClauseId)|]
+  [|\Variable {..} -> (Bit value, S.fst introduced, S.snd introduced, antecedent)|]
+  [|\(Bit value, d, s, antecedent) -> Variable {introduced = d S.:!: s, ..}|]

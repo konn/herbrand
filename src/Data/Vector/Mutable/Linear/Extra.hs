@@ -1,11 +1,12 @@
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE LinearTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 
 module Data.Vector.Mutable.Linear.Extra (
   imapAccumL',
-  find,
+  findWith,
   module Data.Vector.Mutable.Linear,
 ) where
 
@@ -31,16 +32,21 @@ imapAccumL' f = go 0
               f i s a & \(s', Ur a') ->
                 go (i + 1) s' (unsafeSet i a' v'')
 
-find :: forall a. (a -> Bool) -> Vector a %1 -> (Ur (Maybe (a, Int)), Vector a)
-find p = go 0
+findWith ::
+  forall a b c.
+  (b %1 -> Int -> a -> (Ur (Maybe c), b)) ->
+  b %1 ->
+  Vector a %1 ->
+  (Ur (Maybe (c, Int)), b, Vector a)
+findWith p = go 0
   where
-    go :: Int -> Vector a %1 -> (Ur (Maybe (a, Int)), Vector a)
-    go !i !v =
+    go :: Int -> b %1 -> Vector a %1 -> (Ur (Maybe (c, Int)), b, Vector a)
+    go !i !b !v =
       size v & \(Ur l, v) ->
         if i >= l
-          then (Ur Nothing, v)
+          then (Ur Nothing, b, v)
           else
             unsafeGet i v & \(Ur a, v) ->
-              if p a
-                then (Ur (Just (a, i)), v)
-                else go (i + 1) v
+              p b i a & \case
+                (Ur (Just c), b) -> (Ur (Just (c, i)), b, v)
+                (Ur Nothing, b) -> go (i + 1) b v
