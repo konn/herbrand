@@ -22,7 +22,7 @@ module Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive (
 import Control.Arrow ((>>>))
 import Control.DeepSeq (NFData)
 import Control.Lens
-import Control.Monad.Trans.RWS.CPS (RWST, evalRWS, get, modify, tell)
+import Control.Monad.Trans.RWS.CPS (RWST, evalRWS, get, modify, state, tell)
 import Control.Parallel.Strategies (evalList, rseq, using)
 import Data.Coerce (coerce)
 import Data.FMList qualified as FML
@@ -119,7 +119,7 @@ fromFormulaFast =
         pure e'
 
 newFresh :: (Monad m) => RWST () w Word m (Literal (WithFresh a))
-newFresh = Positive . Fresh <$> get <* modify (+ 1)
+newFresh = Positive . Fresh <$> state ((,) <$> id <*> (+ 1))
 
 fromFormulaNaive :: (XTop x ~ XBot x) => Formula x a -> CNF a
 fromFormulaNaive =
