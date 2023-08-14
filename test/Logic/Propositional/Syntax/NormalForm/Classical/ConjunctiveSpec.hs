@@ -2,7 +2,6 @@
 
 module Logic.Propositional.Syntax.NormalForm.Classical.ConjunctiveSpec (
   test_fromFormulaNaive,
-  test_fromFormulaOrd,
   test_fromFormulaFast,
 ) where
 
@@ -23,8 +22,6 @@ import Test.Tasty.Falsify
 test_fromFormulaNaive :: TestTree
 test_fromFormulaNaive = testGroup "fromFormulaNaive" [checkCNFSemantics 5 64 fromFormulaNaive]
 
-test_fromFormulaOrd :: TestTree
-test_fromFormulaOrd = testGroup "fromFormulaOrd" [checkCNFSemantics 10 32 fromFormulaOrd]
 
 test_fromFormulaFast :: TestTree
 test_fromFormulaFast =
