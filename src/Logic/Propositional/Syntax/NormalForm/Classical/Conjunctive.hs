@@ -15,7 +15,6 @@ module Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive (
   forceSpineCNF,
   toFormula,
   fromFormulaFast,
-  fromFormulaOrd,
   fromFormulaNaive,
   WithFresh (..),
 ) where
@@ -122,8 +121,8 @@ fromFormulaFast =
 newFresh :: (Monad m) => RWST () w Word m (Literal (WithFresh a))
 newFresh = Positive . Fresh <$> get <* modify (+ 1)
 
-fromFormulaOrd :: (XTop x ~ XBot x) => Formula x a -> CNF a
-fromFormulaOrd =
+fromFormulaNaive :: (XTop x ~ XBot x) => Formula x a -> CNF a
+fromFormulaNaive =
   CNF . FML.toList . fmap (CNFClause . FML.toList) . do
     deMorgan >>> cata \case
       AtomF a -> FML.singleton $ FML.singleton a
@@ -134,26 +133,6 @@ fromFormulaOrd =
         -- Use distributive laws
         foldMap
           (foldMap (fmap pure . (<>)) rs)
-          ls
-
-fromFormulaNaive :: (XTop x ~ XBot x) => Formula x a -> CNF a
-fromFormulaNaive =
-  CNF . FML.toList . fmap (CNFClause . FML.toList) . do
-    deMorgan >>> cata \case
-      AtomF a -> FML.singleton $ FML.singleton a
-      TopF {} -> mempty
-      BotF {} -> FML.singleton mempty
-      l :/\$ r -> l <> r
-      ls :\/$ rs ->
-        -- Use distributive laws
-        foldMap
-          ( \l ->
-              foldMap
-                ( \r ->
-                    FML.singleton $ l <> r
-                )
-                rs
-          )
           ls
 
 {-

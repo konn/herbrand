@@ -16,7 +16,6 @@ main = do
   defaultMain
     [ withSats "small" smalls $ \fml ->
         [ bench "naive" $ nfAppIO (fmap fromFormulaNaive) fml
-        , bench "ord" $ nfAppIO (fmap fromFormulaOrd) fml
         , bench "fast" $ nfAppIO (fmap fromFormulaFast) fml
         ]
     , withSats "medium" mediums $ \fml ->
@@ -24,10 +23,6 @@ main = do
             $ localOption (Timeout (5 * 10 ^ (6 :: Int)) "5s")
             $ bench "naive"
             $ nfAppIO (fmap fromFormulaNaive) fml
-        , allowFailureBecause "O(n^2)"
-            $ localOption (Timeout (5 * 10 ^ (6 :: Int)) "5s")
-            $ bench "ord"
-            $ nfAppIO (fmap fromFormulaOrd) fml
         , bench "fast" $ nfAppIO (fmap fromFormulaFast) fml
         ]
     , withSats "large" larges $ \fml ->
@@ -35,10 +30,6 @@ main = do
             $ localOption (Timeout (5 * 10 ^ (6 :: Int)) "5s")
             $ bench "naive"
             $ nfAppIO (fmap fromFormulaNaive) fml
-        , allowFailureBecause "O(n^2)"
-            $ localOption (Timeout (5 * 10 ^ (6 :: Int)) "5s")
-            $ bench "ord"
-            $ nfAppIO (fmap fromFormulaOrd) fml
         , bench "fast" $ nfAppIO (fmap fromFormulaFast) fml
         ]
     ]
