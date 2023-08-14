@@ -31,21 +31,21 @@ main = do
             ]
         , withCnfs "medium" mediums $ \fml ->
             [ allowFailureBecause "O(n^2)"
-                $ localOption (Timeout (10 * 10 ^ (6 :: Int)) "10s")
+                $ localOption (Timeout (30 * 10 ^ (6 :: Int)) "30s")
                 $ bench "tableaux"
                 $ nfAppIO (fmap $ Tableaux.solve . snd) fml
             , bench "DPLL" $ nfAppIO (fmap $ DPLL.solve . fst) fml
             ]
         , withCnfs "large" larges $ \fml ->
             [ allowFailureBecause "O(n^2)"
-                $ localOption (Timeout (10 * 10 ^ (6 :: Int)) "10s")
+                $ localOption (Timeout (30 * 10 ^ (6 :: Int)) "30s")
                 $ bench "tableaux"
                 $ nfAppIO (fmap $ Tableaux.solve . snd) fml
             , bench "DPLL" $ nfAppIO (fmap $ DPLL.solve . fst) fml
             ]
         , withCnfs "huge" huges $ \fml ->
             [ allowFailureBecause "O(n^2)"
-                $ localOption (Timeout (10 * 10 ^ (6 :: Int)) "10s")
+                $ localOption (Timeout (30 * 10 ^ (6 :: Int)) "30s")
                 $ bench "tableaux"
                 $ nfAppIO (fmap $ Tableaux.solve . snd) fml
             , bench "DPLL" $ nfAppIO (fmap $ DPLL.solve . fst) fml
