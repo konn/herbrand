@@ -20,14 +20,14 @@ main = do
         ]
     , withSats "medium" mediums $ \fml ->
         [ allowFailureBecause "O(n^2)"
-            $ localOption (Timeout (10 * 10 ^ (6 :: Int)) "5s")
+            $ localOption (Timeout (10 * 10 ^ (6 :: Int)) "10s")
             $ bench "naive"
             $ nfAppIO (fmap fromFormulaNaive) fml
         , bench "fast" $ nfAppIO (fmap fromFormulaFast) fml
         ]
     , withSats "large" larges $ \fml ->
         [ allowFailureBecause "O(n^2)"
-            $ localOption (Timeout (10 * 10 ^ (6 :: Int)) "5s")
+            $ localOption (Timeout (10 * 10 ^ (6 :: Int)) "10s")
             $ bench "naive"
             $ nfAppIO (fmap fromFormulaNaive) fml
         , bench "fast" $ nfAppIO (fmap fromFormulaFast) fml
