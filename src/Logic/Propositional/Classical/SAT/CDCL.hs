@@ -4,159 +4,130 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE LinearTypes #-}
 {-# LANGUAGE MonoLocalBinds #-}
+{-# LANGUAGE PartialTypeSignatures #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# OPTIONS_GHC -Wno-name-shadowing #-}
 
 -- | DPLL Algorithm, supercharged with Conflict-Driven Clause Learning (CDCL).
 module Logic.Propositional.Classical.SAT.CDCL () where
 
 import Control.Applicative
 import Control.Foldl qualified as L
-import Control.Lens
+import Control.Lens hiding (Index, (&))
+import Control.Lens.Extras qualified as Lens
 import Control.Monad (guard)
 import Control.Monad.Trans.Maybe (MaybeT (..))
 import Control.Monad.Trans.Reader (ReaderT (..))
 import Control.Monad.Trans.Writer.CPS (runWriter, tell, writer)
+import Control.Optics.Linear
+import Data.Bifunctor.Linear qualified as BiL
 import Data.Foldable (foldl', foldr', foldrM)
 import Data.Function (fix)
 import Data.Functor (($>))
+import Data.Functor.Linear qualified as D
 import Data.Generics.Labels ()
-import Data.HashMap.Mutable.Linear qualified as Map
+import Data.HashMap.Mutable.Linear.Extra qualified as LHM
 import Data.HashSet qualified as HS
 import Data.Hashable (Hashable)
+import Data.Maybe (isJust)
 import Data.Set.Mutable.Linear qualified as Set
 import Data.Strict (Pair (..))
+import Data.Unrestricted.Linear qualified as Ur
+import Data.Vector.Mutable.Linear.Extra qualified as LV
 import Data.Vector.Unboxed qualified as U
 import GHC.Generics (Generic)
 import Logic.Propositional.Classical.SAT.CDCL.Types
 import Logic.Propositional.Classical.SAT.Types
 import Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
+import Prelude.Linear hiding (not, (<), (==))
+import Prelude hiding (uncurry, ($))
+import Prelude qualified as P
 
-{-
-solve :: (Hashable a) => CNF a -> SatResult (Model a)
-solve =
-  uncurry ($>) . runWriter . fix \self fml -> do
-    fml' <-
-      fixedPointM
-        ( runMaybeT
-            . runReaderT
-              ( ReaderT (MaybeT . writer . oneLiteralRule)
-                  <|> ReaderT (MaybeT . writer . affirmativeNegative)
-              )
-        )
-        fml
-    {-
-      Criteria:
+unitPropInit :: CDLLState %1 -> (CDLLState, PropResult)
+unitPropInit (CDLLState steps clauses watches vals) =
+  LV.findWith (uncurry findUnit) (steps, vals) clauses
+    & \(m, (steps, vals), clauses) ->
+      (CDLLState steps clauses watches vals, Ur.lift isJust m)
 
-        1. If the CNF doesn't have any clause, it is a tautology;
-        2. If any of the clauses is empty, it is false;
-        3. Otherwise, we choose an arbitrary atomic formula and do a case-analysis on it.
+findUnit ::
+  LV.Vector Step %1 ->
+  Valuation %1 ->
+  Int ->
+  Clause ->
+  (Ur (Maybe (PropResult, Clause)), (LV.Vector Step, Valuation))
+findUnit steps vals i c@Clause {..}
+  | watched1 < 0 =
+      (Ur $ Just $ (Conflict Nothing (fromIntegral i), c), (steps, vals))
+  | watched2 < 0 =
+      let l = U.unsafeIndex lits watched1
+       in evalLit l vals & \case
+            (Just False, vals) ->
+              (Ur $ Just ((Conflict (Just l) $ fromIntegral i), c), (steps, vals))
+            (Just True, vals) ->
+              (Ur Nothing, (steps, vals))
+            (Nothing, vals) ->
+              (Ur $ Just ((Unit l (fromIntegral i)), c), (steps, vals))
+  | otherwise =
+      let !l1 = U.unsafeIndex lits watched1
+          !l2 = U.unsafeIndex lits watched2
+       in evalLit l1 vals & \case
+            (Just True, vals) -> (Ur Nothing, (steps, vals))
+            (Just False, vals) ->
+              LHM.backpermute lits vals & \(vs, vals) ->
+                case U.findIndex _ (U.indexed vals) of
+                  Nothing -> (Ur (Just (Unit l2 (fromIntegral i)), c), (steps, vals))
+                  Just i -> (Ur (Just (Nothing,)))
+            (Nothing, vals) ->
+              evalLit l2 vals & \case
+                (Just True, vals) -> (Ur (Nothing, c), (steps, vals))
+                (Nothing, vals) -> (Ur (Nothing, c), (steps, vals))
+                (Just False, vals) ->
+                  findUVecL (unassigned watched1) vals (U.indexed lits) & \case
+                    (Ur Nothing, vals) ->
+                      ( Ur (Just (Unit l1 (fromIntegral i)), c)
+                      , (steps, vals)
+                      )
+                    (Ur (Just (i, _)), vals) ->
+                      ( Ur (Nothing, c {watched2 = i})
+                      , (steps, vals)
+                      )
 
-      We use beautiful folding to check those conditions in a one-shot.
-    -}
-    let (isFalse :!: mv) =
-          L.fold
-            ( (:!:)
-                <$> L.any (null . clauseLits)
-                <*> L.handles folded L.head
-            )
-            $ cnfClauses fml'
-    case mv of
-      _ | isFalse -> pure Unsat
-      Nothing -> pure $ Satisfiable ()
-      Just v -> do
-        let posCl = runWriter (self $ assert (Positive v) fml')
-        case posCl of
-          (Satisfiable (), model) -> Satisfiable <$> tell model
-          (Unsat, _) -> self $ assert (Negative v) fml'
+unassigned :: Index -> Valuation %1 -> (Int, Lit) -> (Bool, Valuation)
+unassigned exclude vals (cur, l)
+  | cur == exclude = (False, vals)
+  | otherwise =
+      evalLit l vals & \case
+        (Nothing, vals) -> (True, vals)
+        (Just {}, vals) -> (False, vals)
 
-assert :: Literal a -> CNF a -> CNF a
-assert l (CNF cs) = CNF $ CNFClause [l] : cs
+findUVecL ::
+  forall a b.
+  (U.Unbox a) =>
+  (b %1 -> a -> (Bool, b)) ->
+  b %1 ->
+  U.Vector a ->
+  (Ur (Maybe a), b)
+findUVecL p = go
+  where
+    go :: b %1 -> U.Vector a -> (Maybe a, b)
+    go !b !uv
+      | U.null uv = (Nothing, b)
+      | otherwise =
+          let a = U.unsafeHead uv
+           in p b a & \case
+                (True, b) -> (Just a, b)
+                (False, b) -> go b (U.unsafeTail uv)
 
-fixedPointM :: (Monad m) => (a -> m (Maybe a)) -> a -> m a
-fixedPointM f = fix $ \self x -> do
-  maybe (pure x) self =<< f x
-
-neg :: Literal a -> Literal a
-neg (Positive a) = Negative a
-neg (Negative a) = Positive a
-
-data StrictFst a b = StrictFst !a b
-  deriving (Show, Eq, Ord, Generic)
-
-litVar :: Literal a -> a
-litVar (Positive a) = a
-litVar (Negative a) = a
-
--- | 1-Literal Rule (Unit Propagation)
-oneLiteralRule :: (Hashable a) => CNF a -> (Maybe (CNF a), Model a)
-oneLiteralRule (CNF cls0) =
-  {-
-    NOTE: We must pay attention to where to use foldr' and foldl'.
-    In the construction of 'oneLit0' we use foldl' add (:), which makes
-    'oneLit0' reversed (compared to occurrence in cls0).
-
-    As we want to process first 1-literals first, we must use foldr for
-    consumption; i.e in the following operations:
-
-    1. filtering/trasforming existing clauses (i.e. generating cls')
-    2. picking of appropriate literal in model generation.
-  -}
-  let (oneLit0, cls') =
-        foldl'
-          ( \(ml, rst) ls ->
-              let ml' = maybe ml (: ml) do
-                    [l] <- pure $ clauseLits ls
-                    pure l
-               in (ml', maybe id (:) (foldrM prune ls oneLit0) rst)
-          )
-          ([], [])
-          cls0
-      prune !l (CNFClause lits) = do
-        guard $ l `notElem` HS.fromList lits
-        pure $ CNFClause $ filter (/= neg l) lits
-
-      ((positive :!: negative) :!: _) =
-        foldr'
-          ( \ !l ((accP :!: accN) :!: occ) ->
-              ( case l of
-                  _ | litVar l `HS.member` occ -> (accP :!: accN) :!: occ
-                  Positive a -> (HS.insert a accP :!: accN) :!: HS.insert a occ
-                  Negative a -> (accP :!: HS.insert a accN) :!: HS.insert a occ
-              )
-          )
-          mempty
-          oneLit0
-   in (forceSpineCNF (CNF cls') <$ guard (not $ null oneLit0), Model {..})
-
-{- |
-Affirmative-Negative Rule (Pure Literal Rule):
-if a literal occurs only postiviely or only negatively, we can set it to 'True' ('False', resp.).
--}
-affirmativeNegative :: (Hashable a) => CNF a -> (Maybe (CNF a), Model a)
-affirmativeNegative (CNF cls0) =
-  let (StrictFst (poss :!: negs) rs) =
-        foldr'
-          ( \cls (StrictFst posNegs ans) ->
-              StrictFst (posNegs <> extractPosNeg cls)
-                $ if HS.null $ HS.intersection pureLits $ HS.fromList $ clauseLits cls
-                  then cls : ans
-                  else ans
-          )
-          (StrictFst (HS.empty :!: HS.empty) [])
-          cls0
-      extractPosNeg =
-        L.fold
-          ( L.premap (\case Positive l -> Left l; Negative l -> Right l)
-              $ (:!:)
-              <$> L.handles _Left L.hashSet
-              <*> L.handles _Right L.hashSet
-          )
-          . clauseLits
-      positive = poss `HS.difference` negs
-      negative = negs `HS.difference` poss
-      pureLits = HS.map Positive positive `HS.union` HS.map Negative negative
-   in (forceSpineCNF (CNF rs) <$ guard (not $ HS.null pureLits), Model {..})
- -}
+evalLit :: Lit -> Valuation %1 -> (Maybe Bool, Valuation)
+evalLit l vals =
+  BiL.first
+    ( \(Ur m) ->
+        m
+          <&> if Lens.is _PosL l
+            then value
+            else not P.. value
+    )
+    $ LHM.lookup (litVar l) vals
