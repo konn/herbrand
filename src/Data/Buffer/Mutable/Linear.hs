@@ -51,7 +51,7 @@ push a (Buffer l arr) =
         (Ur cap, arr') ->
           if cap >= l'
             then Buffer l' (A.set l a arr')
-            else Buffer l' (A.set l a (A.resize (cap * 2) (error "uninitlised growth") arr'))
+            else Buffer l' (A.set l a (A.resize (max 1 cap * 2) (error "uninitlised growth") arr'))
 
 unsafePop :: Buffer a %1 -> (Ur a, Buffer a)
 unsafePop (Buffer l arr) =
@@ -76,7 +76,7 @@ fromListCapacity cap xs k =
     xs
     let l = Prelude.length xs
      in if cap > l
-          then k . Buffer l . A.resize cap (error "unintialised growth")
+          then k . Buffer l . A.resize (max 1 cap) (error "unintialised growth")
           else k . Buffer l
 
 capacity :: Buffer a %1 -> (Ur Int, Buffer a)
