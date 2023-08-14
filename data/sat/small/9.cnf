@@ -1,0 +1,7 @@
+c {"clauses":5,"maxClauseSize":10,"minClauseSize":3,"totalLiterals":32,"variables":10}
+p cnf 10 5
+1 -2 -3 4 5 -6 0
+-7 -2 7 0
+-6 8 2 6 -9 -8 8 -4 0
+-3 -3 -7 -4 -6 5 7 7 10 -4 0
+-9 5 -10 -7 -5 0
