@@ -25,6 +25,7 @@ source-repository head
 
 library
   exposed-modules:
+      Data.Buffer.Mutable.Linear
       Logic.Propositional.Classical.SAT.BruteForce
       Logic.Propositional.Classical.SAT.DPLL
       Logic.Propositional.Classical.SAT.Format.DIMACS
@@ -62,6 +63,7 @@ library
     , hashable
     , lens
     , linear-base
+    , mutable-containers
     , parallel
     , rec-def
     , recursion-schemes
@@ -107,7 +109,6 @@ library herbrand-bench
     , hashable
     , herbrand
     , lens
-    , linear-base
     , parallel
     , rec-def
     , recursion-schemes
@@ -157,7 +158,6 @@ library herbrand-test-utils
     , hashable
     , herbrand
     , lens
-    , linear-base
     , parallel
     , rec-def
     , recursion-schemes
@@ -204,7 +204,6 @@ executable gen-sat
     , herbrand
     , herbrand-test-utils
     , lens
-    , linear-base
     , optparse-applicative
     , parallel
     , parser-combinators
@@ -257,7 +256,6 @@ test-suite herbrand-test
     , herbrand
     , herbrand-test-utils
     , lens
-    , linear-base
     , parallel
     , rec-def
     , recursion-schemes
@@ -309,7 +307,6 @@ benchmark herbrand-cnf-bench
     , herbrand
     , herbrand-bench
     , lens
-    , linear-base
     , parallel
     , rec-def
     , recursion-schemes
@@ -362,7 +359,6 @@ benchmark herbrand-sat-bench
     , herbrand
     , herbrand-bench
     , lens
-    , linear-base
     , parallel
     , rec-def
     , recursion-schemes
