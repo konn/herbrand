@@ -9,6 +9,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE ViewPatterns #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 
 -- | DPLL Algorithm, supercharged with Conflict-Driven Clause Learning (CDCL).
@@ -42,44 +43,81 @@ import GHC.Generics (Generic)
 import Logic.Propositional.Classical.SAT.CDCL.Types
 import Logic.Propositional.Classical.SAT.Types
 import Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
-import Prelude.Linear hiding (not, (<), (==))
+import Prelude.Linear hiding (not, (&&), (/=), (<), (==))
 import Prelude hiding (uncurry, ($))
 import Prelude qualified as P
 
+{-
 unitPropInit :: CDLLState %1 -> (CDLLState, PropResult)
 unitPropInit (CDLLState steps clauses watches vals) =
   LV.findWith (uncurry findUnit) (steps, vals) clauses
     & \(m, (steps, vals), clauses) ->
       (CDLLState steps clauses watches vals, Ur.lift isJust m)
-
+ -}
 findUnit ::
-  LV.Vector Step %1 ->
   Valuation %1 ->
   Int ->
   Clause ->
-  (Ur (Maybe (PropResult, Clause)), (LV.Vector Step, Valuation))
-findUnit steps vals i c@Clause {..}
-  | watched1 < 0 =
-      (Ur $ Just $ (Conflict Nothing (fromIntegral i), c), (steps, vals))
-  | watched2 < 0 =
+  (Ur (Maybe (PropResult, Clause)), Valuation)
+findUnit vals i c@Clause {..}
+  | watched2 < 0 -- Only the first literal is active.
+    =
       let l = U.unsafeIndex lits watched1
        in evalLit l vals & \case
             (Just False, vals) ->
-              (Ur $ Just ((Conflict (Just l) $ fromIntegral i), c), (steps, vals))
+              (Ur $ Just (Conflict (Just l) $ fromIntegral i, c), vals)
             (Just True, vals) ->
-              (Ur Nothing, (steps, vals))
+              (Ur Nothing, vals)
             (Nothing, vals) ->
-              (Ur $ Just ((Unit l (fromIntegral i)), c), (steps, vals))
+              (Ur $ Just (Unit l (fromIntegral i), c), vals)
   | otherwise =
-      let !l1 = U.unsafeIndex lits watched1
-          !l2 = U.unsafeIndex lits watched2
+      let cid = fromIntegral i :: ClauseId
+          l1 = U.unsafeIndex lits watched1
+          l2 = U.unsafeIndex lits watched2
        in evalLit l1 vals & \case
-            (Just True, vals) -> (Ur Nothing, (steps, vals))
+            (Just True, vals) -> (Ur Nothing, vals) -- satified; nothing to do.
             (Just False, vals) ->
-              LHM.backpermute lits vals & \(vs, vals) ->
-                case U.findIndex _ (U.indexed vals) of
-                  Nothing -> (Ur (Just (Unit l2 (fromIntegral i)), c), (steps, vals))
-                  Just i -> (Ur (Just (Nothing,)))
+              -- Unsatisfiable literal: find next literal
+              findUVecL (unassigned watched2) vals (U.indexed lits)
+                & BiL.first move
+                & \case
+                  (Ur Nothing, vals) -> (Ur (Just (Conflict (Just l1) cid, c)), vals)
+                  (Ur (Just (k, l)), vals) ->
+                    ( Ur
+                        ( Just
+                            ( WatchChangedFromTo (litVar l1) (litVar l)
+                            , c {watched1 = k}
+                            )
+                        )
+                    , vals
+                    )
+            (Nothing, vals) ->
+              -- Undetermined. Check for watched2
+              evalLit l2 vals & \case
+                (Just True, vals) -> (Ur Nothing, vals) -- satified; nothing to do.
+                (Just False, vals) ->
+                  -- Unsatisfiable literal: find next literal
+                  findUVecL (unassigned watched1) vals (U.indexed lits)
+                    & BiL.first move
+                    & \case
+                      (Ur Nothing, vals) -> (Ur (Just (Conflict (Just l1) cid, c)), vals)
+                      (Ur (Just (k, l)), vals) ->
+                        ( Ur
+                            ( Just
+                                ( WatchChangedFromTo (litVar l1) (litVar l)
+                                , c {watched1 = k}
+                                )
+                            )
+                        , vals
+                        )
+
+{- U.findIndex undefined (U.indexed vs) & \case
+  Nothing -> vals `lseq`(Ur Nothing, vals) -}
+
+-- \$ Just (Unit l2 (fromIntegral i), c)
+
+-- Just i -> (Ur (Just (Nothing,)))
+{-
             (Nothing, vals) ->
               evalLit l2 vals & \case
                 (Just True, vals) -> (Ur (Nothing, c), (steps, vals))
@@ -94,6 +132,7 @@ findUnit steps vals i c@Clause {..}
                       ( Ur (Nothing, c {watched2 = i})
                       , (steps, vals)
                       )
+-}
 
 unassigned :: Index -> Valuation %1 -> (Int, Lit) -> (Bool, Valuation)
 unassigned exclude vals (cur, l)
@@ -109,7 +148,7 @@ findUVecL ::
   (b %1 -> a -> (Bool, b)) ->
   b %1 ->
   U.Vector a ->
-  (Ur (Maybe a), b)
+  (Maybe a, b)
 findUVecL p = go
   where
     go :: b %1 -> U.Vector a -> (Maybe a, b)

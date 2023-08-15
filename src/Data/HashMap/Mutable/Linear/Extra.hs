@@ -6,33 +6,31 @@
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 
 module Data.HashMap.Mutable.Linear.Extra (
-  backpermute,
+  lookups,
   module Data.HashMap.Mutable.Linear,
 ) where
 
 import qualified Data.Array.Polarized.Push as Push
 import Data.HashMap.Mutable.Linear
 import Data.Hashable (Hashable)
+import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as U
 import GHC.Stack (HasCallStack)
 import Prelude.Linear hiding (lookup)
-import qualified Unsafe.Linear as Unsafe
 import Prelude hiding (lookup, mempty, seq, ($), (.))
 
-backpermute ::
+lookups ::
   forall key v.
-  (HasCallStack, Hashable key, U.Unbox key, Consumable v, U.Unbox v) =>
+  (HasCallStack, Hashable key, U.Unbox key) =>
   U.Vector key ->
   HashMap key v %1 ->
-  (U.Vector v, HashMap key v)
-{-# INLINE backpermute #-}
-backpermute = go mempty
+  (V.Vector (Maybe v), HashMap key v)
+{-# INLINE lookups #-}
+lookups = go mempty
   where
-    go :: (HasCallStack) => Push.Array v %1 -> U.Vector key -> HashMap key v %1 -> (U.Vector v, HashMap key v)
+    go :: (HasCallStack) => Push.Array (Maybe v) %1 -> U.Vector key -> HashMap key v %1 -> (V.Vector (Maybe v), HashMap key v)
     go !arr !uv !hm
-      | U.null uv = (Unsafe.toLinear U.convert (Push.alloc arr), hm)
+      | U.null uv = (Push.alloc arr, hm)
       | otherwise =
-          lookup (U.unsafeHead uv) hm & \case
-            (Ur Nothing, hm) -> Push.alloc arr `lseq` hm `lseq` error "backpermute: Index out of bounds"
-            (Ur (Just v), hm) ->
-              go (Push.snoc v arr) (U.unsafeTail uv) hm
+          lookup (U.unsafeHead uv) hm & \(Ur m, hm) ->
+            go (Push.snoc m arr) (U.unsafeTail uv) hm

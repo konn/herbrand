@@ -4,6 +4,7 @@
 {-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE LinearTypes #-}
+{-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE RecordWildCards #-}
@@ -33,6 +34,8 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   litVar,
   _PosL,
   _NegL,
+  isPositive,
+  isNegative,
 
   -- * Clause
   Clause (..),
@@ -52,6 +55,7 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
 ) where
 
 import Control.DeepSeq (NFData)
+import Control.Foldl qualified as Foldl
 import Control.Foldl qualified as L
 import Control.Lens (Lens', Prism', imapAccumL, lens, prism')
 import Control.Monad (guard)
@@ -67,6 +71,7 @@ import Data.Map.Strict qualified as Map
 import Data.Strict.Tuple (Pair)
 import Data.Strict.Tuple qualified as S
 import Data.Unrestricted.Linear (Ur)
+import Data.Unrestricted.Linear qualified as L
 import Data.Unrestricted.Linear.Orphans ()
 import Data.Vector.Mutable.Linear qualified as LV
 import Data.Vector.Unboxed qualified as U
@@ -74,6 +79,7 @@ import Data.Vector.Unboxed.Deriving (derivingUnbox)
 import GHC.Generics (Generic)
 import Generics.Linear qualified as L
 import Generics.Linear.TH (deriveGeneric)
+import Logic.Propositional.Classical.SAT.Types (SatResult (..))
 import Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
 import Prelude.Linear qualified as L
 import Prelude.Linear qualified as PL
@@ -218,19 +224,27 @@ backtrack decLvl learnt =
     L.. LinLens.over clausesL (LV.push learnt)
     L.. LinLens.over variablesL (LHM.filter ((<= decLvl) . S.fst . introduced))
 
-withCDLLState :: CNF VarId -> (CDLLState %1 -> Ur a) %1 -> Ur a
-withCDLLState (CNF cls) k =
-  let cls' =
+withCDLLState :: CNF VarId -> Either (SatResult ()) ((CDLLState %1 -> Ur a) %1 -> Ur a)
+withCDLLState (CNF cls) =
+  let (cls', truth, contradicting) =
         L.fold
-          ( L.handles
-              #_CNFClause
-              (L.premap (L.fold L.nub . map encodeLit) L.nub)
+          ( (,,)
+              <$> L.handles
+                #_CNFClause
+                (L.premap (L.fold L.nub . map encodeLit) L.nub)
+              <*> Foldl.null
+              <*> Foldl.any null
           )
           cls
-      (upds, cls'') = imapAccumL buildClause Map.empty cls'
-   in LV.fromList [0] \steps -> LV.fromList cls'' \clauses ->
-        LHM.fromList (Map.toList upds) \watcheds ->
-          LHM.empty (Map.size upds) (k PL.. CDLLState steps clauses watcheds)
+   in if
+        | truth -> Left $ Satisfiable ()
+        | contradicting -> Left Unsat
+        | otherwise ->
+            Right
+              $ let (upds, cls'') = imapAccumL buildClause Map.empty cls'
+                 in \k -> LV.fromList [0] \steps -> LV.fromList cls'' \clauses ->
+                      LHM.fromList (Map.toList upds) \watcheds ->
+                        LHM.empty (Map.size upds) (k PL.. CDLLState steps clauses watcheds)
 
 buildClause ::
   Int ->
@@ -262,22 +276,22 @@ deriving via L.Generically CDLLState instance PL.Dupable CDLLState
 data PropResult
   = Unit {-# UNPACK #-} !Lit !ClauseId
   | Conflict !(Maybe Lit) !ClauseId
-  | NoProc
+  | WatchChangedFromTo !VarId !VarId
   deriving (Show, Eq, Ord, Generic)
 
 deriveGeneric ''PropResult
 
-deriving via L.Generically PropResult instance PL.Consumable PropResult
+deriving via L.AsMovable PropResult instance PL.Consumable PropResult
 
-deriving via L.Generically PropResult instance PL.Dupable PropResult
+deriving via L.AsMovable PropResult instance PL.Dupable PropResult
 
 deriving via L.Generically PropResult instance PL.Movable PropResult
 
 deriveGeneric ''Variable
 
-deriving via L.Generically Variable instance PL.Consumable Variable
+deriving via L.AsMovable Variable instance PL.Consumable Variable
 
-deriving via L.Generically Variable instance PL.Dupable Variable
+deriving via L.AsMovable Variable instance PL.Dupable Variable
 
 deriving via L.Generically Variable instance PL.Movable Variable
 
@@ -286,3 +300,9 @@ derivingUnbox
   [t|Variable -> (Bit, DecideLevel, Step, ClauseId)|]
   [|\Variable {..} -> (Bit value, S.fst introduced, S.snd introduced, antecedent)|]
   [|\(Bit value, d, s, antecedent) -> Variable {introduced = d S.:!: s, ..}|]
+
+isNegative :: Lit -> Bool
+isNegative (Lit w) = w .&. negateMask /= 0
+
+isPositive :: Lit -> Bool
+isPositive (Lit w) = w .&. negateMask == 0
