@@ -34,6 +34,7 @@ import Data.Generics.Labels ()
 import Data.HashMap.Mutable.Linear.Extra qualified as LHM
 import Data.HashSet qualified as HS
 import Data.IntSet qualified as IS
+import Data.Semigroup (Arg (..), Max (..))
 import Data.Sequence (Seq (..))
 import Data.Sequence qualified as Seq
 import Data.Set (Set)
@@ -155,24 +156,15 @@ findUIP1 !lit !curCls
                             case var of
                               Indefinite -> (mn, vals)
                               Definite {..} ->
-                                let stp = (decideLevel :!: decisionStep)
-                                 in ( Ur.lift
-                                        ( St.maybe
-                                            (St.Just $ l :!: stp)
-                                            ( \(l0 :!: stp0) ->
-                                                if stp0 > stp
-                                                  then St.Just $ l0 :!: stp0
-                                                  else St.Just $ l :!: stp
-                                            )
-                                        )
-                                        mn
+                                let stp = decideLevel :!: decisionStep
+                                 in ( Ur.lift (P.<> St.Just (Max (Arg stp l))) mn
                                     , vals
                                     )
                       )
                       St.Nothing
                       resolved
                   case mlit' of
-                    St.Just (lit' :!: _) -> findUIP1 lit' resolved
+                    St.Just (Max (Arg _ lit')) -> findUIP1 lit' resolved
                     St.Nothing -> error "findUIP1: Impossible happend!"
 
 resolve :: Lit -> Set Lit -> Set Lit -> Set Lit
