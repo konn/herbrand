@@ -239,24 +239,6 @@ unsafeMapMaybeL s p vs =
   Unsafe.toLinear (\s -> (Ur (p s), s)) s & \(Ur p, s) ->
     (Ur (U.imapMaybe (traverse P.. p) P.$ U.indexed vs), s)
 
-findUVecL ::
-  forall a b.
-  (U.Unbox a) =>
-  (b %1 -> a -> (Bool, b)) ->
-  b %1 ->
-  U.Vector a ->
-  (Maybe a, b)
-findUVecL p = go
-  where
-    go :: b %1 -> U.Vector a -> (Maybe a, b)
-    go !b !uv
-      | U.null uv = (Nothing, b)
-      | otherwise =
-          let a = U.unsafeHead uv
-           in p b a & \case
-                (True, b) -> (Just a, b)
-                (False, b) -> go b (U.unsafeTail uv)
-
 evalLit :: Lit -> Valuation %1 -> (Maybe Bool, Valuation)
 evalLit l vals =
   BiL.first
