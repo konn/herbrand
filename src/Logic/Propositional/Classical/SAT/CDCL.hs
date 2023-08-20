@@ -405,7 +405,9 @@ findNextAvailable w c@Clause {..} = S.do
       Just i ->
         let v' = litVar $ U.unsafeIndex lits i
          in S.pure (Ur (Just $ WatchChangedFromTo w origVar v' i))
-      Nothing -> S.pure (Ur (Just $ Conflict lit))
+      Nothing ->
+        -- FIXME: this code is terribly wrong! consider when w1 = Nothing and w2 = False.
+        S.pure (Ur (Just $ Conflict lit))
 
 unassigned :: Index -> Index -> Valuation -> (Int, Lit) -> Maybe AssignmentState
 unassigned exc1 exc2 vals (cur, l)
