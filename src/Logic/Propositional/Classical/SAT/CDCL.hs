@@ -189,7 +189,7 @@ checkUnitClauseLit ls = S.do
               Definite {..}
                 | decideLevel P.>= lvl ->
                     let (large', small')
-                          | large > decideLevel = (decideLevel, large)
+                          | decideLevel > large = (decideLevel, large)
                           | decideLevel == large = (large, small)
                           | decideLevel > small = (large, decideLevel)
                           | otherwise = (large, small)
