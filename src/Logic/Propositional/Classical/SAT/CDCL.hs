@@ -11,7 +11,10 @@
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 
 -- | DPLL Algorithm, supercharged with Conflict-Driven Clause Learning (CDCL).
-module Logic.Propositional.Classical.SAT.CDCL (propagateUnit) where
+module Logic.Propositional.Classical.SAT.CDCL (
+  solveState,
+  propagateUnit,
+) where
 
 import Control.Applicative
 import Control.Foldl qualified as L
@@ -22,6 +25,7 @@ import Data.Alloc.Linearly.Token (besides)
 import Data.Bifunctor.Linear qualified as BiL
 import Data.Generics.Labels ()
 import Data.HashMap.Mutable.Linear.Extra qualified as LHM
+import Data.HashSet qualified as HS
 import Data.IntSet qualified as IS
 import Data.Sequence (Seq (..))
 import Data.Sequence qualified as Seq
@@ -31,11 +35,46 @@ import Data.Vector.Mutable.Linear.Helpers qualified as LV
 import Data.Vector.Mutable.Linear.Unboxed qualified as LUV
 import Data.Vector.Unboxed qualified as U
 import Logic.Propositional.Classical.SAT.CDCL.Types
+import Logic.Propositional.Classical.SAT.Types
 import Prelude.Linear hiding (not, (&&), (+), (-), (/=), (<), (==), (||))
 import Prelude.Linear qualified as PL hiding ((+), (-))
 import Unsafe.Linear qualified as Unsafe
 import Prelude hiding (uncurry, ($))
 import Prelude qualified as P
+
+solveState :: CDCLState %1 -> Ur (SatResult (Model VarId))
+solveState = go Nothing
+  where
+    go :: Maybe Lit -> CDCLState %1 -> Ur (SatResult (Model VarId))
+    go mlit state =
+      isTotalModel state & \case
+        (Ur True, state) -> toSatResult state
+        (Ur False, state) ->
+          propagateUnit mlit state & \(Ur resl, state) ->
+            case resl of
+              ConflictFound cid ml -> undefined state -- FIXME: backjump
+              NoMorePropagation ->
+                -- Decide
+                undefined state
+
+toSatResult :: CDCLState %1 -> Ur (SatResult (Model VarId))
+toSatResult (CDCLState steps clauses numVars watches vals) =
+  steps
+    `lseq` clauses
+    `lseq` numVars
+    `lseq` watches
+    `lseq` ( LHM.toList vals
+              & \(Ur kvs) ->
+                Ur
+                  $ Satisfiable
+                  $ P.foldMap
+                    ( \(k, Variable {..}) ->
+                        if value
+                          then P.mempty {positive = HS.singleton k}
+                          else P.mempty {negative = HS.singleton k}
+                    )
+                    kvs
+           )
 
 toClauseId :: Int -> ClauseId
 toClauseId = fromIntegral
@@ -47,44 +86,44 @@ propagateUnit ml state =
       go sats (P.maybe Seq.empty Seq.singleton ml) state
   where
     go :: LSet.Set Int %1 -> Seq.Seq Lit -> CDCLState %1 -> (Ur PropResult, CDCLState)
-    go sats (l :<| rest) (CDCLState steps clauses watches vals) =
+    go sats (l :<| rest) (CDCLState steps clauses numVars watches vals) =
       LHM.lookup (litVar l) watches & \case
-        (Ur Nothing, watches) -> go sats rest (CDCLState steps clauses watches vals)
+        (Ur Nothing, watches) -> go sats rest (CDCLState steps clauses numVars watches vals)
         (Ur (Just targs), watches) ->
-          loop sats (IS.toList targs) rest (CDCLState steps clauses watches vals)
+          loop sats (IS.toList targs) rest (CDCLState steps clauses numVars watches vals)
       where
         loop :: LSet.Set Int %1 -> [Int] -> Seq.Seq Lit -> CDCLState %1 -> (Ur PropResult, CDCLState)
         loop !sats [] !rest !state = go sats rest state
-        loop !sats (!i : !is) !rest (CDCLState steps clauses watches vals) =
+        loop !sats (!i : !is) !rest (CDCLState steps clauses numVars watches vals) =
           LV.unsafeGet i clauses & \(Ur c, clauses) ->
             propLit l vals c & \(Ur resl, vals) ->
               case resl of
-                Nothing -> loop sats is rest (CDCLState steps clauses watches vals)
+                Nothing -> loop sats is rest (CDCLState steps clauses numVars watches vals)
                 Just (Conflict l) ->
                   sats
                     `lseq` ( Ur $ ConflictFound (toClauseId i) l
-                           , CDCLState steps clauses watches vals
+                           , CDCLState steps clauses numVars watches vals
                            )
                 Just (Satisfied Nothing) ->
-                  loop (LSet.insert i sats) is rest (CDCLState steps clauses watches vals)
+                  loop (LSet.insert i sats) is rest (CDCLState steps clauses numVars watches vals)
                 Just (Satisfied (Just ((w :!: old) :!: (new :!: newIdx)))) ->
                   Lens.set (watchVarL w) newIdx c & \c ->
                     LV.unsafeSet i c clauses & \clauses ->
                       moveWatchedFromTo i old new watches & \watches ->
-                        loop (LSet.insert i sats) is rest (CDCLState steps clauses watches vals)
+                        loop (LSet.insert i sats) is rest (CDCLState steps clauses numVars watches vals)
                 Just (WatchChangedFromTo w old new newIdx) ->
                   Lens.set (watchVarL w) newIdx c & \c ->
                     LV.unsafeSet i c clauses & \clauses ->
                       moveWatchedFromTo i old new watches & \watches ->
-                        loop sats is rest (CDCLState steps clauses watches vals)
+                        loop sats is rest (CDCLState steps clauses numVars watches vals)
                 Just (Unit l) ->
                   assertLit (toClauseId i) l steps vals & \(steps, vals) ->
                     loop
                       (LSet.insert i sats)
                       is
                       (rest |> l)
-                      (CDCLState steps clauses watches vals)
-    go sats Seq.Empty (CDCLState steps clauses watches vals) =
+                      (CDCLState steps clauses numVars watches vals)
+    go sats Seq.Empty (CDCLState steps clauses numVars watches vals) =
       -- No literal given a priori. Find first literal.
       -- FIXME: Use heuristic for variable selection.
       LV.findWith
@@ -99,25 +138,25 @@ propagateUnit ml state =
         clauses
         & \(Ur resl, (vals, sats), clauses) ->
           case resl of
-            Nothing -> sats `lseq` (Ur NoMorePropagation, CDCLState steps clauses watches vals)
+            Nothing -> sats `lseq` (Ur NoMorePropagation, CDCLState steps clauses numVars watches vals)
             Just (WatchChangedFromTo w old new newIdx, i) ->
               updateWatchLit i w newIdx clauses & \clauses ->
                 moveWatchedFromTo i old new watches & \watches ->
-                  go sats Seq.Empty (CDCLState steps clauses watches vals)
+                  go sats Seq.Empty (CDCLState steps clauses numVars watches vals)
             Just (Satisfied Nothing, i) ->
-              go (LSet.insert i sats) Seq.Empty (CDCLState steps clauses watches vals)
+              go (LSet.insert i sats) Seq.Empty (CDCLState steps clauses numVars watches vals)
             Just (Satisfied (Just ((w :!: old) :!: (new :!: newIdx))), i) ->
               updateWatchLit i w newIdx clauses & \clauses ->
                 moveWatchedFromTo i old new watches & \watches ->
-                  go (LSet.insert i sats) Seq.Empty (CDCLState steps clauses watches vals)
+                  go (LSet.insert i sats) Seq.Empty (CDCLState steps clauses numVars watches vals)
             Just (Conflict ml, i) ->
               sats
                 `lseq` ( Ur (ConflictFound (toClauseId i) ml)
-                       , CDCLState steps clauses watches vals
+                       , CDCLState steps clauses numVars watches vals
                        )
             Just (Unit l, i) ->
               assertLit (toClauseId i) l steps vals & \(steps, vals) ->
-                go (LSet.insert i sats) (Seq.singleton l) (CDCLState steps clauses watches vals)
+                go (LSet.insert i sats) (Seq.singleton l) (CDCLState steps clauses numVars watches vals)
 
 updateWatchLit :: Int -> WatchVar -> Index -> Clauses %1 -> Clauses
 updateWatchLit cid w vid =
@@ -166,7 +205,7 @@ findUnit vals c@Clause {..}
       let l = U.unsafeIndex lits watched1
        in evalLit l vals & \case
             (Just False, vals) ->
-              (Ur $ Just (Conflict (Just l)), vals)
+              (Ur $ Just (Conflict l), vals)
             (Just True, vals) ->
               (Ur $ Just $ Satisfied Nothing, vals)
             (Nothing, vals) ->
@@ -222,7 +261,7 @@ findNextAvailable vals w c@Clause {..} =
                   Just i ->
                     let v' = litVar $ U.unsafeIndex lits i
                      in (Ur (Just $ WatchChangedFromTo w origVar v' i), vals)
-                  Nothing -> (Ur (Just $ Conflict (Just lit)), vals)
+                  Nothing -> (Ur (Just $ Conflict lit), vals)
 
 unassigned :: Index -> Index -> Valuation -> (Int, Lit) -> Maybe AssignmentState
 unassigned exc1 exc2 vals (cur, l)
