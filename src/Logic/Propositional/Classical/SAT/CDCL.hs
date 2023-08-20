@@ -157,15 +157,14 @@ findUIP1 !lit !curCls
                               Indefinite -> (mn, vals)
                               Definite {..} ->
                                 let stp = decideLevel :!: decisionStep
-                                 in ( Ur.lift (P.<> St.Just (Max (Arg stp l))) mn
+                                 in ( Ur.lift (P.<> Max (Arg stp l)) mn
                                     , vals
                                     )
                       )
-                      St.Nothing
+                      (Max (Arg (-1 :!: -1) (error "findUIP1: Impossible happend!")))
                       resolved
                   case mlit' of
-                    St.Just (Max (Arg _ lit')) -> findUIP1 lit' resolved
-                    St.Nothing -> error "findUIP1: Impossible happend!"
+                    Max (Arg _ lit') -> findUIP1 lit' resolved
 
 resolve :: Lit -> Set Lit -> Set Lit -> Set Lit
 resolve lit l r =
