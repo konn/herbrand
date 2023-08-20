@@ -52,6 +52,7 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   U.Vector (V_VarId, V_ClauseId, V_Step, V_DecideLevel),
   U.MVector (MV_VarId, MV_ClauseId, MV_Step, MV_DecideLevel),
   PropResult (..),
+  AssignmentState (..),
 ) where
 
 import Control.DeepSeq (NFData)
@@ -74,6 +75,7 @@ import Data.Unrestricted.Linear (Ur)
 import Data.Unrestricted.Linear qualified as L
 import Data.Unrestricted.Linear.Orphans ()
 import Data.Vector.Mutable.Linear qualified as LV
+import Data.Vector.Mutable.Linear.Unboxed qualified as LUV
 import Data.Vector.Unboxed qualified as U
 import Data.Vector.Unboxed.Deriving (derivingUnbox)
 import GHC.Generics (Generic)
@@ -189,7 +191,7 @@ type Clauses = LV.Vector Clause
 data CDLLState where
   CDLLState ::
     -- | Level-wise maximum steps
-    {-# UNPACK #-} !(LV.Vector Step) %1 ->
+    {-# UNPACK #-} !(LUV.Vector Step) %1 ->
     -- | Clauses
     {-# UNPACK #-} !Clauses %1 ->
     -- | Watches
@@ -198,7 +200,7 @@ data CDLLState where
     {-# UNPACK #-} !Valuation %1 ->
     CDLLState
 
-stepsL :: LinLens.Lens' CDLLState (LV.Vector Step)
+stepsL :: LinLens.Lens' CDLLState (LUV.Vector Step)
 {-# INLINE stepsL #-}
 stepsL = LinLens.lens \(CDLLState ss cs ws vs) ->
   (ss, \ss -> CDLLState ss cs ws vs)
@@ -220,7 +222,7 @@ variablesL = LinLens.lens \(CDLLState ss cs ws vs) -> (vs, CDLLState ss cs ws)
 backtrack :: DecideLevel -> Clause -> CDLLState %1 -> CDLLState
 {-# INLINE backtrack #-}
 backtrack decLvl learnt =
-  LinLens.over stepsL (LV.slice 0 (fromIntegral (unDecideLevel decLvl) + 1))
+  LinLens.over stepsL (LUV.slice 0 (fromIntegral (unDecideLevel decLvl) + 1))
     L.. LinLens.over clausesL (LV.push learnt)
     L.. LinLens.over variablesL (LHM.filter ((<= decLvl) . S.fst . introduced))
 
@@ -242,7 +244,7 @@ withCDLLState (CNF cls) =
         | otherwise ->
             Right
               $ let (upds, cls'') = imapAccumL buildClause Map.empty cls'
-                 in \k -> LV.fromList [0] \steps -> LV.fromList cls'' \clauses ->
+                 in \k -> LUV.fromList [0] \steps -> LV.fromList cls'' \clauses ->
                       LHM.fromList (Map.toList upds) \watcheds ->
                         LHM.empty (Map.size upds) (k PL.. CDLLState steps clauses watcheds)
 
@@ -274,9 +276,11 @@ deriving via L.Generically CDLLState instance PL.Consumable CDLLState
 deriving via L.Generically CDLLState instance PL.Dupable CDLLState
 
 data PropResult
-  = Unit {-# UNPACK #-} !Lit !ClauseId
-  | Conflict !(Maybe Lit) !ClauseId
-  | WatchChangedFromTo !VarId !VarId
+  = Unit {-# UNPACK #-} !Lit
+  | Conflict !(Maybe Lit)
+  | -- | Optional 'Pair' records possible old watched variable and new variable.
+    Satisfied !(Maybe (Pair VarId VarId))
+  | WatchChangedFromTo {-# UNPACK #-} !VarId {-# UNPACK #-} !VarId
   deriving (Show, Eq, Ord, Generic)
 
 deriveGeneric ''PropResult
@@ -306,3 +310,19 @@ isNegative (Lit w) = w .&. negateMask /= 0
 
 isPositive :: Lit -> Bool
 isPositive (Lit w) = w .&. negateMask == 0
+
+data AssignmentState = Unassigned | AssignedTrue
+  deriving (Show, Eq, Ord, Generic)
+
+derivingUnbox
+  "AssignmentState"
+  [t|AssignmentState -> Bit|]
+  [|\case AssignedTrue -> Bit True; Unassigned -> Bit False|]
+  [|\case Bit True -> AssignedTrue; Bit False -> Unassigned|]
+deriveGeneric ''AssignmentState
+
+deriving via L.AsMovable AssignmentState instance L.Consumable AssignmentState
+
+deriving via L.AsMovable AssignmentState instance L.Dupable AssignmentState
+
+deriving via L.Generically AssignmentState instance L.Movable AssignmentState

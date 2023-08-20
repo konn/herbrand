@@ -18,6 +18,7 @@ module Logic.Propositional.Classical.SAT.CDCL () where
 import Control.Applicative
 import Control.Foldl qualified as L
 import Control.Lens hiding (Index, (&))
+import Control.Lens qualified as Lens
 import Control.Lens.Extras qualified as Lens
 import Control.Monad (guard)
 import Control.Monad.Trans.Maybe (MaybeT (..))
@@ -43,7 +44,8 @@ import GHC.Generics (Generic)
 import Logic.Propositional.Classical.SAT.CDCL.Types
 import Logic.Propositional.Classical.SAT.Types
 import Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
-import Prelude.Linear hiding (not, (&&), (/=), (<), (==))
+import Prelude.Linear hiding (not, (&&), (/=), (<), (==), (||))
+import Unsafe.Linear qualified as Unsafe
 import Prelude hiding (uncurry, ($))
 import Prelude qualified as P
 
@@ -54,93 +56,95 @@ unitPropInit (CDLLState steps clauses watches vals) =
     & \(m, (steps, vals), clauses) ->
       (CDLLState steps clauses watches vals, Ur.lift isJust m)
  -}
+
+toClauseId :: Int -> ClauseId
+toClauseId = fromIntegral
+
 findUnit ::
   Valuation %1 ->
-  Int ->
   Clause ->
-  (Ur (Maybe (PropResult, Clause)), Valuation)
-findUnit vals i c@Clause {..}
+  (Ur (Maybe PropResult), Valuation)
+findUnit vals c@Clause {..}
   | watched2 < 0 -- Only the first literal is active.
     =
       let l = U.unsafeIndex lits watched1
        in evalLit l vals & \case
             (Just False, vals) ->
-              (Ur $ Just (Conflict (Just l) $ fromIntegral i, c), vals)
+              (Ur $ Just (Conflict (Just l)), vals)
             (Just True, vals) ->
-              (Ur Nothing, vals)
+              (Ur $ Just $ Satisfied Nothing, vals)
             (Nothing, vals) ->
-              (Ur $ Just (Unit l (fromIntegral i), c), vals)
-  | otherwise =
-      let cid = fromIntegral i :: ClauseId
-          l1 = U.unsafeIndex lits watched1
+              (Ur $ Just (Unit l), vals)
+  | otherwise -- The clause has more than two literals.
+    =
+      let l1 = U.unsafeIndex lits watched1
           l2 = U.unsafeIndex lits watched2
        in evalLit l1 vals & \case
-            (Just True, vals) -> (Ur Nothing, vals) -- satified; nothing to do.
+            (Just True, vals) -> (Ur (Just $ Satisfied Nothing), vals) -- satisfied; nothing to do.
             (Just False, vals) ->
-              -- Unsatisfiable literal: find next literal
-              findUVecL (unassigned watched2) vals (U.indexed lits)
-                & BiL.first move
-                & \case
-                  (Ur Nothing, vals) -> (Ur (Just (Conflict (Just l1) cid, c)), vals)
-                  (Ur (Just (k, l)), vals) ->
-                    ( Ur
-                        ( Just
-                            ( WatchChangedFromTo (litVar l1) (litVar l)
-                            , c {watched1 = k}
-                            )
-                        )
-                    , vals
-                    )
+              -- Unsatisfiable literal: find next available literal for watched1
+              findNextAvailable vals watched1 c
             (Nothing, vals) ->
               -- Undetermined. Check for watched2
               evalLit l2 vals & \case
-                (Just True, vals) -> (Ur Nothing, vals) -- satified; nothing to do.
+                (Just True, vals) ->
+                  -- satisfied; nothing to do.
+                  (Ur (Just $ Satisfied Nothing), vals)
                 (Just False, vals) ->
-                  -- Unsatisfiable literal: find next literal
-                  findUVecL (unassigned watched1) vals (U.indexed lits)
-                    & BiL.first move
-                    & \case
-                      (Ur Nothing, vals) -> (Ur (Just (Conflict (Just l1) cid, c)), vals)
-                      (Ur (Just (k, l)), vals) ->
-                        ( Ur
-                            ( Just
-                                ( WatchChangedFromTo (litVar l1) (litVar l)
-                                , c {watched1 = k}
-                                )
-                            )
-                        , vals
-                        )
+                  -- Unsatisfiable literal: find next available literal for watched2
+                  findNextAvailable vals watched2 c
+                (Nothing, vals) ->
+                  -- No literal changed.
+                  (Ur Nothing, vals)
 
-{- U.findIndex undefined (U.indexed vs) & \case
-  Nothing -> vals `lseq`(Ur Nothing, vals) -}
+findNextAvailable :: Valuation %1 -> Index -> Clause -> (Ur (Maybe PropResult), Valuation)
+findNextAvailable vals origIdx Clause {..} =
+  let lit = U.unsafeIndex lits origIdx
+      origVar = litVar lit
+   in unsafeMapMaybeL
+        vals
+        ( \vals i l ->
+            unassigned watched1 watched2 vals (i, l)
+        )
+        lits
+        & \(Ur cands, vals) ->
+          let (mSat, mUndet) =
+                L.foldOver
+                  (Lens.foldring U.foldr)
+                  ( (,)
+                      <$> (fmap fst <$> L.find ((== AssignedTrue) P.. P.snd))
+                      <*> (fmap fst <$> L.find ((== Unassigned) P.. P.snd))
+                  )
+                  cands
+           in case mSat of
+                Just i ->
+                  let v' = litVar $ U.unsafeIndex lits i
+                   in (Ur (Just (Satisfied $ Just $ origVar :!: v')), vals)
+                Nothing -> case mUndet of
+                  Just i ->
+                    let v' = litVar $ U.unsafeIndex lits i
+                     in (Ur (Just $ WatchChangedFromTo origVar v'), vals)
+                  Nothing -> (Ur (Just $ Conflict (Just lit)), vals)
 
--- \$ Just (Unit l2 (fromIntegral i), c)
-
--- Just i -> (Ur (Just (Nothing,)))
-{-
-            (Nothing, vals) ->
-              evalLit l2 vals & \case
-                (Just True, vals) -> (Ur (Nothing, c), (steps, vals))
-                (Nothing, vals) -> (Ur (Nothing, c), (steps, vals))
-                (Just False, vals) ->
-                  findUVecL (unassigned watched1) vals (U.indexed lits) & \case
-                    (Ur Nothing, vals) ->
-                      ( Ur (Just (Unit l1 (fromIntegral i)), c)
-                      , (steps, vals)
-                      )
-                    (Ur (Just (i, _)), vals) ->
-                      ( Ur (Nothing, c {watched2 = i})
-                      , (steps, vals)
-                      )
--}
-
-unassigned :: Index -> Valuation %1 -> (Int, Lit) -> (Bool, Valuation)
-unassigned exclude vals (cur, l)
-  | cur == exclude = (False, vals)
+unassigned :: Index -> Index -> Valuation -> (Int, Lit) -> Maybe AssignmentState
+unassigned exc1 exc2 vals (cur, l)
+  | cur == exc1 || cur == exc2 = Nothing
   | otherwise =
       evalLit l vals & \case
-        (Nothing, vals) -> (True, vals)
-        (Just {}, vals) -> (False, vals)
+        (Nothing, _vals) -> Just Unassigned
+        (Just True, _vals) -> Just AssignedTrue
+        (Just False, _vals) -> Nothing
+
+unsafeMapMaybeL ::
+  forall a b s.
+  (U.Unbox a, U.Unbox b) =>
+  s %1 ->
+  (s -> Int -> a -> Maybe b) ->
+  U.Vector a ->
+  (Ur (U.Vector (Int, b)), s)
+unsafeMapMaybeL s p vs =
+  Unsafe.toLinear (\s -> (Ur (p s), s)) s & \(Ur p, s) ->
+    (Ur (U.imapMaybe (traverse P.. p) P.$ U.indexed vs), s)
 
 findUVecL ::
   forall a b.

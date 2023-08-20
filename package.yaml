@@ -66,6 +66,7 @@ library:
   - Logic.Propositional.Classical.SAT.CDCL.Types
   dependencies:
   - bitvec
+  - linear-array-extra
   - linear-base
   - linear-generics
   - vector-th-unbox

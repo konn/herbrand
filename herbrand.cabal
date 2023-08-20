@@ -64,6 +64,7 @@ library
     , generic-lens
     , hashable
     , lens
+    , linear-array-extra
     , linear-base
     , linear-generics
     , parallel
