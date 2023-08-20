@@ -26,6 +26,7 @@ source-repository head
 library
   exposed-modules:
       Control.Foldl.Linear
+      Control.Functor.Linear.State.Extra
       Data.HashMap.Mutable.Linear.Extra
       Data.Set.Mutable.Linear.Extra
       Data.Unrestricted.Linear.Orphans
