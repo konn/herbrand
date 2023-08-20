@@ -310,7 +310,10 @@ updateWatchLit cid w old new vid = S.do
     PL.. LHM.alter (fmap $ IS.insert cid) new
 
 assertLit :: ClauseId -> Lit -> S.State CDCLState ()
-assertLit (Just -> antecedent) lit = S.do
+assertLit ante lit = S.do
+  let antecedent
+        | ante < 0 = Nothing
+        | otherwise = Just ante
   Ur (decideLevel :!: decisionStep) <- S.zoom stepsL S.do
     Ur len <- S.state LUV.size
     let curStp = len - 1
