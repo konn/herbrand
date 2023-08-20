@@ -1,6 +1,7 @@
 {-# LANGUAGE GHC2021 #-}
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE LinearTypes #-}
@@ -51,8 +52,11 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   ClauseId (..),
   U.Vector (V_VarId, V_ClauseId, V_Step, V_DecideLevel),
   U.MVector (MV_VarId, MV_ClauseId, MV_Step, MV_DecideLevel),
-  PropResult (..),
+  UnitResult (..),
   AssignmentState (..),
+  PropResult (..),
+  WatchVar (..),
+  watchVarL,
 ) where
 
 import Control.DeepSeq (NFData)
@@ -174,6 +178,7 @@ data Variable = Variable
   , antecedent :: {-# UNPACK #-} !ClauseId
   }
   deriving (Show, Eq, Ord, Generic)
+  deriving anyclass (NFData)
 
 data Clause = Clause
   { lits :: {-# UNPACK #-} !(U.Vector Lit)
@@ -181,6 +186,7 @@ data Clause = Clause
   , watched2 :: {-# UNPACK #-} !Index
   }
   deriving (Show, Eq, Ord, Generic)
+  deriving anyclass (NFData)
 
 type Valuation = LHM.HashMap VarId Variable
 
@@ -275,21 +281,31 @@ deriving via L.Generically CDLLState instance PL.Consumable CDLLState
 
 deriving via L.Generically CDLLState instance PL.Dupable CDLLState
 
-data PropResult
+data WatchVar = W1 | W2 deriving (Show, Eq, Ord, Generic)
+
+deriveGeneric ''WatchVar
+
+deriving via L.AsMovable WatchVar instance PL.Consumable WatchVar
+
+deriving via L.AsMovable WatchVar instance PL.Dupable WatchVar
+
+deriving via L.Generically WatchVar instance PL.Movable WatchVar
+
+data UnitResult
   = Unit {-# UNPACK #-} !Lit
   | Conflict !(Maybe Lit)
   | -- | Optional 'Pair' records possible old watched variable and new variable.
-    Satisfied !(Maybe (Pair VarId VarId))
-  | WatchChangedFromTo {-# UNPACK #-} !VarId {-# UNPACK #-} !VarId
+    Satisfied !(Maybe (Pair (Pair WatchVar VarId) (Pair VarId Index)))
+  | WatchChangedFromTo {-# UNPACK #-} !WatchVar {-# UNPACK #-} !VarId {-# UNPACK #-} !VarId {-# UNPACK #-} !Index
   deriving (Show, Eq, Ord, Generic)
 
-deriveGeneric ''PropResult
+deriveGeneric ''UnitResult
 
-deriving via L.AsMovable PropResult instance PL.Consumable PropResult
+deriving via L.AsMovable UnitResult instance PL.Consumable UnitResult
 
-deriving via L.AsMovable PropResult instance PL.Dupable PropResult
+deriving via L.AsMovable UnitResult instance PL.Dupable UnitResult
 
-deriving via L.Generically PropResult instance PL.Movable PropResult
+deriving via L.Generically UnitResult instance PL.Movable UnitResult
 
 deriveGeneric ''Variable
 
@@ -326,3 +342,20 @@ deriving via L.AsMovable AssignmentState instance L.Consumable AssignmentState
 deriving via L.AsMovable AssignmentState instance L.Dupable AssignmentState
 
 deriving via L.Generically AssignmentState instance L.Movable AssignmentState
+
+data PropResult
+  = ConflictFound {-# UNPACK #-} !ClauseId !(Maybe Lit)
+  | NoMorePropagation
+  deriving (Show, Eq, Ord, Generic)
+
+deriveGeneric ''PropResult
+
+deriving via L.AsMovable PropResult instance L.Consumable PropResult
+
+deriving via L.AsMovable PropResult instance L.Dupable PropResult
+
+deriving via L.Generically PropResult instance L.Movable PropResult
+
+watchVarL :: WatchVar -> Lens' Clause Index
+watchVarL W1 = #watched1
+watchVarL W2 = #watched1
