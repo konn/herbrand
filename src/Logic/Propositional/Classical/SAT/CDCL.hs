@@ -7,9 +7,7 @@
 {-# LANGUAGE PartialTypeSignatures #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE ViewPatterns #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 
 -- | DPLL Algorithm, supercharged with Conflict-Driven Clause Learning (CDCL).
@@ -20,36 +18,17 @@ import Control.Foldl qualified as L
 import Control.Lens hiding (Index, (&))
 import Control.Lens qualified as Lens
 import Control.Lens.Extras qualified as Lens
-import Control.Monad (guard)
-import Control.Monad.Trans.Maybe (MaybeT (..))
-import Control.Monad.Trans.Reader (ReaderT (..))
-import Control.Monad.Trans.Writer.CPS (runWriter, tell, writer)
-import Control.Optics.Linear
 import Data.Bifunctor.Linear qualified as BiL
-import Data.Foldable (foldl', foldr', foldrM)
-import Data.Function (fix)
-import Data.Functor (($>))
-import Data.Functor.Linear qualified as D
 import Data.Generics.Labels ()
 import Data.HashMap.Mutable.Linear.Extra qualified as LHM
-import Data.HashSet qualified as HS
-import Data.Hashable (Hashable)
 import Data.IntSet qualified as IS
-import Data.Maybe (isJust)
 import Data.Sequence (Seq (..))
 import Data.Sequence qualified as Seq
-import Data.Set.Mutable.Linear qualified as LSet
-import Data.Set.Mutable.Linear qualified as Set
 import Data.Strict (Pair (..))
-import Data.Strict.Tuple qualified as S
-import Data.Unrestricted.Linear qualified as Ur
 import Data.Vector.Mutable.Linear.Extra qualified as LV
 import Data.Vector.Mutable.Linear.Unboxed qualified as LUV
 import Data.Vector.Unboxed qualified as U
-import GHC.Generics (Generic)
 import Logic.Propositional.Classical.SAT.CDCL.Types
-import Logic.Propositional.Classical.SAT.Types
-import Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
 import Prelude.Linear hiding (not, (&&), (+), (-), (/=), (<), (==), (||))
 import Prelude.Linear qualified as PL hiding ((+), (-))
 import Unsafe.Linear qualified as Unsafe
