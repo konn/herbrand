@@ -27,7 +27,7 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   WatchMap,
   stepsL,
   clausesL,
-  watchMapL,
+  watchesL,
   valuationL,
   Index,
   backtrack,
@@ -183,7 +183,7 @@ data Variable
   = Definite
       { decideLevel :: {-# UNPACK #-} !DecideLevel
       , decisionStep :: {-# UNPACK #-} !Step
-      , antecedent :: {-# UNPACK #-} !(Maybe ClauseId)
+      , antecedent :: !(Maybe ClauseId)
       , value :: !Bool
       }
   | Indefinite
@@ -256,12 +256,12 @@ clausesL :: LinLens.Lens' CDCLState (LV.Vector Clause)
 clausesL = LinLens.lens \(CDCLState ss cs ws vs) ->
   (cs, \cs -> CDCLState ss cs ws vs)
 
-watchMapL :: LinLens.Lens' CDCLState WatchMap
-{-# INLINE watchMapL #-}
-watchMapL = LinLens.lens \(CDCLState ss cs ws vs) ->
+watchesL :: LinLens.Lens' CDCLState WatchMap
+{-# INLINE watchesL #-}
+watchesL = LinLens.lens \(CDCLState ss cs ws vs) ->
   (ws, \ws -> CDCLState ss cs ws vs)
 
-valuationL :: LinLens.Lens' CDCLState Valuation
+valuationL :: LinLens.Lens CDCLState CDCLState Valuation Valuation
 {-# INLINE valuationL #-}
 valuationL = LinLens.lens \(CDCLState ss cs ws vs) -> (vs, CDCLState ss cs ws)
 
