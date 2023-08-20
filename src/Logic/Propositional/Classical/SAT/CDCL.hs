@@ -160,7 +160,7 @@ findUIP1 !lit !curCls
                                         ( St.maybe
                                             (St.Just $ l :!: stp)
                                             ( \(l0 :!: stp0) ->
-                                                if stp0 > stp0
+                                                if stp0 > stp
                                                   then St.Just $ l0 :!: stp0
                                                   else St.Just $ l :!: stp
                                             )
