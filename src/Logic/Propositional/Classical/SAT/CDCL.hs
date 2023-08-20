@@ -148,7 +148,7 @@ findUIP1 !lit !curCls
               if Set.null resolved
                 then S.pure $ Ur Nothing -- Conflicting clause
                 else S.do
-                  Ur mlit' <- S.uses valuationL \vals ->
+                  Ur (Max (Arg _ lit')) <- S.uses valuationL \vals ->
                     foldlLin'
                       vals
                       ( \vals !mn !l ->
@@ -163,8 +163,7 @@ findUIP1 !lit !curCls
                       )
                       (Max (Arg (-1 :!: -1) (error "findUIP1: Impossible happend!")))
                       resolved
-                  case mlit' of
-                    Max (Arg _ lit') -> findUIP1 lit' resolved
+                  findUIP1 lit' resolved
 
 resolve :: Lit -> Set Lit -> Set Lit -> Set Lit
 resolve lit l r =
