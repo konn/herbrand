@@ -19,6 +19,7 @@
 
 module Logic.Propositional.Classical.SAT.CDCL.Types (
   withCDCLState,
+  toCDCLState,
   CDCLState (..),
   Valuation,
   Clauses,
@@ -66,11 +67,12 @@ import Control.Foldl qualified as L
 import Control.Lens (Lens', Prism', imapAccumL, lens, prism')
 import Control.Monad (guard)
 import Control.Optics.Linear qualified as LinLens
+import Data.Alloc.Linearly.Token
 import Data.Alloc.Linearly.Token.Unsafe (HasLinearWitness)
 import Data.Bit (Bit (..))
 import Data.Bits ((.&.), (.|.))
 import Data.Generics.Labels ()
-import Data.HashMap.Mutable.Linear qualified as LHM
+import Data.HashMap.Mutable.Linear.Extra qualified as LHM
 import Data.Hashable (Hashable)
 import Data.IntSet (IntSet)
 import Data.IntSet qualified as IS
@@ -80,7 +82,7 @@ import Data.Strict.Tuple qualified as S
 import Data.Unrestricted.Linear (Ur)
 import Data.Unrestricted.Linear qualified as L
 import Data.Unrestricted.Linear.Orphans ()
-import Data.Vector.Mutable.Linear qualified as LV
+import Data.Vector.Mutable.Linear.Extra qualified as LV
 import Data.Vector.Mutable.Linear.Unboxed qualified as LUV
 import Data.Vector.Unboxed qualified as U
 import Data.Vector.Unboxed.Deriving (derivingUnbox)
@@ -89,7 +91,7 @@ import Generics.Linear qualified as L
 import Generics.Linear.TH (deriveGeneric)
 import Logic.Propositional.Classical.SAT.Types (SatResult (..))
 import Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
-import Prelude.Linear ((&))
+import Prelude.Linear (lseq, (&))
 import Prelude.Linear qualified as L
 import Prelude.Linear qualified as PL
 
@@ -236,6 +238,32 @@ backtrack decLvl learnt =
     L.. LinLens.over clausesL (LV.push learnt)
     L.. LinLens.over variablesL (LHM.filter ((<= decLvl) . S.fst . introduced))
 
+toCDCLState :: Linearly %1 -> CNF VarId -> Either (SatResult ()) CDCLState
+toCDCLState lin (CNF cls) =
+  let (cls', truth, contradicting) =
+        L.fold
+          ( (,,)
+              <$> L.handles
+                #_CNFClause
+                (L.premap (L.fold L.nub . map encodeLit) L.nub)
+              <*> Foldl.null
+              <*> Foldl.any null
+          )
+          cls
+      (upds, cls'') = imapAccumL buildClause Map.empty cls'
+   in case () of
+        _
+          | truth -> lin `lseq` Left (Satisfiable ())
+          | contradicting -> lin `lseq` Left Unsat
+        _ ->
+          besides lin (`LUV.fromListL` [0]) PL.& \(steps, lin) ->
+            besides lin (`LV.fromListL` cls'') PL.& \(clauses, lin) ->
+              besides lin (`LHM.fromListL` Map.toList upds)
+                PL.& \(watcheds, lin) ->
+                  Right
+                    PL.$ CDCLState steps clauses watcheds
+                    PL.$ LHM.emptyL lin (Map.size upds)
+
 withCDCLState :: CNF VarId -> Either (SatResult ()) ((CDCLState %1 -> Ur a) %1 -> Ur a)
 withCDCLState (CNF cls) =
   let (cls', truth, contradicting) =
@@ -300,7 +328,7 @@ data UnitResult
   | Conflict !(Maybe Lit)
   | -- | Optional 'Pair' records possible old watched variable and new variable.
     Satisfied !(Maybe (Pair (Pair WatchVar VarId) (Pair VarId Index)))
-  | WatchChangedFromTo {-# UNPACK #-} !WatchVar {-# UNPACK #-} !VarId {-# UNPACK #-} !VarId {-# UNPACK #-} !Index
+  | WatchChangedFromTo !WatchVar {-# UNPACK #-} !VarId {-# UNPACK #-} !VarId {-# UNPACK #-} !Index
   deriving (Show, Eq, Ord, Generic)
 
 deriveGeneric ''UnitResult

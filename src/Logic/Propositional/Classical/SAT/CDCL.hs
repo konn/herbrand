@@ -27,7 +27,7 @@ import Data.Sequence (Seq (..))
 import Data.Sequence qualified as Seq
 import Data.Set.Mutable.Linear.Extra qualified as LSet
 import Data.Strict (Pair (..))
-import Data.Vector.Mutable.Linear.Extra qualified as LV
+import Data.Vector.Mutable.Linear.Helpers qualified as LV
 import Data.Vector.Mutable.Linear.Unboxed qualified as LUV
 import Data.Vector.Unboxed qualified as U
 import Logic.Propositional.Classical.SAT.CDCL.Types
@@ -36,14 +36,6 @@ import Prelude.Linear qualified as PL hiding ((+), (-))
 import Unsafe.Linear qualified as Unsafe
 import Prelude hiding (uncurry, ($))
 import Prelude qualified as P
-
-{-
-unitPropInit :: CDCLState %1 -> (CDCLState, UnitResult)
-unitPropInit (CDCLState steps clauses watches vals) =
-  LV.findWith (uncurry findUnit) (steps, vals) clauses
-    & \(m, (steps, vals), clauses) ->
-      (CDCLState steps clauses watches vals, Ur.lift isJust m)
- -}
 
 toClauseId :: Int -> ClauseId
 toClauseId = fromIntegral

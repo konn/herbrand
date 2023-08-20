@@ -4,14 +4,14 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 
-module Data.Vector.Mutable.Linear.Extra (
+module Data.Vector.Mutable.Linear.Helpers (
   imapAccumL',
   findWith,
-  module Data.Vector.Mutable.Linear,
+  module Data.Vector.Mutable.Linear.Extra,
 ) where
 
 import Data.Unrestricted.Linear
-import Data.Vector.Mutable.Linear
+import Data.Vector.Mutable.Linear.Extra
 import Prelude.Linear ((&))
 
 imapAccumL' ::

@@ -29,7 +29,7 @@ library
       Data.HashMap.Mutable.Linear.Extra
       Data.Set.Mutable.Linear.Extra
       Data.Unrestricted.Linear.Orphans
-      Data.Vector.Mutable.Linear.Extra
+      Data.Vector.Mutable.Linear.Helpers
       Logic.Propositional.Classical.SAT.BruteForce
       Logic.Propositional.Classical.SAT.CDCL
       Logic.Propositional.Classical.SAT.DPLL
