@@ -83,8 +83,8 @@ solverLoop = fix $ \go mlit -> S.do
               vid
               Definite
                 { value = True
-                , decisionStep = fromIntegral newDec
-                , decideLevel = 0
+                , decideLevel = fromIntegral newDec
+                , decisionStep = 0
                 , antecedent = Nothing
                 }
           go (Just (PosL $ toEnum vid, -1))
