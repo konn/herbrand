@@ -27,6 +27,7 @@ library
   exposed-modules:
       Control.Foldl.Linear
       Data.HashMap.Mutable.Linear.Extra
+      Data.Set.Mutable.Linear.Extra
       Data.Unrestricted.Linear.Orphans
       Data.Vector.Mutable.Linear.Extra
       Logic.Propositional.Classical.SAT.BruteForce

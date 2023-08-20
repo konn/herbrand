@@ -18,12 +18,14 @@ import Control.Foldl qualified as L
 import Control.Lens hiding (Index, (&))
 import Control.Lens qualified as Lens
 import Control.Lens.Extras qualified as Lens
+import Data.Alloc.Linearly.Token (besides)
 import Data.Bifunctor.Linear qualified as BiL
 import Data.Generics.Labels ()
 import Data.HashMap.Mutable.Linear.Extra qualified as LHM
 import Data.IntSet qualified as IS
 import Data.Sequence (Seq (..))
 import Data.Sequence qualified as Seq
+import Data.Set.Mutable.Linear.Extra qualified as LSet
 import Data.Strict (Pair (..))
 import Data.Vector.Mutable.Linear.Extra qualified as LV
 import Data.Vector.Mutable.Linear.Unboxed qualified as LUV
@@ -36,83 +38,94 @@ import Prelude hiding (uncurry, ($))
 import Prelude qualified as P
 
 {-
-unitPropInit :: CDLLState %1 -> (CDLLState, UnitResult)
-unitPropInit (CDLLState steps clauses watches vals) =
+unitPropInit :: CDCLState %1 -> (CDCLState, UnitResult)
+unitPropInit (CDCLState steps clauses watches vals) =
   LV.findWith (uncurry findUnit) (steps, vals) clauses
     & \(m, (steps, vals), clauses) ->
-      (CDLLState steps clauses watches vals, Ur.lift isJust m)
+      (CDCLState steps clauses watches vals, Ur.lift isJust m)
  -}
 
 toClauseId :: Int -> ClauseId
 toClauseId = fromIntegral
 
-propagateUnit :: Maybe Lit -> CDLLState %1 -> (Ur PropResult, CDLLState)
-propagateUnit = go IS.empty P.. P.maybe Seq.empty Seq.singleton
+propagateUnit :: Maybe Lit -> CDCLState %1 -> (Ur PropResult, CDCLState)
+propagateUnit ml state =
+  numClauses state & \(Ur cap, state) ->
+    besides state (`LSet.emptyL` cap) & \(sats, state) ->
+      go sats (P.maybe Seq.empty Seq.singleton ml) state
   where
-    go :: IS.IntSet -> Seq.Seq Lit -> CDLLState %1 -> (Ur PropResult, CDLLState)
-    go sats (l :<| rest) (CDLLState steps clauses watches vals) =
+    go :: LSet.Set Int %1 -> Seq.Seq Lit -> CDCLState %1 -> (Ur PropResult, CDCLState)
+    go sats (l :<| rest) (CDCLState steps clauses watches vals) =
       LHM.lookup (litVar l) watches & \case
-        (Ur Nothing, watches) -> go sats rest (CDLLState steps clauses watches vals)
+        (Ur Nothing, watches) -> go sats rest (CDCLState steps clauses watches vals)
         (Ur (Just targs), watches) ->
-          loop sats (IS.toList targs) rest (CDLLState steps clauses watches vals)
+          loop sats (IS.toList targs) rest (CDCLState steps clauses watches vals)
       where
-        loop :: IS.IntSet -> [Int] -> Seq.Seq Lit -> CDLLState %1 -> (Ur PropResult, CDLLState)
+        loop :: LSet.Set Int %1 -> [Int] -> Seq.Seq Lit -> CDCLState %1 -> (Ur PropResult, CDCLState)
         loop !sats [] !rest !state = go sats rest state
-        loop !sats (!i : !is) !rest (CDLLState steps clauses watches vals) =
+        loop !sats (!i : !is) !rest (CDCLState steps clauses watches vals) =
           LV.unsafeGet i clauses & \(Ur c, clauses) ->
             propLit l vals c & \(Ur resl, vals) ->
               case resl of
-                Nothing -> loop sats is rest (CDLLState steps clauses watches vals)
+                Nothing -> loop sats is rest (CDCLState steps clauses watches vals)
                 Just (Conflict l) ->
-                  ( Ur $ ConflictFound (toClauseId i) l
-                  , CDLLState steps clauses watches vals
-                  )
+                  sats
+                    `lseq` ( Ur $ ConflictFound (toClauseId i) l
+                           , CDCLState steps clauses watches vals
+                           )
                 Just (Satisfied Nothing) ->
-                  loop (IS.insert i sats) is rest (CDLLState steps clauses watches vals)
+                  loop (LSet.insert i sats) is rest (CDCLState steps clauses watches vals)
                 Just (Satisfied (Just ((w :!: old) :!: (new :!: newIdx)))) ->
                   Lens.set (watchVarL w) newIdx c & \c ->
                     LV.unsafeSet i c clauses & \clauses ->
                       moveWatchedFromTo i old new watches & \watches ->
-                        loop (IS.insert i sats) is rest (CDLLState steps clauses watches vals)
+                        loop (LSet.insert i sats) is rest (CDCLState steps clauses watches vals)
                 Just (WatchChangedFromTo w old new newIdx) ->
                   Lens.set (watchVarL w) newIdx c & \c ->
                     LV.unsafeSet i c clauses & \clauses ->
                       moveWatchedFromTo i old new watches & \watches ->
-                        loop sats is rest (CDLLState steps clauses watches vals)
+                        loop sats is rest (CDCLState steps clauses watches vals)
                 Just (Unit l) ->
                   assertLit (toClauseId i) l steps vals & \(steps, vals) ->
                     loop
-                      (IS.insert i sats)
+                      (LSet.insert i sats)
                       is
                       (rest |> l)
-                      (CDLLState steps clauses watches vals)
-    go sats Seq.Empty (CDLLState steps clauses watches vals) =
+                      (CDCLState steps clauses watches vals)
+    go sats Seq.Empty (CDCLState steps clauses watches vals) =
       -- No literal given a priori. Find first literal.
       -- FIXME: Use heuristic for variable selection.
       LV.findWith
-        (\vals i c -> if i `IS.notMember` sats then findUnit vals c else (Ur Nothing, vals))
-        vals
+        ( \(vals, sats) i c ->
+            LSet.member i sats & \case
+              (Ur False, sats) ->
+                findUnit vals c & \(r, a) ->
+                  (r, (a, sats))
+              (Ur True, sats) -> (Ur Nothing, (vals, sats))
+        )
+        (vals, sats)
         clauses
-        & \(Ur resl, vals, clauses) ->
+        & \(Ur resl, (vals, sats), clauses) ->
           case resl of
-            Nothing -> (Ur NoMorePropagation, CDLLState steps clauses watches vals)
+            Nothing -> sats `lseq` (Ur NoMorePropagation, CDCLState steps clauses watches vals)
             Just (WatchChangedFromTo w old new newIdx, i) ->
               updateWatchLit i w newIdx clauses & \clauses ->
                 moveWatchedFromTo i old new watches & \watches ->
-                  go sats Seq.Empty (CDLLState steps clauses watches vals)
+                  go sats Seq.Empty (CDCLState steps clauses watches vals)
             Just (Satisfied Nothing, i) ->
-              go (IS.insert i sats) Seq.Empty (CDLLState steps clauses watches vals)
+              go (LSet.insert i sats) Seq.Empty (CDCLState steps clauses watches vals)
             Just (Satisfied (Just ((w :!: old) :!: (new :!: newIdx))), i) ->
               updateWatchLit i w newIdx clauses & \clauses ->
                 moveWatchedFromTo i old new watches & \watches ->
-                  go (IS.insert i sats) Seq.Empty (CDLLState steps clauses watches vals)
+                  go (LSet.insert i sats) Seq.Empty (CDCLState steps clauses watches vals)
             Just (Conflict ml, i) ->
-              ( Ur (ConflictFound (toClauseId i) ml)
-              , CDLLState steps clauses watches vals
-              )
+              sats
+                `lseq` ( Ur (ConflictFound (toClauseId i) ml)
+                       , CDCLState steps clauses watches vals
+                       )
             Just (Unit l, i) ->
               assertLit (toClauseId i) l steps vals & \(steps, vals) ->
-                go (IS.insert i sats) (Seq.singleton l) (CDLLState steps clauses watches vals)
+                go (LSet.insert i sats) (Seq.singleton l) (CDCLState steps clauses watches vals)
 
 updateWatchLit :: Int -> WatchVar -> Index -> Clauses %1 -> Clauses
 updateWatchLit cid w vid =
