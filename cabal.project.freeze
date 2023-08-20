@@ -3023,4 +3023,4 @@ constraints: abstract-deque ==0.3,
 source-repository-package
   type: git
   location: https://github.com/konn/linear-array-extra.git
-  tag: 74c230d2dbb10bf012a130d1b4a514e1580251e5
+  tag: 7a05371f4bbe6236688cd60a53cd66d04fe7f82e

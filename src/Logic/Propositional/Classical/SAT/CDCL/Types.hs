@@ -15,6 +15,7 @@
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
+{-# OPTIONS_GHC -Wno-partial-fields #-}
 {-# OPTIONS_GHC -funbox-strict-fields #-}
 
 module Logic.Propositional.Classical.SAT.CDCL.Types (
@@ -59,19 +60,17 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   WatchVar (..),
   watchVarL,
   numClauses,
-  numVariables,
-  isTotalModel,
 ) where
 
 import Control.DeepSeq (NFData)
 import Control.Foldl qualified as Foldl
 import Control.Foldl qualified as L
 import Control.Lens (Lens', Prism', imapAccumL, lens, prism')
-import Control.Lens qualified as Lens
 import Control.Monad (guard)
 import Control.Optics.Linear qualified as LinLens
 import Data.Alloc.Linearly.Token
 import Data.Alloc.Linearly.Token.Unsafe (HasLinearWitness)
+import Data.Array.Mutable.Linear.Unboxed qualified as LUA
 import Data.Bit (Bit (..))
 import Data.Bits ((.&.), (.|.))
 import Data.Generics.Labels ()
@@ -80,9 +79,8 @@ import Data.Hashable (Hashable)
 import Data.IntSet (IntSet)
 import Data.IntSet qualified as IS
 import Data.Map.Strict qualified as Map
-import Data.Set qualified as Set
+import Data.Maybe (fromMaybe)
 import Data.Strict.Tuple (Pair)
-import Data.Strict.Tuple qualified as S
 import Data.Unrestricted.Linear (Ur)
 import Data.Unrestricted.Linear qualified as L
 import Data.Unrestricted.Linear.Orphans ()
@@ -105,17 +103,17 @@ newtype VarId = VarId {unVarId :: Word}
 
 derivingUnbox "VarId" [t|VarId -> Word|] [|unVarId|] [|VarId|]
 
-newtype ClauseId = ClauseId {unClauseId :: Word}
+newtype ClauseId = ClauseId {unClauseId :: Int}
   deriving (Show, Eq, Ord, Generic)
   deriving newtype (NFData, Hashable, Num, Enum, PL.Consumable, PL.Dupable, PL.Movable)
 
-derivingUnbox "ClauseId" [t|ClauseId -> Word|] [|unClauseId|] [|ClauseId|]
+derivingUnbox "ClauseId" [t|ClauseId -> Int|] [|unClauseId|] [|ClauseId|]
 
-newtype DecideLevel = DecideLevel {unDecideLevel :: Word}
+newtype DecideLevel = DecideLevel {unDecideLevel :: Int}
   deriving (Show, Eq, Ord, Generic)
   deriving newtype (NFData, Hashable, Num, Enum, Integral, Real, PL.Consumable, PL.Dupable, PL.Movable)
 
-derivingUnbox "DecideLevel" [t|DecideLevel -> Word|] [|unDecideLevel|] [|DecideLevel|]
+derivingUnbox "DecideLevel" [t|DecideLevel -> Int|] [|unDecideLevel|] [|DecideLevel|]
 
 newtype Step = Step {unStep :: Word}
   deriving (Show, Eq, Ord, Generic)
@@ -181,13 +179,45 @@ derivingUnbox "Lit" [t|Lit -> Word|] [|runLit|] [|Lit|]
 
 type Index = Int
 
-data Variable = Variable
-  { value :: !Bool
-  , introduced :: {-# UNPACK #-} !(Pair DecideLevel Step)
-  , antecedent :: {-# UNPACK #-} !ClauseId
-  }
+data Variable
+  = Definite
+      { decideLevel :: {-# UNPACK #-} !DecideLevel
+      , decisionStep :: {-# UNPACK #-} !Step
+      , antecedent :: {-# UNPACK #-} !(Maybe ClauseId)
+      , value :: !Bool
+      }
+  | Indefinite
   deriving (Show, Eq, Ord, Generic)
   deriving anyclass (NFData)
+
+isAssignedAfter :: DecideLevel -> Variable -> Bool
+isAssignedAfter _ Indefinite {} = False
+isAssignedAfter decLvl Definite {..} = decideLevel > decLvl
+
+deriveGeneric ''Variable
+
+deriving via L.AsMovable Variable instance PL.Consumable Variable
+
+deriving via L.AsMovable Variable instance PL.Dupable Variable
+
+deriving via L.Generically Variable instance PL.Movable Variable
+
+derivingUnbox
+  "Variable"
+  [t|Variable -> (DecideLevel, Step, ClauseId, Bit)|]
+  [|
+    \case
+      Indefinite -> (-1, -1, -1, Bit False)
+      Definite {..} -> (decideLevel, decisionStep, fromMaybe (-1) antecedent, Bit value)
+    |]
+  [|
+    \(decideLevel, decisionStep, ante, Bit value) ->
+      if decideLevel < 0
+        then Indefinite
+        else
+          let antecedent = if ante < 0 then Nothing else Just ante
+           in Definite {..}
+    |]
 
 data Clause = Clause
   { lits :: {-# UNPACK #-} !(U.Vector Lit)
@@ -197,7 +227,7 @@ data Clause = Clause
   deriving (Show, Eq, Ord, Generic)
   deriving anyclass (NFData)
 
-type Valuation = LHM.HashMap VarId Variable
+type Valuation = LUA.UArray Variable
 
 type WatchMap = LHM.HashMap VarId IntSet
 
@@ -209,8 +239,6 @@ data CDCLState where
     {-# UNPACK #-} !(LUV.Vector Step) %1 ->
     -- | Clauses
     {-# UNPACK #-} !Clauses %1 ->
-    -- | Number of Variables
-    {-# UNPACK #-} !(Ur Int) %1 ->
     -- | Watches
     {-# UNPACK #-} !WatchMap %1 ->
     -- | Valuations
@@ -220,41 +248,33 @@ data CDCLState where
 
 stepsL :: LinLens.Lens' CDCLState (LUV.Vector Step)
 {-# INLINE stepsL #-}
-stepsL = LinLens.lens \(CDCLState ss cs num ws vs) ->
-  (ss, \ss -> CDCLState ss cs num ws vs)
+stepsL = LinLens.lens \(CDCLState ss cs ws vs) ->
+  (ss, \ss -> CDCLState ss cs ws vs)
 
 clausesL :: LinLens.Lens' CDCLState (LV.Vector Clause)
 {-# INLINE clausesL #-}
-clausesL = LinLens.lens \(CDCLState ss cs num ws vs) ->
-  (cs, \cs -> CDCLState ss cs num ws vs)
+clausesL = LinLens.lens \(CDCLState ss cs ws vs) ->
+  (cs, \cs -> CDCLState ss cs ws vs)
 
 watchMapL :: LinLens.Lens' CDCLState WatchMap
 {-# INLINE watchMapL #-}
-watchMapL = LinLens.lens \(CDCLState ss cs num ws vs) ->
-  (ws, \ws -> CDCLState ss cs num ws vs)
+watchMapL = LinLens.lens \(CDCLState ss cs ws vs) ->
+  (ws, \ws -> CDCLState ss cs ws vs)
 
 valuationL :: LinLens.Lens' CDCLState Valuation
 {-# INLINE valuationL #-}
-valuationL = LinLens.lens \(CDCLState ss cs num ws vs) -> (vs, CDCLState ss cs num ws)
-
-backtrack :: DecideLevel -> Clause -> CDCLState %1 -> CDCLState
-{-# INLINE backtrack #-}
-backtrack decLvl learnt =
-  LinLens.over stepsL (LUV.slice 0 (fromIntegral (unDecideLevel decLvl) + 1))
-    L.. LinLens.over clausesL (LV.push learnt)
-    L.. LinLens.over valuationL (LHM.filter ((<= decLvl) . S.fst . introduced))
+valuationL = LinLens.lens \(CDCLState ss cs ws vs) -> (vs, CDCLState ss cs ws)
 
 toCDCLState :: Linearly %1 -> CNF VarId -> Either (SatResult ()) CDCLState
 toCDCLState lin (CNF cls) =
-  let (cls', truth, contradicting, numVars) =
+  let (cls', truth, contradicting) =
         L.fold
-          ( (,,,)
+          ( (,,)
               <$> L.handles
                 #_CNFClause
                 (L.premap (L.fold L.nub . map encodeLit) L.nub)
               <*> Foldl.null
               <*> Foldl.any null
-              <*> Foldl.handles Lens.folded (Set.size <$> L.set)
           )
           cls
       (upds, cls'') = imapAccumL buildClause Map.empty cls'
@@ -268,20 +288,19 @@ toCDCLState lin (CNF cls) =
               besides lin (`LHM.fromListL` Map.toList upds)
                 PL.& \(watcheds, lin) ->
                   Right
-                    PL.$ CDCLState steps clauses (Ur numVars) watcheds
-                    PL.$ LHM.emptyL lin (Map.size upds)
+                    PL.$ CDCLState steps clauses watcheds
+                    PL.$ LUA.allocL lin (Map.size upds) Indefinite
 
 withCDCLState :: CNF VarId -> Either (SatResult ()) ((CDCLState %1 -> Ur a) %1 -> Ur a)
 withCDCLState (CNF cls) =
-  let (cls', truth, contradicting, numVars) =
+  let (cls', truth, contradicting) =
         L.fold
-          ( (,,,)
+          ( (,,)
               <$> L.handles
                 #_CNFClause
                 (L.premap (L.fold L.nub . map encodeLit) L.nub)
               <*> Foldl.null
               <*> Foldl.any null
-              <*> Foldl.handles Lens.folded (Set.size <$> L.set)
           )
           cls
    in if
@@ -292,7 +311,7 @@ withCDCLState (CNF cls) =
               $ let (upds, cls'') = imapAccumL buildClause Map.empty cls'
                  in \k -> LUV.fromList [0] \steps -> LV.fromList cls'' \clauses ->
                       LHM.fromList (Map.toList upds) \watcheds ->
-                        LHM.empty (Map.size upds) (k PL.. CDCLState steps clauses (Ur numVars) watcheds)
+                        LUA.alloc (Map.size upds) Indefinite (k PL.. CDCLState steps clauses watcheds)
 
 buildClause ::
   Int ->
@@ -347,20 +366,6 @@ deriving via L.AsMovable UnitResult instance PL.Dupable UnitResult
 
 deriving via L.Generically UnitResult instance PL.Movable UnitResult
 
-deriveGeneric ''Variable
-
-deriving via L.AsMovable Variable instance PL.Consumable Variable
-
-deriving via L.AsMovable Variable instance PL.Dupable Variable
-
-deriving via L.Generically Variable instance PL.Movable Variable
-
-derivingUnbox
-  "Variable"
-  [t|Variable -> (Bit, DecideLevel, Step, ClauseId)|]
-  [|\Variable {..} -> (Bit value, S.fst introduced, S.snd introduced, antecedent)|]
-  [|\(Bit value, d, s, antecedent) -> Variable {introduced = d S.:!: s, ..}|]
-
 isNegative :: Lit -> Bool
 isNegative (Lit w) = w .&. negateMask /= 0
 
@@ -401,17 +406,18 @@ watchVarL W1 = #watched1
 watchVarL W2 = #watched1
 
 numClauses :: CDCLState %1 -> (Ur Int, CDCLState)
-numClauses (CDCLState steps clauses numVals watches vals) =
+numClauses (CDCLState steps clauses watches vals) =
   LV.size clauses & \(sz, clauses) ->
-    (sz, CDCLState steps clauses numVals watches vals)
+    (sz, CDCLState steps clauses watches vals)
 
-numVariables :: CDCLState %1 -> (Ur Int, CDCLState)
-numVariables (CDCLState steps clauses (Ur numVals) watches vals) =
-  (Ur numVals, CDCLState steps clauses (Ur numVals) watches vals)
-
-isTotalModel :: CDCLState %1 -> (Ur Bool, CDCLState)
-isTotalModel (CDCLState steps clauses (Ur numVals) watches vals) =
-  LHM.size vals & \(Ur sz, vals) ->
-    ( Ur $ numVals == sz
-    , CDCLState steps clauses (Ur numVals) watches vals
-    )
+backtrack :: DecideLevel -> Clause -> CDCLState %1 -> CDCLState
+{-# INLINE backtrack #-}
+backtrack decLvl learnt =
+  LinLens.over stepsL (LUV.slice 0 (unDecideLevel decLvl + 1))
+    L.. LinLens.over clausesL (LV.push learnt)
+    L.. LinLens.over valuationL do
+      LUA.mapSame \v ->
+        PL.move v & \(Ur v) ->
+          if isAssignedAfter decLvl v
+            then Indefinite
+            else v
