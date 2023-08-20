@@ -19,6 +19,7 @@
 {-# OPTIONS_GHC -funbox-strict-fields #-}
 
 module Logic.Propositional.Classical.SAT.CDCL.Types (
+  isAssignedAfter,
   withCDCLState,
   toCDCLState,
   CDCLState (..),
@@ -30,7 +31,6 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   watchesL,
   valuationL,
   Index,
-  backtrack,
 
   -- * Compact literal
   Lit (PosL, NegL),
@@ -93,8 +93,7 @@ import Generics.Linear qualified as L
 import Generics.Linear.TH (deriveGeneric)
 import Logic.Propositional.Classical.SAT.Types (SatResult (..))
 import Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
-import Prelude.Linear (Ur (..), lseq, (&))
-import Prelude.Linear qualified as L
+import Prelude.Linear (lseq, (&))
 import Prelude.Linear qualified as PL
 
 newtype VarId = VarId {unVarId :: Word}
@@ -409,15 +408,3 @@ numClauses :: CDCLState %1 -> (Ur Int, CDCLState)
 numClauses (CDCLState steps clauses watches vals) =
   LV.size clauses & \(sz, clauses) ->
     (sz, CDCLState steps clauses watches vals)
-
-backtrack :: DecideLevel -> Clause -> CDCLState %1 -> CDCLState
-{-# INLINE backtrack #-}
-backtrack decLvl learnt =
-  LinLens.over stepsL (LUV.slice 0 (unDecideLevel decLvl + 1))
-    L.. LinLens.over clausesL (LV.push learnt)
-    L.. LinLens.over valuationL do
-      LUA.mapSame \v ->
-        PL.move v & \(Ur v) ->
-          if isAssignedAfter decLvl v
-            then Indefinite
-            else v

@@ -25,14 +25,11 @@ import Control.Functor.Linear.State.Extra qualified as S
 import Control.Lens hiding (Index, lens, (&))
 import Control.Lens qualified as Lens
 import Control.Lens.Extras qualified as Lens
-import Control.Monad (guard)
-import Control.Optics.Linear (lens)
-import Control.Optics.Linear qualified as Opt
 import Data.Alloc.Linearly.Token (besides)
 import Data.Array.Mutable.Linear.Unboxed qualified as LUA
-import Data.Array.Polarized.Pull.Extra qualified as Pull
-import Data.Bifunctor.Linear qualified as BiL
+import Data.Foldable qualified as Foldable
 import Data.Function (fix)
+import Data.Functor.Linear qualified as D
 import Data.Generics.Labels ()
 import Data.HashMap.Mutable.Linear.Extra qualified as LHM
 import Data.HashSet qualified as HS
@@ -43,35 +40,40 @@ import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.Set.Mutable.Linear.Extra qualified as LSet
 import Data.Strict (Pair (..))
+import Data.Strict.Classes qualified as St
+import Data.Strict.Maybe qualified as St
+import Data.Tuple qualified as P
 import Data.Unrestricted.Linear qualified as Ur
 import Data.Vector.Internal.Check
 import Data.Vector.Mutable.Linear.Helpers qualified as LV
 import Data.Vector.Mutable.Linear.Unboxed qualified as LUV
 import Data.Vector.Unboxed qualified as U
+import GHC.Generics qualified as GHC
 import Logic.Propositional.Classical.SAT.CDCL.Types
 import Logic.Propositional.Classical.SAT.Types
-import Prelude.Linear hiding (not, (&&), (+), (-), (.), (/=), (<), (==), (||))
-import Prelude.Linear qualified as PL
+import Prelude.Linear hiding (not, (&&), (+), (-), (.), (/=), (<), (==), (>), (>=), (||))
+import Prelude.Linear qualified as PL hiding ((>), (>=))
 import Unsafe.Linear qualified as Unsafe
 import Prelude hiding (uncurry, ($))
 import Prelude qualified as P
 
-solveState :: CDCLState %1 -> Ur (SatResult (Model VarId))
-solveState = toSatResult PL.. S.execState (solverLoop Nothing)
+data FinalState = Ok | Failed
+  deriving (Show, P.Eq, P.Ord, GHC.Generic)
 
-solverLoop :: Maybe Lit -> S.State CDCLState ()
-solverLoop = fix \go mlit -> S.do
+solveState :: CDCLState %1 -> Ur (SatResult (Model VarId))
+solveState = toSatResult PL.. S.runState (solverLoop Nothing)
+
+solverLoop :: (HasCallStack) => Maybe (Lit, ClauseId) -> S.State CDCLState FinalState
+solverLoop = fix $ \go mlit -> S.do
   Ur resl <- propagateUnit mlit
   case resl of
-    ConflictFound cid l ->
-      -- Conflict found. Let's Backjump!
-      backjump cid l
+    ConflictFound cid l -> backjump cid l -- Conflict found. Let's Backjump!
     NoMorePropagation -> S.do
       -- Decide indefinite variable
       -- FIXME: Use heuristics for variable selection.
       Ur mid <- S.uses valuationL (LUA.findIndex (Lens.is #_Indefinite))
       case mid of
-        Nothing -> S.pure () -- No vacant variable - model is full!
+        Nothing -> S.pure Ok -- No vacant variable - model is full!
         Just vid -> S.do
           Ur newDec <- S.uses stepsL LUV.size
           stepsL S.%= LUV.push 1
@@ -84,20 +86,147 @@ solverLoop = fix \go mlit -> S.do
                 , decideLevel = 0
                 , antecedent = Nothing
                 }
-          go (Just (PosL $ toEnum vid))
+          go (Just (PosL $ toEnum vid, -1))
 
-backjump ::
-  ClauseId ->
+backjump :: (HasCallStack) => ClauseId -> Lit -> S.State CDCLState FinalState
+backjump confCls lit = S.do
+  Ur c <- S.uses clausesL $ LV.unsafeGet $ fromEnum confCls
+  Ur mLearnt <- findUIP1 lit $ L.foldOver (Lens.foldring U.foldr) L.set $ lits c
+  case mLearnt of
+    Nothing ->
+      -- No valid backjumping destination found. Unsat.
+      S.pure Failed
+    Just (decLvl, learnt, truth) -> S.do
+      stepsL S.%= LUV.slice 0 (unDecideLevel decLvl + 1)
+      clausesL S.%= LV.push learnt
+      Ur sz <- S.uses clausesL LV.size
+      valuationL S.%= LUA.mapSame \v ->
+        PL.move v & \(Ur v) ->
+          if isAssignedAfter decLvl v
+            then Indefinite
+            else v
+      let reason = fromIntegral $ sz - 1
+      solverLoop $ Just (truth, reason)
+
+findUIP1 ::
+  (HasCallStack) =>
   Lit ->
-  S.State CDCLState ()
-backjump confCls lit = undefined
+  Set Lit ->
+  S.State CDCLState (Ur (Maybe (DecideLevel, Clause, Lit)))
+findUIP1 !lit !curCls
+  | Set.null curCls = S.pure $ Ur Nothing
+  | otherwise = S.do
+      ml <- checkUnitClauseLit curCls
+      case ml of
+        Ur (Just (l', decLvl)) ->
+          -- Already Unit clause. Learn it!
+          let cls' = U.cons l' $ L.fold L.vector $ Set.delete l' curCls
+           in S.pure
+                $ Ur
+                $ Just
+                  ( decLvl
+                  , Clause
+                      { watched2 = if U.length cls' > 1 then 1 else -1
+                      , watched1 = 0
+                      , lits = cls'
+                      }
+                  , l'
+                  )
+        Ur Nothing -> S.do
+          -- Not a UIP. resolve.
+          Ur v <- S.uses valuationL $ LUA.unsafeGet $ fromEnum $ litVar lit
+          case v of
+            Indefinite -> error $ "Literal " P.<> show lit P.<> " was chosen as resolver, but indefinite!"
+            Definite {..} -> S.do
+              Ur cls' <- case antecedent of
+                Just ante ->
+                  Ur.lift (L.foldOver (Lens.foldring U.foldr) L.set . lits)
+                    D.<$> S.uses clausesL (LV.unsafeGet (fromEnum ante))
+                Nothing -> S.pure $ Ur Set.empty
+              let resolved = resolve lit curCls cls'
+              if Set.null resolved
+                then S.pure $ Ur Nothing -- Conflicting clause
+                else S.do
+                  Ur mlit' <- S.uses valuationL \vals ->
+                    foldlLin'
+                      vals
+                      ( \vals !mn !l ->
+                          LUA.unsafeGet (fromEnum $ litVar l) vals & \(Ur var, vals) ->
+                            case var of
+                              Indefinite -> (mn, vals)
+                              Definite {..} ->
+                                let stp = (decideLevel :!: decisionStep)
+                                 in ( Ur.lift
+                                        ( St.maybe
+                                            (St.Just $ l :!: stp)
+                                            ( \(l0 :!: stp0) ->
+                                                if stp0 > stp0
+                                                  then St.Just $ l0 :!: stp0
+                                                  else St.Just $ l :!: stp
+                                            )
+                                        )
+                                        mn
+                                    , vals
+                                    )
+                      )
+                      St.Nothing
+                      resolved
+                  case mlit' of
+                    St.Just (lit' :!: _) -> findUIP1 lit' resolved
+                    St.Nothing -> error "findUIP1: Impossible happend!"
 
 resolve :: Lit -> Set Lit -> Set Lit -> Set Lit
 resolve lit l r =
-  Set.filter ((/= litVar lit) . litVar) l P.<> Set.filter ((/= litVar lit) . litVar) r
+  Set.filter ((/= litVar lit) . litVar) l
+    P.<> Set.filter ((/= litVar lit) . litVar) r
 
-toSatResult :: CDCLState %1 -> Ur (SatResult (Model VarId))
-toSatResult (CDCLState steps clauses watches vals) =
+data ULS = ULS
+  { _ulCount :: {-# UNPACK #-} !Int
+  , _mcand :: !(St.Maybe Lit)
+  , _latestDec :: {-# UNPACK #-} !DecideLevel
+  , _penultimateDec :: {-# UNPACK #-} !DecideLevel
+  }
+
+checkUnitClauseLit :: Set Lit -> S.State CDCLState (Ur (Maybe (Lit, DecideLevel)))
+checkUnitClauseLit ls = S.do
+  Ur lvl <- currentDecideLevel
+  Ur lcnd <- S.uses valuationL \vals ->
+    foldlLin'
+      vals
+      ( \vals (Ur (ULS count mcand large small)) lit ->
+          LUA.unsafeGet (fromEnum (litVar lit)) vals & \(Ur var, vals) ->
+            case var of
+              Definite {..}
+                | decideLevel P.>= lvl ->
+                    let (large', small')
+                          | large > decideLevel = (decideLevel, large)
+                          | decideLevel == large = (large, small)
+                          | decideLevel > small = (large, decideLevel)
+                          | otherwise = (large, small)
+                     in (Ur (ULS count mcand large' small'), vals)
+              _ -> (Ur (ULS count mcand large small), vals)
+      )
+      (ULS 0 St.Nothing (-1) (-2))
+      ls
+  S.pure $ case lcnd of
+    (ULS 1 mx _ pu) | pu >= 0 -> Ur $ (,pu) <$> St.toLazy mx
+    _ -> Ur Nothing
+
+foldlLin' :: (Foldable.Foldable t) => b %1 -> (b %1 -> Ur x -> a -> (Ur x, b)) -> x -> t a -> (Ur x, b)
+foldlLin' b f x =
+  Unsafe.toLinear
+    (P.fmap (Foldable.foldl' (P.uncurry $ P.flip (forget f))) . P.flip (,))
+    b
+    (Ur x)
+
+currentDecideLevel :: S.State CDCLState (Ur DecideLevel)
+currentDecideLevel =
+  Ur.lift (fromIntegral P.. P.subtract 1)
+    D.<$> S.uses stepsL LUV.size
+
+toSatResult :: (FinalState, CDCLState) %1 -> Ur (SatResult (Model VarId))
+toSatResult (Failed, state) = state `lseq` Ur Unsat
+toSatResult (Ok, CDCLState steps clauses watches vals) =
   steps
     `lseq` clauses
     `lseq` watches
@@ -119,20 +248,21 @@ toSatResult (CDCLState steps clauses watches vals) =
 toClauseId :: Int -> ClauseId
 toClauseId = fromIntegral
 
-propagateUnit :: Maybe Lit -> S.State CDCLState (Ur PropResult)
+propagateUnit :: Maybe (Lit, ClauseId) -> S.State CDCLState (Ur PropResult)
 propagateUnit ml = S.do
   Ur cap <- S.state numClauses
   sats <- S.state $ \st -> besides st (`LSet.emptyL` cap)
   go sats (P.maybe Seq.empty Seq.singleton ml)
   where
-    go :: LSet.Set Int %1 -> Seq.Seq Lit -> S.State CDCLState (Ur PropResult)
-    go sats (l :<| rest) = S.do
+    go :: LSet.Set Int %1 -> Seq.Seq (Lit, ClauseId) -> S.State CDCLState (Ur PropResult)
+    go sats ((l, reason) :<| rest) = S.do
+      assertLit reason l
       Ur m <- S.uses watchesL $ LHM.lookup (litVar l)
       case m of
         Nothing -> go sats rest
         Just targs -> loop sats (IS.toList targs) rest
       where
-        loop :: LSet.Set Int %1 -> [Int] -> Seq.Seq Lit -> S.State CDCLState (Ur PropResult)
+        loop :: LSet.Set Int %1 -> [Int] -> Seq.Seq (Lit, ClauseId) -> S.State CDCLState (Ur PropResult)
         loop !sats [] !rest = go sats rest
         loop !sats (!i : !is) !rest = S.do
           Ur c <- S.uses clausesL $ LV.unsafeGet i
@@ -148,9 +278,8 @@ propagateUnit ml = S.do
             Just (WatchChangedFromTo w old new newIdx) -> S.do
               updateWatchLit i w old new newIdx
               loop sats is rest
-            Just (Unit l) -> S.do
-              assertLit (toClauseId i) l
-              loop (LSet.insert i sats) is (rest |> l)
+            Just (Unit l) ->
+              loop (LSet.insert i sats) is (rest |> (l, toClauseId i))
     go sats Seq.Empty = S.do
       -- No literal given a priori. Find first literal.
       -- FIXME: Use heuristics for variable selection.
@@ -180,8 +309,7 @@ propagateUnit ml = S.do
         Just (Conflict ml, i) ->
           sats `lseq` S.pure (Ur (ConflictFound (toClauseId i) ml))
         Just (Unit l, i) -> S.do
-          assertLit (toClauseId i) l
-          go (LSet.insert i sats) (Seq.singleton l)
+          go (LSet.insert i sats) (Seq.singleton (l, toClauseId i))
 
 updateWatchLit :: Int -> WatchVar -> VarId -> VarId -> Index -> S.State CDCLState ()
 updateWatchLit cid w old new vid = S.do
