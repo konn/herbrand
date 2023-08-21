@@ -1,5 +1,6 @@
 {-# LANGUAGE GHC2021 #-}
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE LambdaCase #-}
@@ -92,12 +93,15 @@ import Data.Functor.Classes
 import Data.Functor.Foldable
 import Data.Functor.Foldable qualified as R
 import Data.Functor.Foldable.TH
+import Data.Functor.Linear qualified as Lin
 import Data.HashMap.Strict qualified as HM
 import Data.Hashable (Hashable)
 import Data.Strict.Tuple (Pair (..))
 import Data.Strict.Tuple qualified as S
 import Data.String (IsString (..))
 import GHC.Generics (Generic, Generic1)
+import Generics.Linear qualified as L
+import Generics.Linear.TH qualified as L
 
 data NoExtField = NoExtField
   deriving (Show, Eq, Ord, Generic)
@@ -484,3 +488,10 @@ compressVariables =
       Nothing -> state $ \(((+ 1) -> !i) :!: e) ->
         (i, i :!: HM.insert v i e)
       Just i -> pure i
+
+L.deriveGenericAnd1 ''Literal
+
+deriving via L.Generically1 Literal instance Lin.Functor Literal
+
+instance Lin.Traversable Literal where
+  traverse = Lin.genericTraverse

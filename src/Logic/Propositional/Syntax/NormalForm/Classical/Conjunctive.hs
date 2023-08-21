@@ -1,10 +1,13 @@
 {-# LANGUAGE GHC2021 #-}
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MonoLocalBinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 -- | Conjunctive normal forms in classical propositional logic.
@@ -29,12 +32,16 @@ import Data.FMList qualified as FML
 import Data.Foldable1 as F1
 import Data.Functor.Foldable (cata)
 import Data.Functor.Foldable qualified as R
+import Data.Functor.Linear qualified as Lin
 import Data.Hashable (Hashable)
 import Data.List.NonEmpty qualified as NE
 import GHC.Exts (IsList)
 import GHC.Generics (Generic, Generic1)
+import Generics.Linear qualified as L
+import Generics.Linear.TH qualified as L
 import Logic.Propositional.Syntax.General
 import Logic.Propositional.Syntax.Transformation.Claassical (deMorgan)
+import Prelude.Linear.Generically qualified as Lin
 import Prelude hiding (foldl1)
 
 -- | Propositional formula in Conjunction Normal Form (__CNF__) with atomic formula @a@.
@@ -170,3 +177,16 @@ toFormula =
     )
     . NE.nonEmpty
     . cnfClauses
+
+L.deriveGenericAnd1 ''CNFClause
+L.deriveGenericAnd1 ''CNF
+
+deriving via Lin.Generically1 CNFClause instance Lin.Functor CNFClause
+
+instance Lin.Traversable CNFClause where
+  traverse = Lin.genericTraverse
+
+deriving via Lin.Generically1 CNF instance Lin.Functor CNF
+
+instance Lin.Traversable CNF where
+  traverse = Lin.genericTraverse

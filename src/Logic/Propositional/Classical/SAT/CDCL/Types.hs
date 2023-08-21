@@ -264,8 +264,8 @@ valuationL :: LinLens.Lens CDCLState CDCLState Valuation Valuation
 {-# INLINE valuationL #-}
 valuationL = LinLens.lens \(CDCLState ss cs ws vs) -> (vs, CDCLState ss cs ws)
 
-toCDCLState :: Linearly %1 -> CNF VarId -> Either (SatResult ()) CDCLState
-toCDCLState lin (CNF cls) =
+toCDCLState :: CNF VarId -> Linearly %1 -> Either (SatResult ()) CDCLState
+toCDCLState (CNF cls) lin =
   let (cls', truth, contradicting) =
         L.fold
           ( (,,)

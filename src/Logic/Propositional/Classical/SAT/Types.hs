@@ -1,11 +1,16 @@
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE EmptyCase #-}
+{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeFamilies #-}
 
 module Logic.Propositional.Classical.SAT.Types (
   Model (..),
@@ -16,10 +21,14 @@ module Logic.Propositional.Classical.SAT.Types (
 
 import Control.DeepSeq (NFData)
 import Data.Functor.Foldable
+import qualified Data.Functor.Linear as Lin
 import Data.HashSet (HashSet)
 import qualified Data.HashSet as HS
 import Data.Hashable (Hashable)
+import qualified Data.Unrestricted.Linear as L
 import GHC.Generics
+import qualified Generics.Linear as L
+import qualified Generics.Linear.TH as L
 import Logic.Propositional.Syntax.General
 
 data Model a = Model {positive :: HashSet a, negative :: HashSet a}
@@ -58,3 +67,25 @@ orM (Just False) r = r
 orM _ (Just True) = Just True
 orM l (Just False) = l
 orM Nothing Nothing = Nothing
+
+L.deriveGenericAnd1 ''SatResult
+
+deriving via L.Generically1 SatResult instance Lin.Functor SatResult
+
+instance Lin.Traversable SatResult where
+  traverse = Lin.genericTraverse
+
+deriving via
+  L.Generically (SatResult a)
+  instance
+    (L.Consumable a) => L.Consumable (SatResult a)
+
+deriving via
+  L.Generically (SatResult a)
+  instance
+    (L.Dupable a) => L.Dupable (SatResult a)
+
+deriving via
+  L.Generically (SatResult a)
+  instance
+    (L.Movable a) => L.Movable (SatResult a)
