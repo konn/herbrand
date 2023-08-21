@@ -99,6 +99,7 @@ import Data.Hashable (Hashable)
 import Data.Strict.Tuple (Pair (..))
 import Data.Strict.Tuple qualified as S
 import Data.String (IsString (..))
+import Data.Unrestricted.Linear qualified as L
 import GHC.Generics (Generic, Generic1)
 import Generics.Linear qualified as L
 import Generics.Linear.TH qualified as L
@@ -492,6 +493,21 @@ compressVariables =
 L.deriveGenericAnd1 ''Literal
 
 deriving via L.Generically1 Literal instance Lin.Functor Literal
+
+deriving via
+  L.Generically (Literal a)
+  instance
+    (L.Consumable a) => L.Consumable (Literal a)
+
+deriving via
+  L.Generically (Literal a)
+  instance
+    (L.Dupable a) => L.Dupable (Literal a)
+
+deriving via
+  L.Generically (Literal a)
+  instance
+    (L.Movable a) => L.Movable (Literal a)
 
 instance Lin.Traversable Literal where
   traverse = Lin.genericTraverse

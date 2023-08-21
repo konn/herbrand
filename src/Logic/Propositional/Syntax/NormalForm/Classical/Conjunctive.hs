@@ -35,12 +35,14 @@ import Data.Functor.Foldable qualified as R
 import Data.Functor.Linear qualified as Lin
 import Data.Hashable (Hashable)
 import Data.List.NonEmpty qualified as NE
+import Data.Unrestricted.Linear (Consumable)
 import GHC.Exts (IsList)
 import GHC.Generics (Generic, Generic1)
 import Generics.Linear qualified as L
 import Generics.Linear.TH qualified as L
 import Logic.Propositional.Syntax.General
 import Logic.Propositional.Syntax.Transformation.Claassical (deMorgan)
+import Prelude.Linear (Dupable, Movable)
 import Prelude.Linear.Generically qualified as Lin
 import Prelude hiding (foldl1)
 
@@ -186,7 +188,31 @@ deriving via Lin.Generically1 CNFClause instance Lin.Functor CNFClause
 instance Lin.Traversable CNFClause where
   traverse = Lin.genericTraverse
 
+deriving newtype instance
+  (Consumable a) => Consumable (CNFClause a)
+
+deriving newtype instance
+  (Dupable a) => Dupable (CNFClause a)
+
+deriving newtype instance
+  (Movable a) => Movable (CNFClause a)
+
 deriving via Lin.Generically1 CNF instance Lin.Functor CNF
 
 instance Lin.Traversable CNF where
   traverse = Lin.genericTraverse
+
+deriving via
+  L.Generically (CNF a)
+  instance
+    (Consumable a) => Consumable (CNF a)
+
+deriving via
+  L.Generically (CNF a)
+  instance
+    (Dupable a) => Dupable (CNF a)
+
+deriving via
+  L.Generically (CNF a)
+  instance
+    (Movable a) => Movable (CNF a)

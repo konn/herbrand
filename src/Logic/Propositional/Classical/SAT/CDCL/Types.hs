@@ -81,7 +81,7 @@ import Data.IntSet qualified as IS
 import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe)
 import Data.Strict.Tuple (Pair)
-import Data.Unrestricted.Linear (Ur)
+import Data.Unrestricted.Linear (Ur (..))
 import Data.Unrestricted.Linear qualified as L
 import Data.Unrestricted.Linear.Orphans ()
 import Data.Vector.Mutable.Linear.Extra qualified as LV
@@ -264,7 +264,7 @@ valuationL :: LinLens.Lens CDCLState CDCLState Valuation Valuation
 {-# INLINE valuationL #-}
 valuationL = LinLens.lens \(CDCLState ss cs ws vs) -> (vs, CDCLState ss cs ws)
 
-toCDCLState :: CNF VarId -> Linearly %1 -> Either (SatResult ()) CDCLState
+toCDCLState :: CNF VarId -> Linearly %1 -> Either (Ur (SatResult ())) CDCLState
 toCDCLState (CNF cls) lin =
   let (cls', truth, contradicting) =
         L.fold
@@ -279,8 +279,8 @@ toCDCLState (CNF cls) lin =
       (upds, cls'') = imapAccumL buildClause Map.empty cls'
    in case () of
         _
-          | truth -> lin `lseq` Left (Satisfiable ())
-          | contradicting -> lin `lseq` Left Unsat
+          | truth -> lin `lseq` Left (Ur $ Satisfiable ())
+          | contradicting -> lin `lseq` Left (Ur Unsat)
         _ ->
           besides lin (`LUV.fromListL` [0]) PL.& \(steps, lin) ->
             besides lin (`LV.fromListL` cls'') PL.& \(clauses, lin) ->

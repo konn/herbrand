@@ -31,7 +31,7 @@ import qualified Generics.Linear as L
 import qualified Generics.Linear.TH as L
 import Logic.Propositional.Syntax.General
 
-data Model a = Model {positive :: HashSet a, negative :: HashSet a}
+data Model a = Model {positive :: !(HashSet a), negative :: !(HashSet a)}
   deriving (Show, Eq, Ord, Generic, Generic1, Foldable)
   deriving (Semigroup, Monoid) via Generically (Model a)
   deriving anyclass (Hashable, NFData)

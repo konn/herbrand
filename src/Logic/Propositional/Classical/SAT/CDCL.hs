@@ -15,6 +15,8 @@
 
 -- | DPLL Algorithm, supercharged with Conflict-Driven Clause Learning (CDCL).
 module Logic.Propositional.Classical.SAT.CDCL (
+  solve,
+  solveVarId,
   solveState,
   propagateUnit,
 ) where
@@ -22,6 +24,7 @@ module Logic.Propositional.Classical.SAT.CDCL (
 import Control.Applicative
 import Control.Arrow ((>>>))
 import Control.Foldl qualified as L
+import Control.Functor.Linear qualified as C
 import Control.Functor.Linear.State.Extra qualified as S
 import Control.Lens hiding (Index, lens, (&))
 import Control.Lens qualified as Lens
@@ -29,6 +32,7 @@ import Control.Lens.Extras qualified as Lens
 import Control.Optics.Linear qualified as LinOpt
 import Data.Alloc.Linearly.Token (besides)
 import Data.Array.Mutable.Linear.Unboxed qualified as LUA
+import Data.Bifunctor.Linear qualified as BiL
 import Data.Foldable qualified as Foldable
 import Data.Function (fix)
 import Data.Functor.Linear qualified as D
@@ -37,6 +41,7 @@ import Data.HashMap.Mutable.Linear.Extra qualified as LHM
 import Data.HashSet qualified as HS
 import Data.Hashable
 import Data.IntSet qualified as IS
+import Data.Maybe qualified as P
 import Data.Semigroup (Arg (..), Max (..))
 import Data.Sequence (Seq (..))
 import Data.Sequence qualified as Seq
@@ -47,6 +52,7 @@ import Data.Strict (Pair (..))
 import Data.Strict.Classes qualified as St
 import Data.Strict.Maybe qualified as St
 import Data.Tuple qualified as P
+import Data.Unrestricted.Linear (UrT (..), liftUrT, runUrT)
 import Data.Unrestricted.Linear qualified as Ur
 import Data.Vector.Internal.Check
 import Data.Vector.Mutable.Linear.Helpers qualified as LV
@@ -64,6 +70,80 @@ import Prelude qualified as P
 
 data FinalState = Ok | Failed
   deriving (Show, P.Eq, P.Ord, GHC.Generic)
+
+solve :: (LHM.Keyed a) => CNF a -> SatResult (Model a)
+{-# INLINE [1] solve #-}
+{-# ANN solve "HLint: ignore Avoid lambda" #-}
+solve cnf = unur $ LHM.empty 128 \dic ->
+  besides dic (`LHM.emptyL` 128) & \(rev, dic) ->
+    S.runState
+      (runUrT (traverse (\v -> liftUrT (renameCNF v)) cnf))
+      ((rev, Ur 0), dic)
+      & \(Ur cnf, ((dic, Ur _), rev)) ->
+        dic `lseq` do
+          besides rev (toCDCLState cnf) & \case
+            (Left (Ur resl), rev) ->
+              rev `lseq` Ur (P.mempty P.<$ resl)
+            (Right state, rev) ->
+              solveState state & \case
+                (Ur Unsat) -> rev `lseq` Ur Unsat
+                (Ur (Satisfiable m)) ->
+                  Satisfiable D.<$> S.evalState (unrenameModel m) rev
+
+{-# RULES "solve/VarId" solve = solveVarId #-}
+
+solveVarId :: CNF VarId -> SatResult (Model VarId)
+solveVarId cnf =
+  withCDCLState cnf & \case
+    Left resl -> (P.mempty P.<$ resl)
+    Right k -> unur (k solveState)
+
+unrenameModel ::
+  (Hashable a) =>
+  Model VarId ->
+  S.State (LHM.HashMap VarId a) (Ur (Model a))
+unrenameModel (Model pos neg) = S.do
+  Ur !positive <- backHS pos
+  Ur !negative <- backHS neg
+  S.pure $ Ur Model {..}
+
+backHS ::
+  (Hashable a) =>
+  HS.HashSet VarId ->
+  S.StateT (LHM.HashMap VarId a) Identity (Ur (HS.HashSet a))
+{-# INLINE backHS #-}
+backHS vs =
+  C.fmap (Ur.lift HS.fromList)
+    $ runUrT
+    $ traverse
+      ( \v ->
+          UrT
+            $ S.state
+            $ \dic ->
+              BiL.first
+                ( D.fmap
+                    ( fromMaybe
+                        ( error
+                            $ "unrenameMode: variable out of bound: "
+                            P.<> show v
+                        )
+                    )
+                )
+                $ LHM.lookup v dic
+      )
+    $ HS.toList vs
+
+renameCNF :: (LHM.Keyed a) => a -> S.State ((LHM.HashMap a VarId, Ur VarId), LHM.HashMap VarId a) VarId
+renameCNF a = S.do
+  Ur m <- S.uses (LinOpt._1 LinOpt..> LinOpt._1) $ LHM.lookup a
+  case m of
+    Just a -> S.pure a
+    Nothing -> S.do
+      Ur i <- S.uses (LinOpt._1 LinOpt..> LinOpt._2) \(Ur i) ->
+        (Ur i, Ur (i + 1))
+      (LinOpt._1 LinOpt..> LinOpt._1) S.%= LHM.insert a i
+      LinOpt._2 S.%= LHM.insert i a
+      S.pure i
 
 solveState :: CDCLState %1 -> Ur (SatResult (Model VarId))
 solveState = toSatResult PL.. S.runState (solverLoop Nothing)
