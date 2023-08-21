@@ -20,11 +20,13 @@ module Logic.Propositional.Classical.SAT.CDCL (
 ) where
 
 import Control.Applicative
+import Control.Arrow ((>>>))
 import Control.Foldl qualified as L
 import Control.Functor.Linear.State.Extra qualified as S
 import Control.Lens hiding (Index, lens, (&))
 import Control.Lens qualified as Lens
 import Control.Lens.Extras qualified as Lens
+import Control.Optics.Linear qualified as LinOpt
 import Data.Alloc.Linearly.Token (besides)
 import Data.Array.Mutable.Linear.Unboxed qualified as LUA
 import Data.Foldable qualified as Foldable
@@ -33,6 +35,7 @@ import Data.Functor.Linear qualified as D
 import Data.Generics.Labels ()
 import Data.HashMap.Mutable.Linear.Extra qualified as LHM
 import Data.HashSet qualified as HS
+import Data.Hashable
 import Data.IntSet qualified as IS
 import Data.Semigroup (Arg (..), Max (..))
 import Data.Sequence (Seq (..))
@@ -52,6 +55,7 @@ import Data.Vector.Unboxed qualified as U
 import GHC.Generics qualified as GHC
 import Logic.Propositional.Classical.SAT.CDCL.Types
 import Logic.Propositional.Classical.SAT.Types
+import Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
 import Prelude.Linear hiding (not, (&&), (+), (-), (.), (/=), (<), (==), (>), (>=), (||))
 import Prelude.Linear qualified as PL hiding ((>), (>=))
 import Unsafe.Linear qualified as Unsafe
@@ -107,6 +111,10 @@ backjump confCls lit = S.do
             then Indefinite
             else v
       let reason = fromIntegral $ sz - 1
+      watch reason $ litVar (lits learnt U.! watched1 learnt)
+      if watched2 learnt >= 0
+        then watch reason $ litVar (lits learnt U.! watched2 learnt)
+        else S.pure ()
       solverLoop $ Just (truth, reason)
 
 findUIP1 ::
@@ -153,13 +161,9 @@ findUIP1 !lit !curCls
                       vals
                       ( \vals !mn !l ->
                           LUA.unsafeGet (fromEnum $ litVar l) vals & \(Ur var, vals) ->
-                            case var of
-                              Indefinite -> (mn, vals)
-                              Definite {..} ->
-                                let stp = decideLevel :!: decisionStep
-                                 in ( Ur.lift (P.<> Max (Arg stp l)) mn
-                                    , vals
-                                    )
+                            ( Ur.lift (P.<> Max (Arg (introduced var) l)) mn
+                            , vals
+                            )
                       )
                       (Max (Arg (-1 :!: -1) (error "findUIP1: Impossible happend!")))
                       resolved
@@ -304,10 +308,25 @@ propagateUnit ml = S.do
 updateWatchLit :: Int -> WatchVar -> VarId -> VarId -> Index -> S.State CDCLState ()
 updateWatchLit cid w old new vid = S.do
   S.zoom clausesL $ S.modify $ LV.modify_ (watchVarL w .~ vid) cid
-  S.zoom watchesL
-    $ S.modify
-    $ LHM.alter (fmap $ IS.delete cid) old
-    PL.. LHM.alter (fmap $ IS.insert cid) new
+  unwatch (toClauseId cid) old
+  watch (toClauseId cid) new
+
+watch :: ClauseId -> VarId -> S.State CDCLState ()
+watch cid v =
+  watchesL
+    S.%= LHM.alter
+      (Just . P.maybe (IS.singleton $ fromEnum cid) (IS.insert $ fromEnum cid))
+      v
+
+unwatch :: ClauseId -> VarId -> S.State CDCLState ()
+unwatch cid v =
+  watchesL
+    S.%= LHM.alter
+      ( >>=
+          IS.delete (fromEnum cid) >>> \s ->
+            if IS.null s then Nothing else Just s
+      )
+      v
 
 assertLit :: ClauseId -> Lit -> S.State CDCLState ()
 assertLit ante lit = S.do
@@ -324,18 +343,45 @@ assertLit ante lit = S.do
 -- | Propagate Literal.
 propLit :: Lit -> Clause -> S.State Valuation (Ur (Maybe UnitResult))
 propLit trueLit c@Clause {..} =
-  let l = U.unsafeIndex lits watched1
-   in if litVar l == litVar trueLit
+  let l1 = U.unsafeIndex lits watched1
+   in if litVar l1 == litVar trueLit
         then -- Have the same variable as watched var #1
 
-          if l == trueLit
+          if l1 == trueLit
             then S.pure $ Ur $ Just $ Satisfied Nothing -- Satisfied.
-            else findNextAvailable W1 c -- False. Find next watched lit.
+            else S.do
+              -- False. Find next watched lit.
+              Ur mnext <- findNextAvailable W1 c
+              case mnext of
+                Just next -> S.pure $ Ur $ Just $ fromNextSlot next
+                Nothing -- No vacancy.
+                  | watched2 < 0 -> S.pure $ Ur $ Just $ Conflict l1
+                  | otherwise -> S.do
+                      let l2 = U.unsafeIndex lits watched2
+                      mval2 <- evalLit l2
+                      case mval2 of
+                        Nothing -> S.pure $ Ur $ Just $ Unit l2
+                        Just True -> S.pure $ Ur $ Just $ Satisfied Nothing
+                        Just False ->
+                          -- Unsatifiable! pick the oldest variable as conflicting lit.
+                          Ur.lift Just D.<$> reportLastAddedAsConflict c
         else -- Otherwise it must be watched var #2
 
-          if U.unsafeIndex lits watched2 == trueLit
-            then S.pure $ Ur $ Just $ Satisfied Nothing -- Satisfied
-            else findNextAvailable W2 c -- False. Find next watched lit.
+          let l2 = U.unsafeIndex lits watched2
+           in if l2 == trueLit
+                then S.pure $ Ur $ Just $ Satisfied Nothing -- Satisfied
+                else S.do
+                  Ur mnext <- findNextAvailable W2 c
+                  case mnext of
+                    Just next -> S.pure $ Ur $ Just $ fromNextSlot next
+                    Nothing -> S.do
+                      mval1 <- evalLit l1
+                      case mval1 of
+                        Nothing -> S.pure $ Ur $ Just $ Unit l1
+                        Just True -> S.pure $ Ur $ Just $ Satisfied Nothing
+                        Just False ->
+                          -- Unsatifiable! pick the oldest variable as conflicting lit.
+                          Ur.lift Just D.<$> reportLastAddedAsConflict c
 
 findUnit ::
   Clause ->
@@ -358,9 +404,24 @@ findUnit c@Clause {..}
         Just True ->
           -- satisfied; nothing to do.
           S.pure $ Ur $ Just $ Satisfied Nothing
-        Just False ->
+        Just False -> S.do
           -- Unsatisfiable literal: find next available literal for watched1
-          findNextAvailable W1 c
+          Ur mres <- findNextAvailable W1 c
+          case mres of
+            Just next ->
+              -- Next slot found. Move to it.
+              S.pure $ Ur $ Just $ fromNextSlot next
+            Nothing -> S.do
+              -- No vacancy. Trying to "satisfy" watched 2.
+              mres' <- evalLit l2
+              case mres' of
+                Nothing ->
+                  -- w2 can be unit!
+                  S.pure $ Ur $ Just $ Unit l2
+                Just True -> S.pure $ Ur $ Just $ Satisfied Nothing
+                Just False ->
+                  -- Unsatifiable! pick the oldest variable as conflicting lit.
+                  Ur.lift Just D.<$> reportLastAddedAsConflict c
         Nothing -> S.do
           -- Undetermined. Check for watched2
           mres' <- evalLit l2
@@ -368,18 +429,48 @@ findUnit c@Clause {..}
             Just True ->
               -- satisfied; nothing to do.
               S.pure (Ur (Just $ Satisfied Nothing))
-            Just False ->
+            Just False -> S.do
               -- Unsatisfiable literal: find next available literal for watched2
-              findNextAvailable W2 c
-            Nothing ->
-              -- No literal changed.
-              S.pure (Ur Nothing)
+              Ur mres'' <- findNextAvailable W2 c
+              S.pure $ Ur $ case mres'' of
+                Just next -> Just $ fromNextSlot next
+                Nothing -> Just $ Unit l1 -- w1 is unit!
+            Nothing -> S.pure (Ur Nothing) -- No literal changed.
+
+reportLastAddedAsConflict :: Clause -> S.State Valuation (Ur UnitResult)
+reportLastAddedAsConflict c@Clause {..}
+  | watched2 < 0 = S.pure $ Ur $ Conflict $ getWatchedLit W1 c
+  | otherwise = S.do
+      let l1 = getWatchedLit W1 c
+          l2 = getWatchedLit W2 c
+      Ur v1 <- S.state $ LUA.unsafeGet (fromEnum $ litVar l1)
+      Ur v2 <- S.state $ LUA.unsafeGet (fromEnum $ litVar l2)
+      S.pure
+        $ Ur
+        $ Conflict
+        $ if introduced v1 > introduced v2 then l1 else l2
+
+introduced :: Variable -> Pair DecideLevel Step
+introduced Indefinite = -1 :!: -1
+introduced Definite {..} = decideLevel :!: decisionStep
 
 getWatchedLit :: WatchVar -> Clause -> Lit
 getWatchedLit W1 Clause {..} = U.unsafeIndex lits watched1
 getWatchedLit W2 Clause {..} = U.unsafeIndex lits watched2
 
-findNextAvailable :: WatchVar -> Clause -> S.State Valuation (Ur (Maybe UnitResult))
+fromNextSlot :: NextSlot -> UnitResult
+fromNextSlot (NextSlot True w old new lid) = Satisfied $ Just $ (w :!: old) :!: (new :!: lid)
+fromNextSlot (NextSlot False w old new lid) = WatchChangedFromTo w old new lid
+
+data NextSlot = NextSlot
+  { satisfied :: !Bool
+  , target :: !WatchVar
+  , oldVar, newVar :: {-# UNPACK #-} !VarId
+  , litIndexInClause :: {-# UNPACK #-} !Index
+  }
+  deriving (Show, P.Eq, P.Ord, GHC.Generic)
+
+findNextAvailable :: WatchVar -> Clause -> S.State Valuation (Ur (Maybe NextSlot))
 findNextAvailable w c@Clause {..} = S.do
   let lit = getWatchedLit w c
       origVar = litVar lit
@@ -400,14 +491,12 @@ findNextAvailable w c@Clause {..} = S.do
   case mSat of
     Just i ->
       let v' = litVar $ U.unsafeIndex lits i
-       in S.pure (Ur (Just (Satisfied $ Just $ (w :!: origVar) :!: (v' :!: i))))
+       in S.pure $ Ur $ Just $ NextSlot True w origVar v' i
     Nothing -> case mUndet of
       Just i ->
         let v' = litVar $ U.unsafeIndex lits i
-         in S.pure (Ur (Just $ WatchChangedFromTo w origVar v' i))
-      Nothing ->
-        -- FIXME: this code is terribly wrong! consider when w1 = Nothing and w2 = False.
-        S.pure (Ur (Just $ Conflict lit))
+         in S.pure $ Ur $ Just $ NextSlot False w origVar v' i
+      Nothing -> S.pure (Ur Nothing)
 
 unassigned :: Index -> Index -> Valuation -> (Int, Lit) -> Maybe AssignmentState
 unassigned exc1 exc2 vals (cur, l)
