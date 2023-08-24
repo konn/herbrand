@@ -1,18 +1,24 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE LinearTypes #-}
+{-# LANGUAGE QualifiedDo #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE NoImplicitPrelude #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 
 module Data.Vector.Mutable.Linear.Helpers (
   imapAccumL',
   findWith,
   module Data.Vector.Mutable.Linear.Extra,
+  ifindIndexM,
+  ifindWithIndexM,
 ) where
 
+import Control.Functor.Linear (Monad, pure)
+import qualified Control.Functor.Linear as C
 import Data.Unrestricted.Linear
 import Data.Vector.Mutable.Linear.Extra
-import Prelude.Linear ((&))
+import Prelude.Linear
 
 imapAccumL' ::
   forall s a.
@@ -28,9 +34,9 @@ imapAccumL' f = go 0
         if i >= l
           then (s, v')
           else
-            unsafeGet i v' & \(Ur a, v'') ->
+            get i v' & \(Ur a, v'') ->
               f i s a & \(s', Ur a') ->
-                go (i + 1) s' (unsafeSet i a' v'')
+                go (i + 1) s' (set i a' v'')
 
 findWith ::
   forall a b c.
@@ -46,7 +52,33 @@ findWith p = go 0
         if i >= l
           then (Ur Nothing, b, v)
           else
-            unsafeGet i v & \(Ur a, v) ->
+            get i v & \(Ur a, v) ->
               p b i a & \case
                 (Ur (Just c), b) -> (Ur (Just (c, i)), b, v)
                 (Ur Nothing, b) -> go (i + 1) b v
+
+ifindWithIndexM :: (Monad m) => (Int -> a -> m (Ur (Maybe b))) -> Vector a %1 -> m (Ur (Maybe (b, Int)), Vector a)
+ifindWithIndexM (p :: Int -> a -> m (Ur (Maybe b))) v = size v & \(Ur sz, v) -> go 0 sz v
+  where
+    go :: Int -> Int -> Vector a %1 -> m (Ur (Maybe (b, Int)), Vector a)
+    go !i !j !arr
+      | i == j = pure (Ur Nothing, arr)
+      | otherwise =
+          unsafeGet i arr & \(Ur a, arr) -> C.do
+            Ur mb <- p i a
+            case mb of
+              Nothing -> go (i + 1) j arr
+              Just b -> pure (Ur (Just (b, i)), arr)
+
+ifindIndexM :: (Monad m) => (Int -> a -> m Bool) -> Vector a %1 -> m (Ur (Maybe Int), Vector a)
+ifindIndexM (p :: Int -> a -> m Bool) v = size v & \(Ur sz, v) -> go 0 sz v
+  where
+    go :: Int -> Int -> Vector a %1 -> m (Ur (Maybe Int), Vector a)
+    go !i !j !arr
+      | i == j = pure (Ur Nothing, arr)
+      | otherwise =
+          unsafeGet i arr & \(Ur a, arr) -> C.do
+            b <- p i a
+            if b
+              then pure (Ur (Just i), arr)
+              else go (i + 1) j arr
