@@ -402,7 +402,7 @@ deriving via L.Generically PropResult instance L.Movable PropResult
 
 watchVarL :: WatchVar -> Lens' Clause Index
 watchVarL W1 = #watched1
-watchVarL W2 = #watched1
+watchVarL W2 = #watched2
 
 numClauses :: CDCLState %1 -> (Ur Int, CDCLState)
 numClauses (CDCLState steps clauses watches vals) =
