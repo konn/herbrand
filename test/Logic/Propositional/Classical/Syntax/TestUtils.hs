@@ -160,7 +160,10 @@ testSolverSemanticsWith projVar toInput vs sz solver =
 
 testFormulae :: [Formula Full Int]
 testFormulae =
-  [ neg (⊥) /\ neg ((neg (⊥) ==> (⊤) /\ Atom 0) /\ (neg (⊥) ==> (⊥) \/ Atom 0))
+  [ neg (⊥) ==> (⊤) /\ Atom 0
+  , neg (⊥) ==> (⊥) \/ Atom 0
+  , neg ((neg (⊥) ==> (⊤) /\ Atom 0) /\ (neg (⊥) ==> (⊥) \/ Atom 0))
+  , neg (⊥) /\ neg ((neg (⊥) ==> (⊤) /\ Atom 0) /\ (neg (⊥) ==> (⊥) \/ Atom 0))
   , neg (neg (neg (⊥))) /\ neg ((neg (⊥) ==> (⊤) /\ Atom 0) /\ (neg (⊥) ==> (⊥) \/ Atom 0))
   , neg (neg (neg (neg (neg (⊥))))) /\ neg ((neg (⊥) ==> (⊤) /\ Atom 0) /\ (neg (⊥) ==> (⊥) \/ Atom 0))
   , neg (neg (neg (neg (neg (neg (neg (neg (neg (neg (neg (⊥))))))))))) /\ neg ((neg (⊥) ==> (⊤) /\ Atom 0) /\ (neg (⊥) ==> (⊥) \/ Atom 0))
