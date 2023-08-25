@@ -52,13 +52,13 @@ import Data.Sequence (Seq (..))
 import Data.Sequence qualified as Seq
 import Data.Set (Set)
 import Data.Set qualified as Set
-import Data.Set.Mutable.Linear.Extra qualified as LSet
 import Data.Strict (Pair (..))
 import Data.Strict.Classes qualified as St
 import Data.Strict.Maybe qualified as St
 import Data.Tuple qualified as P
 import Data.Unrestricted.Linear (UrT (..), liftUrT, runUrT)
 import Data.Unrestricted.Linear qualified as Ur
+import Data.Vector qualified as V
 import Data.Vector.Internal.Check
 import Data.Vector.Mutable.Linear.Helpers qualified as LV
 import Data.Vector.Mutable.Linear.Unboxed qualified as LUV
@@ -157,23 +157,28 @@ solveState = toSatResult PL.. S.runState (solverLoop Nothing)
 
 solverLoop :: (HasCallStack) => Maybe (Lit, ClauseId) -> S.State CDCLState FinalState
 solverLoop = fix $ \go mlit -> S.do
-  Ur resl <- propagateUnit mlit
-  case resl of
-    ConflictFound cid l -> backjump cid l -- Conflict found. Let's Backjump!
-    NoMorePropagation -> S.do
-      -- Decide indefinite variable
-      -- FIXME: Use heuristics for variable selection.
-      Ur mid <- S.uses valuationL (LUA.findIndex (Lens.is #_Indefinite))
-      case mid of
-        Nothing -> S.pure Ok -- No vacant variable - model is full!
-        Just vid -> S.do
-          stepsL S.%= LUV.push 0
-          let decLit = PosL $ toEnum vid
-          assResult <- assertLit (-1) decLit
-          case assResult of
-            Asserted -> go (Just (decLit, -1))
-            AlreadyAsserted -> error $ "Impossible:  decide variable is already asserted true: " <> show decLit
-            ContradictingAssertion -> error $ "Impossible: decide variable is contradicting!: " <> show decLit
+  Ur num <- S.uses numInitialClausesL $ BiL.first move PL.. dup2
+  Ur origs <- S.uses clausesL $ BiL.first (LV.freeze PL.. LV.slice 0 num) PL.. dup2
+  if V.all ((>= 0) . satisfiedAt) origs
+    then S.pure Ok
+    else S.do
+      Ur resl <- propagateUnit mlit
+      case resl of
+        ConflictFound cid l -> backjump cid l -- Conflict found. Let's Backjump!
+        NoMorePropagation -> S.do
+          -- Decide indefinite variable
+          -- FIXME: Use heuristics for variable selection.
+          Ur mid <- S.uses valuationL (LUA.findIndex (Lens.is #_Indefinite))
+          case mid of
+            Nothing -> S.pure Ok -- No vacant variable - model is full!
+            Just vid -> S.do
+              stepsL S.%= LUV.push 0
+              let decLit = PosL $ toEnum vid
+              assResult <- assertLit (-1) decLit
+              case assResult of
+                Asserted -> go (Just (decLit, -1))
+                AlreadyAsserted -> error $ "Impossible:  decide variable is already asserted true: " <> show decLit
+                ContradictingAssertion -> error $ "Impossible: decide variable is contradicting!: " <> show decLit
 
 backjump :: (HasCallStack) => ClauseId -> Lit -> S.State CDCLState FinalState
 backjump confCls lit = S.do
@@ -185,6 +190,13 @@ backjump confCls lit = S.do
       S.pure Failed
     Just (decLvl, learnt, truth) -> S.do
       stepsL S.%= LUV.slice 0 (unDecideLevel decLvl + 1)
+      clausesL S.%= D.fmap \Clause {..} ->
+        move satisfiedAt & \(Ur satisfiedAt) ->
+          Clause
+            { satisfiedAt =
+                if satisfiedAt > decLvl then -1 else satisfiedAt
+            , ..
+            }
       clausesL S.%= LV.push learnt
       Ur sz <- S.uses clausesL LV.size
       valuationL S.%= LUA.mapSame \v ->
@@ -219,6 +231,7 @@ findUIP1 !lit !curCls
                   , Clause
                       { watched2 = if U.length cls' > 1 then 1 else -1
                       , watched1 = 0
+                      , satisfiedAt = decLvl
                       , lits = cls'
                       }
                   , l'
@@ -306,8 +319,9 @@ currentDecideLevel =
 
 toSatResult :: (FinalState, CDCLState) %1 -> Ur (SatResult (Model VarId))
 toSatResult (Failed, state) = state `lseq` Ur Unsat
-toSatResult (Ok, CDCLState steps clauses watches vals) =
-  steps
+toSatResult (Ok, CDCLState numOrig steps clauses watches vals) =
+  numOrig
+    `lseq` steps
     `lseq` clauses
     `lseq` watches
     `lseq` ( LUA.freeze vals & Ur.lift do
@@ -330,71 +344,68 @@ toClauseId = fromIntegral
 
 propagateUnit :: (HasCallStack) => Maybe (Lit, ClauseId) -> S.State CDCLState (Ur PropResult)
 propagateUnit ml = S.do
-  Ur cap <- S.state numClauses
-  sats <- S.state $ \st -> besides st (`LSet.emptyL` cap)
-  go sats (P.maybe Seq.empty Seq.singleton ml)
+  go (P.maybe Seq.empty Seq.singleton ml)
   where
-    go :: LSet.Set Int %1 -> Seq.Seq (Lit, ClauseId) -> S.State CDCLState (Ur PropResult)
-    go sats ((l, reason) :<| rest) = S.do
+    go :: Seq.Seq (Lit, ClauseId) -> S.State CDCLState (Ur PropResult)
+    go ((l, reason) :<| rest) = S.do
       assResl <- assertLit reason l
       case assResl of
-        AlreadyAsserted -> go sats rest
-        ContradictingAssertion ->
-          sats `lseq` S.pure (Ur (ConflictFound reason l))
+        AlreadyAsserted -> go rest
+        ContradictingAssertion -> S.pure (Ur (ConflictFound reason l))
         Asserted -> S.do
           Ur m <- S.uses watchesL $ LHM.lookup (litVar l)
           case m of
             Just (IS.delete (P.fromEnum reason) -> targs)
-              | not (IS.null targs) -> loop sats (IS.toList targs) rest
-            _ -> go sats rest
+              | not (IS.null targs) -> loop (IS.toList targs) rest
+            _ -> go rest
       where
-        loop :: LSet.Set Int %1 -> [Int] -> Seq.Seq (Lit, ClauseId) -> S.State CDCLState (Ur PropResult)
-        loop !sats [] !rest = go sats rest
-        loop !sats (!i : !is) !rest = S.do
+        loop :: [Int] -> Seq.Seq (Lit, ClauseId) -> S.State CDCLState (Ur PropResult)
+        loop [] !rest = go rest
+        loop (!i : !is) !rest = S.do
           Ur c <- S.uses clausesL $ LV.get i
           Ur resl <- S.zoom valuationL $ propLit l c
           case resl of
-            Nothing -> loop sats is rest
+            Nothing -> loop is rest
             Just (Conflict l) ->
-              sats `lseq` S.pure (Ur (ConflictFound (toClauseId i) l))
-            Just (Satisfied Nothing) -> loop (LSet.insert i sats) is rest
+              S.pure (Ur (ConflictFound (toClauseId i) l))
+            Just (Satisfied Nothing) -> loop is rest
             Just (Satisfied (Just ((w :!: old) :!: (new :!: newIdx)))) -> S.do
               updateWatchLit i w old new newIdx
-              loop (LSet.insert i sats) is rest
+              loop is rest
             Just (WatchChangedFromTo w old new newIdx) -> S.do
               updateWatchLit i w old new newIdx
-              loop sats is rest
+              loop is rest
             Just (Unit l) ->
-              loop (LSet.insert i sats) is (rest |> (l, toClauseId i))
-    go sats Seq.Empty = S.do
+              loop is (rest |> (l, toClauseId i))
+    go Seq.Empty = S.do
       -- No literal given a priori. Find first literal.
       -- FIXME: Use heuristics for variable selection.
-      (Ur resl, sats) <- S.state \(CDCLState steps clauses watches vals) ->
+      (Ur resl) <- S.state \(CDCLState numCls steps clauses watches vals) ->
         LV.findWith
-          ( \(vals, sats) i c -> S.do
-              LSet.member i sats & \case
-                (Ur False, sats) ->
+          ( \vals c -> S.do
+              if satisfiedAt c P.< 0
+                then
                   S.runState (findUnit c) vals
-                    & \(Ur r, vals) -> (Ur r, (vals, sats))
-                (Ur True, sats) -> (Ur Nothing, (vals, sats))
+                    & \(Ur r, vals) -> (Ur r, vals)
+                else (Ur Nothing, vals)
           )
-          (vals, sats)
+          vals
           clauses
-          & \(Ur ur, (vals, sats), clauses) ->
-            ((Ur ur, sats), CDCLState steps clauses watches vals)
+          & \(Ur ur, vals, clauses) ->
+            (Ur ur, CDCLState numCls steps clauses watches vals)
       case resl of
-        Nothing -> sats `lseq` S.pure (Ur NoMorePropagation)
+        Nothing -> S.pure (Ur NoMorePropagation)
         Just (WatchChangedFromTo w old new newIdx, i) -> S.do
           updateWatchLit i w old new newIdx
-          go sats Seq.Empty
-        Just (Satisfied Nothing, i) -> go (LSet.insert i sats) Seq.Empty
+          go Seq.Empty
+        Just (Satisfied Nothing, _) -> go Seq.Empty
         Just (Satisfied (Just ((w :!: old) :!: (new :!: newIdx))), i) -> S.do
           updateWatchLit i w old new newIdx
-          go (LSet.insert i sats) Seq.Empty
+          go Seq.Empty
         Just (Conflict ml, i) ->
-          sats `lseq` S.pure (Ur (ConflictFound (toClauseId i) ml))
+          S.pure (Ur (ConflictFound (toClauseId i) ml))
         Just (Unit l, i) -> S.do
-          go (LSet.insert i sats) (Seq.singleton (l, toClauseId i))
+          go (Seq.singleton (l, toClauseId i))
 
 updateWatchLit :: Int -> WatchVar -> VarId -> VarId -> Index -> S.State CDCLState ()
 updateWatchLit cid w old new vid = S.do

@@ -40,7 +40,7 @@ imapAccumL' f = go 0
 
 findWith ::
   forall a b c.
-  (b %1 -> Int -> a -> (Ur (Maybe c), b)) ->
+  (b %1 -> a -> (Ur (Maybe c), b)) ->
   b %1 ->
   Vector a %1 ->
   (Ur (Maybe (c, Int)), b, Vector a)
@@ -53,7 +53,7 @@ findWith p = go 0
           then (Ur Nothing, b, v)
           else
             get i v & \(Ur a, v) ->
-              p b i a & \case
+              p b a & \case
                 (Ur (Just c), b) -> (Ur (Just (c, i)), b, v)
                 (Ur Nothing, b) -> go (i + 1) b v
 

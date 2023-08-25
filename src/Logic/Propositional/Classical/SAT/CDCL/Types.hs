@@ -29,6 +29,7 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   clausesL,
   watchesL,
   valuationL,
+  numInitialClausesL,
   Index,
 
   -- * Compact literal
@@ -58,13 +59,13 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   PropResult (..),
   WatchVar (..),
   watchVarL,
-  numClauses,
+  numTotalClauses,
 ) where
 
 import Control.DeepSeq (NFData)
 import Control.Foldl qualified as Foldl
 import Control.Foldl qualified as L
-import Control.Lens (Lens', Prism', imapAccumL, lens, prism')
+import Control.Lens (Lens', Prism', lens, prism')
 import Control.Monad (guard)
 import Control.Optics.Linear qualified as LinLens
 import Data.Alloc.Linearly.Token
@@ -77,9 +78,10 @@ import Data.HashMap.Mutable.Linear.Extra qualified as LHM
 import Data.Hashable (Hashable)
 import Data.IntSet (IntSet)
 import Data.IntSet qualified as IS
+import Data.List (mapAccumL)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe)
-import Data.Strict.Tuple (Pair)
+import Data.Strict.Tuple (Pair (..))
 import Data.Unrestricted.Linear (Ur (..))
 import Data.Unrestricted.Linear qualified as L
 import Data.Unrestricted.Linear.Orphans ()
@@ -219,6 +221,7 @@ derivingUnbox
 
 data Clause = Clause
   { lits :: {-# UNPACK #-} !(U.Vector Lit)
+  , satisfiedAt :: {-# UNPACK #-} !DecideLevel
   , watched1 :: {-# UNPACK #-} !Index
   , watched2 :: {-# UNPACK #-} !Index
   }
@@ -233,6 +236,8 @@ type Clauses = LV.Vector Clause
 
 data CDCLState where
   CDCLState ::
+    -- | Number of original clauses
+    {-# UNPACK #-} !Int %1 ->
     -- | Level-wise maximum steps
     {-# UNPACK #-} !(LUV.Vector Step) %1 ->
     -- | Clauses
@@ -246,22 +251,26 @@ data CDCLState where
 
 stepsL :: LinLens.Lens' CDCLState (LUV.Vector Step)
 {-# INLINE stepsL #-}
-stepsL = LinLens.lens \(CDCLState ss cs ws vs) ->
-  (ss, \ss -> CDCLState ss cs ws vs)
+stepsL = LinLens.lens \(CDCLState numOrig ss cs ws vs) ->
+  (ss, \ss -> CDCLState numOrig ss cs ws vs)
+
+numInitialClausesL :: LinLens.Lens' CDCLState Int
+numInitialClausesL = LinLens.lens \(CDCLState numOrig ss cs ws vs) ->
+  (numOrig, \numOrig -> CDCLState numOrig ss cs ws vs)
 
 clausesL :: LinLens.Lens' CDCLState (LV.Vector Clause)
 {-# INLINE clausesL #-}
-clausesL = LinLens.lens \(CDCLState ss cs ws vs) ->
-  (cs, \cs -> CDCLState ss cs ws vs)
+clausesL = LinLens.lens \(CDCLState numOrig ss cs ws vs) ->
+  (cs, \cs -> CDCLState numOrig ss cs ws vs)
 
 watchesL :: LinLens.Lens' CDCLState WatchMap
 {-# INLINE watchesL #-}
-watchesL = LinLens.lens \(CDCLState ss cs ws vs) ->
-  (ws, \ws -> CDCLState ss cs ws vs)
+watchesL = LinLens.lens \(CDCLState numOrig ss cs ws vs) ->
+  (ws, \ws -> CDCLState numOrig ss cs ws vs)
 
 valuationL :: LinLens.Lens CDCLState CDCLState Valuation Valuation
 {-# INLINE valuationL #-}
-valuationL = LinLens.lens \(CDCLState ss cs ws vs) -> (vs, CDCLState ss cs ws)
+valuationL = LinLens.lens \(CDCLState norig ss cs ws vs) -> (vs, CDCLState norig ss cs ws)
 
 toCDCLState :: CNF VarId -> Linearly %1 -> Either (Ur (SatResult ())) CDCLState
 toCDCLState (CNF cls) lin =
@@ -276,7 +285,7 @@ toCDCLState (CNF cls) lin =
               <*> Foldl.handles Foldl.folded Foldl.maximum
           )
           cls
-      (upds, cls'') = imapAccumL buildClause Map.empty cls'
+      (numOrigCls :!: upds, cls'') = mapAccumL buildClause (0 :!: Map.empty) cls'
    in case () of
         _
           | truth -> lin `lseq` Left (Ur $ Satisfiable ())
@@ -287,28 +296,33 @@ toCDCLState (CNF cls) lin =
               besides lin (`LHM.fromListL` Map.toList upds)
                 PL.& \(watcheds, lin) ->
                   Right
-                    PL.$ CDCLState steps clauses watcheds
+                    PL.$ CDCLState numOrigCls steps clauses watcheds
                     PL.$ LUA.allocL lin (maybe 0 ((+ 1) . fromEnum) maxVar) Indefinite
 
 buildClause ::
-  Int ->
-  Map.Map VarId IntSet ->
+  Pair Int (Map.Map VarId IntSet) ->
   [Lit] ->
-  (Map.Map VarId IntSet, Clause)
-buildClause _ watches [] =
-  (watches, Clause {lits = mempty, watched1 = -1, watched2 = -1})
-buildClause i watches [x] =
-  ( Map.insertWith IS.union (litVar x) (IS.singleton i) watches
-  , Clause {lits = U.singleton x, watched1 = 0, watched2 = -1}
+  (Pair Int (Map.Map VarId IntSet), Clause)
+buildClause (i :!: watches) [] =
+  (i :!: watches, Clause {lits = mempty, satisfiedAt = -1, watched1 = -1, watched2 = -1})
+buildClause (i :!: watches) [x] =
+  ( (i + 1) :!: Map.insertWith IS.union (litVar x) (IS.singleton i) watches
+  , Clause {lits = U.singleton x, satisfiedAt = -1, watched1 = 0, watched2 = -1}
   )
-buildClause i watches xs =
-  ( Map.insertWith IS.union (litVar $ head xs) (IS.singleton i)
-      $ Map.insertWith
+buildClause (i :!: watches) xs =
+  ( i
+      + 1
+      :!: Map.insertWith
         IS.union
-        (litVar $ xs !! 1)
+        (litVar $ head xs)
         (IS.singleton i)
-        watches
-  , Clause {lits = U.fromList xs, watched1 = 0, watched2 = 1}
+        ( Map.insertWith
+            IS.union
+            (litVar $ xs !! 1)
+            (IS.singleton i)
+            watches
+        )
+  , Clause {lits = U.fromList xs, satisfiedAt = -1, watched1 = 0, watched2 = 1}
   )
 
 deriveGeneric ''CDCLState
@@ -382,7 +396,7 @@ watchVarL :: WatchVar -> Lens' Clause Index
 watchVarL W1 = #watched1
 watchVarL W2 = #watched2
 
-numClauses :: CDCLState %1 -> (Ur Int, CDCLState)
-numClauses (CDCLState steps clauses watches vals) =
+numTotalClauses :: CDCLState %1 -> (Ur Int, CDCLState)
+numTotalClauses (CDCLState numOrig steps clauses watches vals) =
   LV.size clauses & \(sz, clauses) ->
-    (sz, CDCLState steps clauses watches vals)
+    (sz, CDCLState numOrig steps clauses watches vals)
