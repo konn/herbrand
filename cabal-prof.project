@@ -9,4 +9,4 @@ program-options
   ghc-options: -fprof-auto -fprof-late -finfo-table-map -fdistinct-constructor-tables
 
 package *
-  ghc-options: -fno-prof-auto -fprof-late -finfo-table-map -fdistinct-constructor-tables
+  ghc-options: -fprof-auto -fprof-late -finfo-table-map -fdistinct-constructor-tables
