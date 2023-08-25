@@ -157,7 +157,14 @@ solveState = toSatResult PL.. S.runState (solverLoop Nothing)
 
 solverLoop :: (HasCallStack) => Maybe (Lit, ClauseId) -> S.State CDCLState FinalState
 solverLoop = fix $ \go mlit -> S.do
+  -- First, check if the original clauses are all satisfied (at the current stage)
+  -- We only have to traverse the initial segment, as the lerant clauses are always
+  -- deducible from the original clauses.
+  -- Without this, CDCL solver seems at most x1000 slower than DPLL and even Naïve tableaux...
+
+  -- FIXME: Perhaps we can maintain global "unsatisified" stack?
   Ur num <- S.uses numInitialClausesL $ BiL.first move PL.. dup2
+  -- FIXME: Avoid reallocation here
   Ur origs <- S.uses clausesL $ BiL.first (LV.freeze PL.. LV.slice 0 num) PL.. dup2
   if V.all ((>= 0) . satisfiedAt) origs
     then S.pure Ok
