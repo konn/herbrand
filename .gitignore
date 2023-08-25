@@ -87,3 +87,6 @@ Temporary Items
 
 
 /bench-results
+*.ps
+*.pdf
+*.eventlog.*
