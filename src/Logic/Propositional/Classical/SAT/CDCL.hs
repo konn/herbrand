@@ -63,6 +63,7 @@ import Data.Vector.Internal.Check
 import Data.Vector.Mutable.Linear.Helpers qualified as LV
 import Data.Vector.Mutable.Linear.Unboxed qualified as LUV
 import Data.Vector.Unboxed qualified as U
+import Debug.Trace.Linear qualified as DT
 import GHC.Generics qualified as GHC
 import Logic.Propositional.Classical.SAT.CDCL.Types
 import Logic.Propositional.Classical.SAT.Types
@@ -85,7 +86,7 @@ solve cnf = unur $ LHM.empty 128 \dic ->
       (runUrT (traverse (\v -> liftUrT (renameCNF v)) cnf))
       ((rev, Ur 0), dic)
       & \(Ur cnf, ((dic, Ur _), rev)) ->
-        dic `lseq` do
+        dic `lseq` DT.trace ("CNF: " <> show cnf) do
           besides rev (toCDCLState cnf) & \case
             (Left (Ur resl), rev) ->
               rev `lseq` Ur (P.mempty P.<$ resl)
@@ -94,15 +95,6 @@ solve cnf = unur $ LHM.empty 128 \dic ->
                 (Ur Unsat) -> rev `lseq` Ur Unsat
                 (Ur (Satisfiable m)) ->
                   Satisfiable D.<$> S.evalState (unrenameModel m) rev
-
-{-# RULES "solve/VarId" solve = solveVarId #-}
-
-solveVarId :: CNF VarId -> SatResult (Model VarId)
-solveVarId cnf =
-  unur PL.$ linearly \l ->
-    toCDCLState cnf l PL.& \case
-      Left (Ur resl) -> Ur (P.mempty P.<$ resl)
-      Right stt -> (solveState stt)
 
 unrenameModel ::
   (Hashable a) =>
@@ -150,6 +142,15 @@ renameCNF a = S.do
       (LinOpt._1 LinOpt..> LinOpt._1) S.%= LHM.insert a i
       LinOpt._2 S.%= LHM.insert i a
       S.pure i
+
+{-# RULES "solve/VarId" solve = solveVarId #-}
+
+solveVarId :: CNF VarId -> SatResult (Model VarId)
+solveVarId cnf =
+  unur PL.$ linearly \l ->
+    toCDCLState cnf l PL.& \case
+      Left (Ur resl) -> Ur (P.mempty P.<$ resl)
+      Right stt -> (solveState stt)
 
 solveState :: CDCLState %1 -> Ur (SatResult (Model VarId))
 solveState = toSatResult PL.. S.runState (solverLoop Nothing)
