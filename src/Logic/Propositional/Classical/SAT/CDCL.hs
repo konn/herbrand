@@ -368,9 +368,8 @@ propagateUnit ml = S.do
             Nothing -> loop is rest
             Just (Conflict l) ->
               S.pure (Ur (ConflictFound (toClauseId i) l))
-            Just (Satisfied Nothing) -> loop is rest
-            Just (Satisfied (Just ((w :!: old) :!: (new :!: newIdx)))) -> S.do
-              updateWatchLit i w old new newIdx
+            Just (Satisfied m) -> S.do
+              setSatisfied m i
               loop is rest
             Just (WatchChangedFromTo w old new newIdx) -> S.do
               updateWatchLit i w old new newIdx
@@ -398,14 +397,22 @@ propagateUnit ml = S.do
         Just (WatchChangedFromTo w old new newIdx, i) -> S.do
           updateWatchLit i w old new newIdx
           go Seq.Empty
-        Just (Satisfied Nothing, _) -> go Seq.Empty
-        Just (Satisfied (Just ((w :!: old) :!: (new :!: newIdx))), i) -> S.do
-          updateWatchLit i w old new newIdx
+        Just (Satisfied m, i) -> S.do
+          setSatisfied m i
           go Seq.Empty
         Just (Conflict ml, i) ->
           S.pure (Ur (ConflictFound (toClauseId i) ml))
         Just (Unit l, i) -> S.do
           go (Seq.singleton (l, toClauseId i))
+
+setSatisfied :: Maybe (Pair (Pair WatchVar VarId) (Pair VarId Index)) -> Int -> S.StateT CDCLState Identity ()
+setSatisfied m i = S.do
+  Ur lvl <- currentDecideLevel
+  clausesL S.%= LV.modify_ (\c -> c {satisfiedAt = lvl}) i
+  case m of
+    Just ((w :!: old) :!: (new :!: newIdx)) ->
+      updateWatchLit i w old new newIdx
+    Nothing -> S.pure ()
 
 updateWatchLit :: Int -> WatchVar -> VarId -> VarId -> Index -> S.State CDCLState ()
 updateWatchLit cid w old new vid = S.do
