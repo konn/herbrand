@@ -93,15 +93,10 @@ fromFormulaFast =
         pure $ Positive (Fresh 0)
       BotF _ -> do
         pure $ Negative (Fresh 0)
-      NotF _ aSt -> do
-        e <- aSt
-        e' <- newFresh
-        tell
-          $ FML.fromList
-            [ FML.fromList [e, e']
-            , FML.fromList [negLit e, negLit e']
-            ]
-        pure e'
+      NotF _ aSt ->
+        aSt <&> \case
+          Positive e -> Negative e
+          Negative e -> Positive e
       ImplF _ l r -> do
         e1 <- l
         e2 <- r
