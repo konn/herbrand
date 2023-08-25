@@ -98,7 +98,7 @@ testSolverSemanticsWith projVar toInput vs sz solver =
                   .$ ("answer", projModel projVar <$> ans)
         , testGroup
             "Regressions"
-            [ testCase "show phi" do
+            [ testCase (show phi) do
               let consis = classifyFormula phi
                   ans = solver $ toInput phi
               case consis of
