@@ -46,7 +46,6 @@ import Data.HashMap.Mutable.Linear.Extra qualified as LHM
 import Data.HashSet qualified as HS
 import Data.Hashable
 import Data.IntSet qualified as IS
-import Data.Map.Strict qualified as Map
 import Data.Maybe qualified as P
 import Data.Semigroup (Arg (..), Max (..))
 import Data.Sequence (Seq (..))
@@ -64,9 +63,7 @@ import Data.Vector.Internal.Check
 import Data.Vector.Mutable.Linear.Helpers qualified as LV
 import Data.Vector.Mutable.Linear.Unboxed qualified as LUV
 import Data.Vector.Unboxed qualified as U
-import Debug.Trace.Linear qualified as NDTL
 import GHC.Generics qualified as GHC
-import GHC.Stack (SrcLoc (..), callStack, getCallStack)
 import Logic.Propositional.Classical.SAT.CDCL.Types
 import Logic.Propositional.Classical.SAT.Types
 import Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
@@ -79,28 +76,6 @@ import Prelude qualified as P
 data FinalState = Ok | Failed
   deriving (Show, P.Eq, P.Ord, GHC.Generic)
 
-traceStack :: (HasCallStack) => String %1 -> a %1 -> a
-traceStack msg =
-  let theStack = getCallStack callStack
-      (site, loc) = P.head theStack
-      caller = case getCallStack callStack of
-        (_ : (c, _) : _) -> Just c
-        _ -> Nothing
-      locStr =
-        site
-          <> ", "
-          <> srcLocFile loc
-          <> ":"
-          <> show (srcLocStartLine loc)
-          <> ":"
-          <> show (srcLocStartCol loc)
-          <> "-"
-          <> show (srcLocEndLine loc)
-          <> ":"
-          <> show (srcLocEndCol loc)
-          <> P.maybe "" ("; from " <>) caller
-   in NDTL.trace (msg PL.<> "\n\t\ESC[2m@" <> locStr <> "\ESC[0m")
-
 solve :: (LHM.Keyed a) => CNF a -> SatResult (Model a)
 {-# INLINE [1] solve #-}
 {-# ANN solve "HLint: ignore Avoid lambda" #-}
@@ -110,8 +85,9 @@ solve cnf = unur $ LHM.empty 128 \dic ->
       (runUrT (traverse (\v -> liftUrT (renameCNF v)) cnf))
       ((rev, Ur 0), dic)
       & \(Ur cnf, ((dic, Ur _), rev)) ->
-        dic `lseq` traceStack ("CNF: " <> show cnf) do
-          besides rev (toCDCLState cnf) & \case
+        dic
+          `lseq` besides rev (toCDCLState cnf)
+          & \case
             (Left (Ur resl), rev) ->
               rev `lseq` Ur (P.mempty P.<$ resl)
             (Right state, rev) ->
@@ -180,21 +156,17 @@ solveState :: CDCLState %1 -> Ur (SatResult (Model VarId))
 solveState = toSatResult PL.. S.runState (solverLoop Nothing)
 
 solverLoop :: (HasCallStack) => Maybe (Lit, ClauseId) -> S.State CDCLState FinalState
-solverLoop = fix $ \go mlit -> traceStack ("MainLoop: (mlit, clause) = " <> show mlit) S.do
+solverLoop = fix $ \go mlit -> S.do
   Ur resl <- propagateUnit mlit
-  traceStack ("Propagation Result: " <> show resl) PL.$ S.pure ()
   case resl of
-    ConflictFound cid l -> traceStack "Conflict found! backjumping..." $ backjump cid l -- Conflict found. Let's Backjump!
-    NoMorePropagation -> traceStack "No unit found. deciding..." S.do
+    ConflictFound cid l -> backjump cid l -- Conflict found. Let's Backjump!
+    NoMorePropagation -> S.do
       -- Decide indefinite variable
       -- FIXME: Use heuristics for variable selection.
       Ur mid <- S.uses valuationL (LUA.findIndex (Lens.is #_Indefinite))
-      traceStack ("Decision variable candidate: " <> show mid) $ S.pure ()
       case mid of
         Nothing -> S.pure Ok -- No vacant variable - model is full!
-        Just vid -> traceStack ("Try to decide var #" <> show vid) S.do
-          Ur newDec <- S.uses stepsL LUV.size
-          traceStack ("New decision level: " <> show newDec) $ S.pure ()
+        Just vid -> S.do
           stepsL S.%= LUV.push 0
           let decLit = PosL $ toEnum vid
           assResult <- assertLit (-1) decLit
@@ -204,10 +176,9 @@ solverLoop = fix $ \go mlit -> traceStack ("MainLoop: (mlit, clause) = " <> show
             ContradictingAssertion -> error $ "Impossible: decide variable is contradicting!: " <> show decLit
 
 backjump :: (HasCallStack) => ClauseId -> Lit -> S.State CDCLState FinalState
-backjump confCls lit = traceStack ("Backjumping with: " <> show (confCls, lit)) S.do
+backjump confCls lit = S.do
   Ur c <- S.uses clausesL $ LV.get $ fromEnum confCls
   Ur mLearnt <- findUIP1 lit $ L.foldOver (Lens.foldring U.foldr) L.set $ lits c
-  traceStack ("(conflict, mlearnt) = " <> show (c, mLearnt)) $ S.pure ()
   case mLearnt of
     Nothing ->
       -- No valid backjumping destination found. Unsat.
@@ -234,16 +205,14 @@ findUIP1 ::
   Set Lit ->
   S.State CDCLState (Ur (Maybe (DecideLevel, Clause, Lit)))
 findUIP1 !lit !curCls
-  | traceStack ("findUIP: " <> show (lit, curCls)) False = error "Impossible"
-  | Set.null curCls = traceStack ("Reached to empty clause: " <> show (lit, curCls)) $ S.pure $ Ur Nothing
+  | Set.null curCls = S.pure $ Ur Nothing
   | otherwise = S.do
       ml <- checkUnitClauseLit curCls
       case ml of
-        Ur (Just u@(l', decLvl)) ->
+        Ur (Just (l', decLvl)) ->
           -- Already Unit clause. Learn it!
           let cls' = U.cons l' $ L.fold L.vector $ Set.delete l' curCls
-           in traceStack ("Unit clause detected: " <> show u)
-                $ S.pure
+           in S.pure
                 $ Ur
                 $ Just
                   ( decLvl
@@ -254,10 +223,9 @@ findUIP1 !lit !curCls
                       }
                   , l'
                   )
-        Ur Nothing -> traceStack "Not a UIP. resolving..." $ S.do
+        Ur Nothing -> S.do
           -- Not a UIP. resolve.
           Ur v <- S.uses valuationL $ LUA.get $ fromEnum $ litVar lit
-          traceStack ("Resolvent valuation: " <> show (lit, v)) $ S.pure ()
           case v of
             Indefinite -> error $ "Literal " P.<> show lit P.<> " was chosen as resolver, but indefinite!"
             Definite {..} -> S.do
@@ -266,9 +234,7 @@ findUIP1 !lit !curCls
                   Ur.lift (L.foldOver (Lens.foldring U.foldr) L.set . lits)
                     D.<$> S.uses clausesL (LV.get (fromEnum ante))
                 Nothing -> S.pure $ Ur Set.empty
-              traceStack ("Ante for resol: " <> show cls') $ S.pure ()
               let resolved = resolve lit curCls cls'
-              traceStack ("Resolution: " <> show (curCls, lit, cls', resolved)) $ S.pure ()
               if Set.null resolved
                 then S.pure $ Ur Nothing -- Conflicting clause
                 else S.do
@@ -301,9 +267,6 @@ data ULS = ULS
 checkUnitClauseLit :: (HasCallStack) => Set Lit -> S.State CDCLState (Ur (Maybe (Lit, DecideLevel)))
 checkUnitClauseLit ls = S.do
   Ur lvl <- currentDecideLevel
-  Ur vals <- S.uses valuationL (BiL.first LUA.freeze PL.. dup2)
-  traceStack ("Checking if unit: (level, lit) = " <> show (unDecideLevel lvl, Set.toList ls)) $ S.pure ()
-  traceStack ("Current valuation: " <> show (Map.toList $ Map.fromSet (\i -> vals U.! fromEnum (litVar i)) ls)) $ S.pure ()
   Ur lcnd <- S.uses valuationL \vals ->
     foldlLin'
       vals
@@ -325,7 +288,6 @@ checkUnitClauseLit ls = S.do
       )
       (ULS 0 St.Nothing (-1) (-2))
       ls
-  traceStack ("candidate lit: " <> show lcnd) $ S.pure ()
   S.pure $ case lcnd of
     (ULS 1 mx _ pu) | pu >= 0 -> Ur $ (,pu) <$> St.toLazy mx
     _ -> Ur Nothing
@@ -367,36 +329,30 @@ toClauseId :: Int -> ClauseId
 toClauseId = fromIntegral
 
 propagateUnit :: (HasCallStack) => Maybe (Lit, ClauseId) -> S.State CDCLState (Ur PropResult)
-propagateUnit ml = traceStack ("propagateUnit: " <> show ml) S.do
+propagateUnit ml = S.do
   Ur cap <- S.state numClauses
   sats <- S.state $ \st -> besides st (`LSet.emptyL` cap)
   go sats (P.maybe Seq.empty Seq.singleton ml)
   where
     go :: LSet.Set Int %1 -> Seq.Seq (Lit, ClauseId) -> S.State CDCLState (Ur PropResult)
-    go sats stk@((l, reason) :<| rest) = traceStack ("propUnit.go: stack = " <> show stk) S.do
-      assResl <- traceStack ("Asserting: " <> show (l, reason)) $ assertLit reason l
+    go sats ((l, reason) :<| rest) = S.do
+      assResl <- assertLit reason l
       case assResl of
-        AlreadyAsserted -> traceStack ("Already asserted: " <> show l) (go sats rest)
+        AlreadyAsserted -> go sats rest
         ContradictingAssertion ->
-          traceStack
-            ("Contradiction!: " <> show l)
-            sats
-            `lseq` S.pure (Ur (ConflictFound reason l))
+          sats `lseq` S.pure (Ur (ConflictFound reason l))
         Asserted -> S.do
           Ur m <- S.uses watchesL $ LHM.lookup (litVar l)
-          traceStack ("Clauses watching the lit: " <> show m) $ S.pure ()
           case m of
             Just (IS.delete (P.fromEnum reason) -> targs)
-              | not (IS.null targs) -> traceStack ("Propagating to watching clauses: " <> show targs) $ loop sats (IS.toList targs) rest
-            _ -> traceStack "No remaining watchers. pop!" $ go sats rest
+              | not (IS.null targs) -> loop sats (IS.toList targs) rest
+            _ -> go sats rest
       where
         loop :: LSet.Set Int %1 -> [Int] -> Seq.Seq (Lit, ClauseId) -> S.State CDCLState (Ur PropResult)
-        loop !sats [] !rest = traceStack ("No remaining watchhing clause for " <> show l) $ go sats rest
+        loop !sats [] !rest = go sats rest
         loop !sats (!i : !is) !rest = S.do
           Ur c <- S.uses clausesL $ LV.get i
-          traceStack ("Propagating " <> show l <> " to: " <> show (i, c)) $ S.pure ()
           Ur resl <- S.zoom valuationL $ propLit l c
-          traceStack ("Propagation result: " <> show (i, c, resl)) $ S.pure ()
           case resl of
             Nothing -> loop sats is rest
             Just (Conflict l) ->
@@ -410,28 +366,24 @@ propagateUnit ml = traceStack ("propagateUnit: " <> show ml) S.do
               loop sats is rest
             Just (Unit l) ->
               loop (LSet.insert i sats) is (rest |> (l, toClauseId i))
-    go sats Seq.Empty = traceStack "No units available. finding unit..." S.do
+    go sats Seq.Empty = S.do
       -- No literal given a priori. Find first literal.
       -- FIXME: Use heuristics for variable selection.
       (Ur resl, sats) <- S.state \(CDCLState steps clauses watches vals) ->
         LV.findWith
           ( \(vals, sats) i c -> S.do
-              dup2 vals & BiL.first LUA.freeze & \(Ur valsD, vals) ->
-                traceStack ("finding unit in: " <> show (i, c, valsD)) (LSet.member i sats) & \case
-                  (Ur False, sats) ->
-                    traceStack ("Unsatisfied clause: " <> show (i, c) <> "; check if it is unit")
-                      PL.$ S.runState (findUnit c) vals
-                      & \(Ur r, vals) -> traceStack ("Unit result: " <> show (i, c, r)) (Ur r, (vals, sats))
-                  (Ur True, sats) -> traceStack ("Already satisfied: " <> show i) (Ur Nothing, (vals, sats))
+              LSet.member i sats & \case
+                (Ur False, sats) ->
+                  S.runState (findUnit c) vals
+                    & \(Ur r, vals) -> (Ur r, (vals, sats))
+                (Ur True, sats) -> (Ur Nothing, (vals, sats))
           )
           (vals, sats)
           clauses
           & \(Ur ur, (vals, sats), clauses) ->
-            traceStack
-              ("findUnit Result = " <> show ur)
-              ((Ur ur, sats), CDCLState steps clauses watches vals)
+            ((Ur ur, sats), CDCLState steps clauses watches vals)
       case resl of
-        Nothing -> sats `lseq` traceStack "NoProp" S.pure (Ur NoMorePropagation)
+        Nothing -> sats `lseq` S.pure (Ur NoMorePropagation)
         Just (WatchChangedFromTo w old new newIdx, i) -> S.do
           updateWatchLit i w old new newIdx
           go sats Seq.Empty
@@ -538,22 +490,19 @@ findUnit ::
   Clause ->
   S.State Valuation (Ur (Maybe UnitResult))
 findUnit c@Clause {..}
-  | watched2 < 0 = traceStack "findUnit: Only one watchvar" S.do
+  | watched2 < 0 = S.do
       -- Only the first literal is active.
       let !l = (U.!) lits watched1
       Ur mres <- evalLit l
-      traceStack ("w1: " <> show (l, mres)) $ S.pure ()
       S.pure case mres of
         Just False -> Ur $ Just (Conflict l)
         Just True -> Ur $ Just $ Satisfied Nothing
         Nothing -> Ur $ Just (Unit l)
-  | otherwise = traceStack "findUnit: two watch vars" S.do
+  | otherwise = S.do
       -- The clause has more than two literals.
       let l1 = (U.!) lits watched1
           l2 = (U.!) lits watched2
-      traceStack ("(l1, l2): " <> show (l1, l2)) $ S.pure ()
       Ur mres <- evalLit l1
-      traceStack ("l1_val: " <> show mres) $ S.pure ()
       case mres of
         Just True ->
           -- satisfied; nothing to do.
