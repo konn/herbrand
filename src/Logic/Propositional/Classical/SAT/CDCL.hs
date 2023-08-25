@@ -163,7 +163,6 @@ solverLoop = fix $ \go mlit -> S.do
 
   -- FIXME: Perhaps we can maintain global "unsatisified" stack?
   Ur num <- move C.<$> S.use numInitialClausesL
-  -- FIXME: Avoid reallocation here
   Ur done <- S.uses clausesL $ LV.allFirstN num ((>= 0) . satisfiedAt)
   if done
     then S.pure Ok
