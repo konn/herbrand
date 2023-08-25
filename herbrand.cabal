@@ -196,11 +196,8 @@ executable cdcl-dry
     , containers
     , data-fix
     , deepseq
-    , directory
     , distributive
     , dlist
-    , falsify
-    , filepath
     , filtrable
     , fmlist
     , foldable1-classes-compat
@@ -208,11 +205,9 @@ executable cdcl-dry
     , generic-lens
     , hashable
     , herbrand
-    , herbrand-test-utils
     , lens
     , optparse-applicative
     , parallel
-    , parser-combinators
     , rec-def
     , recursion-schemes
     , semigroupoids

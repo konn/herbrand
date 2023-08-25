@@ -119,13 +119,8 @@ executables:
     - -rtsopts
     dependencies:
     - herbrand
-    - herbrand-test-utils
     - bytestring
-    - directory
-    - falsify
-    - filepath
     - optparse-applicative
-    - parser-combinators
 
 tests:
   herbrand-test:
