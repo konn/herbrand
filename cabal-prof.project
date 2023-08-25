@@ -1,0 +1,12 @@
+import: cabal.project
+import: cabal.project.freeze
+profiling: True
+library-profiling: True
+executable-profiling: True
+profiling-detail: late
+
+program-options
+  ghc-options: -fprof-auto -fprof-late
+
+package *
+  ghc-options: -fno-prof-auto
