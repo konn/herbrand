@@ -58,7 +58,6 @@ import Data.Strict.Maybe qualified as St
 import Data.Tuple qualified as P
 import Data.Unrestricted.Linear (UrT (..), liftUrT, runUrT)
 import Data.Unrestricted.Linear qualified as Ur
-import Data.Vector qualified as V
 import Data.Vector.Internal.Check
 import Data.Vector.Mutable.Linear.Helpers qualified as LV
 import Data.Vector.Mutable.Linear.Unboxed qualified as LUV
@@ -163,10 +162,10 @@ solverLoop = fix $ \go mlit -> S.do
   -- Without this, CDCL solver seems at most x1000 slower than DPLL and even Naïve tableaux...
 
   -- FIXME: Perhaps we can maintain global "unsatisified" stack?
-  Ur num <- S.uses numInitialClausesL $ BiL.first move PL.. dup2
+  Ur num <- move C.<$> S.use numInitialClausesL
   -- FIXME: Avoid reallocation here
-  Ur origs <- S.uses clausesL $ BiL.first (LV.freeze PL.. LV.slice 0 num) PL.. dup2
-  if V.all ((>= 0) . satisfiedAt) origs
+  Ur done <- S.uses clausesL $ LV.allFirstN num ((>= 0) . satisfiedAt)
+  if done
     then S.pure Ok
     else S.do
       Ur resl <- propagateUnit mlit

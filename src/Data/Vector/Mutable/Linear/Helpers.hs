@@ -12,6 +12,7 @@ module Data.Vector.Mutable.Linear.Helpers (
   module Data.Vector.Mutable.Linear.Extra,
   ifindIndexM,
   ifindWithIndexM,
+  allFirstN,
 ) where
 
 import Control.Functor.Linear (Monad, pure)
@@ -82,3 +83,15 @@ ifindIndexM (p :: Int -> a -> m Bool) v = size v & \(Ur sz, v) -> go 0 sz v
             if b
               then pure (Ur (Just i), arr)
               else go (i + 1) j arr
+
+allFirstN :: Int -> (a -> Bool) -> Vector a %1 -> (Ur Bool, Vector a)
+allFirstN n0 (p :: a -> Bool) v = size v & \(Ur n, v) -> go 0 (max 0 $ min n n0) v
+  where
+    go :: Int -> Int -> Vector a %1 -> (Ur Bool, Vector a)
+    go !i !n !v
+      | i == n = (Ur True, v)
+      | otherwise =
+          unsafeGet i v & \(Ur x, v) ->
+            p x & \case
+              True -> go (i + 1) n v
+              False -> (Ur False, v)
