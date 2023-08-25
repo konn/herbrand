@@ -37,10 +37,10 @@ test_solve =
                   $ P.eq
                   .$ ("expected", Unsat)
                   .$ ("answer", ans)
-              _ ->
+              consis ->
                 assert
                   $ P.satisfies
-                    ("Satisfiable", \case Satisfiable {} -> True; _ -> False)
+                    ("expected (" <> show consis <> ")", \case Satisfiable {} -> True; _ -> False)
                   .$ ("answer", ans)
         , testProperty "Gives a correct model" $ do
             cnf <- gen $ cnfGen 10 10 ((0, 10) `withOrigin` 5)

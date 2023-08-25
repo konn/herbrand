@@ -86,10 +86,10 @@ testSolverSemanticsWith projVar toInput vs sz solver =
               $ P.eq
               .$ ("expected", Unsat)
               .$ ("answer", projModel projVar <$> ans)
-          _ ->
+          resl ->
             assert
               $ P.satisfies
-                ("Satisfiable", \case Satisfiable {} -> True; _ -> False)
+                ("Satisfiable (" <> show resl <> ")", \case Satisfiable {} -> True; _ -> False)
               .$ ("answer", projModel projVar <$> ans)
     , testProperty "Gives a correct model" $ do
         (phi, consis) <- genFormula vs sz
