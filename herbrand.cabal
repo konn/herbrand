@@ -48,7 +48,6 @@ library
   build-depends:
       adjunctions
     , aeson
-    , algebraic-graphs
     , attoparsec
     , base >=4.7 && <5
     , bifunctors
@@ -95,7 +94,6 @@ library herbrand-bench
       Glob
     , adjunctions
     , aeson
-    , algebraic-graphs
     , attoparsec
     , base >=4.7 && <5
     , bifunctors
@@ -143,7 +141,6 @@ library herbrand-test-utils
   build-depends:
       adjunctions
     , aeson
-    , algebraic-graphs
     , attoparsec
     , base >=4.7 && <5
     , bifunctors
@@ -188,7 +185,6 @@ executable cdcl-dry
   build-depends:
       adjunctions
     , aeson
-    , algebraic-graphs
     , attoparsec
     , base >=4.7 && <5
     , bifunctors
@@ -230,7 +226,6 @@ executable gen-sat
   build-depends:
       adjunctions
     , aeson
-    , algebraic-graphs
     , attoparsec
     , base >=4.7 && <5
     , bifunctors
@@ -285,7 +280,6 @@ test-suite herbrand-test
   build-depends:
       adjunctions
     , aeson
-    , algebraic-graphs
     , attoparsec
     , base >=4.7 && <5
     , bifunctors
@@ -334,7 +328,6 @@ benchmark herbrand-cnf-bench
   build-depends:
       adjunctions
     , aeson
-    , algebraic-graphs
     , attoparsec
     , base >=4.7 && <5
     , bifunctors
@@ -386,7 +379,6 @@ benchmark herbrand-sat-bench
   build-depends:
       adjunctions
     , aeson
-    , algebraic-graphs
     , attoparsec
     , base >=4.7 && <5
     , bifunctors

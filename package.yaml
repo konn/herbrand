@@ -24,7 +24,6 @@ dependencies:
 - adjunctions
 - aeson
 - attoparsec
-- algebraic-graphs
 - bifunctors
 - bytestring
 - lens
