@@ -306,7 +306,7 @@ checkUnitClauseLit ls = S.do
                           | decideLevel == large = (large, small)
                           | decideLevel > small = (large, decideLevel)
                           | otherwise = (large, small)
-                     in (Ur (ULS count mcand large' small'), vals)
+                     in (Ur (ULS (count + 1) mcand large' small'), vals)
               _ -> (Ur (ULS count mcand large small), vals)
       )
       (ULS 0 St.Nothing (-1) (-2))
