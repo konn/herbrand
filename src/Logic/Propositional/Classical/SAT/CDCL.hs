@@ -46,6 +46,7 @@ import Data.HashMap.Mutable.Linear.Extra qualified as LHM
 import Data.HashSet qualified as HS
 import Data.Hashable
 import Data.IntSet qualified as IS
+import Data.Map.Strict qualified as Map
 import Data.Maybe qualified as P
 import Data.Semigroup (Arg (..), Max (..))
 import Data.Sequence (Seq (..))
@@ -203,9 +204,10 @@ solverLoop = fix $ \go mlit -> traceStack ("MainLoop: (mlit, clause) = " <> show
             ContradictingAssertion -> error $ "Impossible: decide variable is contradicting!: " <> show decLit
 
 backjump :: (HasCallStack) => ClauseId -> Lit -> S.State CDCLState FinalState
-backjump confCls lit = S.do
+backjump confCls lit = traceStack ("Backjumping with: " <> show (confCls, lit)) S.do
   Ur c <- S.uses clausesL $ LV.get $ fromEnum confCls
   Ur mLearnt <- findUIP1 lit $ L.foldOver (Lens.foldring U.foldr) L.set $ lits c
+  traceStack ("(conflict, mlearnt) = " <> show (c, mLearnt)) $ S.pure ()
   case mLearnt of
     Nothing ->
       -- No valid backjumping destination found. Unsat.
@@ -232,14 +234,16 @@ findUIP1 ::
   Set Lit ->
   S.State CDCLState (Ur (Maybe (DecideLevel, Clause, Lit)))
 findUIP1 !lit !curCls
-  | Set.null curCls = S.pure $ Ur Nothing
+  | traceStack ("findUIP: " <> show (lit, curCls)) False = error "Impossible"
+  | Set.null curCls = traceStack ("Reached to empty clause: " <> show (lit, curCls)) $ S.pure $ Ur Nothing
   | otherwise = S.do
       ml <- checkUnitClauseLit curCls
       case ml of
-        Ur (Just (l', decLvl)) ->
+        Ur (Just u@(l', decLvl)) ->
           -- Already Unit clause. Learn it!
           let cls' = U.cons l' $ L.fold L.vector $ Set.delete l' curCls
-           in S.pure
+           in traceStack ("Unit clause detected: " <> show u)
+                $ S.pure
                 $ Ur
                 $ Just
                   ( decLvl
@@ -250,9 +254,10 @@ findUIP1 !lit !curCls
                       }
                   , l'
                   )
-        Ur Nothing -> S.do
+        Ur Nothing -> traceStack "Not a UIP. resolving..." $ S.do
           -- Not a UIP. resolve.
           Ur v <- S.uses valuationL $ LUA.get $ fromEnum $ litVar lit
+          traceStack ("Resolvent valuation: " <> show (lit, v)) $ S.pure ()
           case v of
             Indefinite -> error $ "Literal " P.<> show lit P.<> " was chosen as resolver, but indefinite!"
             Definite {..} -> S.do
@@ -261,7 +266,9 @@ findUIP1 !lit !curCls
                   Ur.lift (L.foldOver (Lens.foldring U.foldr) L.set . lits)
                     D.<$> S.uses clausesL (LV.get (fromEnum ante))
                 Nothing -> S.pure $ Ur Set.empty
+              traceStack ("Ante for resol: " <> show cls') $ S.pure ()
               let resolved = resolve lit curCls cls'
+              traceStack ("Resolution: " <> show (curCls, lit, cls', resolved)) $ S.pure ()
               if Set.null resolved
                 then S.pure $ Ur Nothing -- Conflicting clause
                 else S.do
@@ -289,28 +296,36 @@ data ULS = ULS
   , _latestDec :: {-# UNPACK #-} !DecideLevel
   , _penultimateDec :: {-# UNPACK #-} !DecideLevel
   }
+  deriving (Show)
 
 checkUnitClauseLit :: (HasCallStack) => Set Lit -> S.State CDCLState (Ur (Maybe (Lit, DecideLevel)))
 checkUnitClauseLit ls = S.do
   Ur lvl <- currentDecideLevel
+  Ur vals <- S.uses valuationL (BiL.first LUA.freeze PL.. dup2)
+  traceStack ("Checking if unit: (level, lit) = " <> show (unDecideLevel lvl, Set.toList ls)) $ S.pure ()
+  traceStack ("Current valuation: " <> show (Map.toList $ Map.fromSet (\i -> vals U.! fromEnum (litVar i)) ls)) $ S.pure ()
   Ur lcnd <- S.uses valuationL \vals ->
     foldlLin'
       vals
       ( \vals (Ur (ULS count mcand large small)) lit ->
           LUA.get (fromEnum (litVar lit)) vals & \(Ur var, vals) ->
             case var of
-              Definite {..}
-                | decideLevel P.>= lvl ->
-                    let (large', small')
-                          | decideLevel > large = (decideLevel, large)
-                          | decideLevel == large = (large, small)
-                          | decideLevel > small = (large, decideLevel)
-                          | otherwise = (large, small)
-                     in (Ur (ULS (count + 1) mcand large' small'), vals)
+              Definite {..} ->
+                let (large', small')
+                      | decideLevel > large = (decideLevel, large)
+                      | decideLevel == large = (large, small)
+                      | decideLevel > small = (large, decideLevel)
+                      | otherwise = (large, small)
+                    (count', mcand') =
+                      if decideLevel P.>= lvl
+                        then (count + 1, St.maybe (St.Just lit) St.Just mcand)
+                        else (count, mcand)
+                 in (Ur (ULS count' mcand' large' small'), vals)
               _ -> (Ur (ULS count mcand large small), vals)
       )
       (ULS 0 St.Nothing (-1) (-2))
       ls
+  traceStack ("candidate lit: " <> show lcnd) $ S.pure ()
   S.pure $ case lcnd of
     (ULS 1 mx _ pu) | pu >= 0 -> Ur $ (,pu) <$> St.toLazy mx
     _ -> Ur Nothing
