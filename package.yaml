@@ -109,6 +109,23 @@ executables:
     - optparse-applicative
     - parser-combinators
 
+  cdcl-dry:
+    main:                Main.hs
+    source-dirs:         app/cdcl-dry
+    ghc-options:
+    - '"-with-rtsopts=-A32m -T --nonmoving-gc"'
+    - -fproc-alignment=64
+    - -O2
+    dependencies:
+    - herbrand
+    - herbrand-test-utils
+    - bytestring
+    - directory
+    - falsify
+    - filepath
+    - optparse-applicative
+    - parser-combinators
+
 tests:
   herbrand-test:
     main:                Spec.hs

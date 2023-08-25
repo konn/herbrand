@@ -176,6 +176,53 @@ library herbrand-test-utils
     , vector
   default-language: Haskell2010
 
+executable cdcl-dry
+  main-is: Main.hs
+  other-modules:
+      Paths_herbrand
+  autogen-modules:
+      Paths_herbrand
+  hs-source-dirs:
+      app/cdcl-dry
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints "-with-rtsopts=-A32m -T --nonmoving-gc" -fproc-alignment=64 -O2
+  build-depends:
+      adjunctions
+    , aeson
+    , algebraic-graphs
+    , attoparsec
+    , base >=4.7 && <5
+    , bifunctors
+    , bytestring
+    , containers
+    , data-fix
+    , deepseq
+    , directory
+    , distributive
+    , dlist
+    , falsify
+    , filepath
+    , filtrable
+    , fmlist
+    , foldable1-classes-compat
+    , foldl
+    , generic-lens
+    , hashable
+    , herbrand
+    , herbrand-test-utils
+    , lens
+    , optparse-applicative
+    , parallel
+    , parser-combinators
+    , rec-def
+    , recursion-schemes
+    , semigroupoids
+    , strict
+    , text
+    , transformers
+    , unordered-containers
+    , vector
+  default-language: Haskell2010
+
 executable gen-sat
   main-is: Main.hs
   other-modules:

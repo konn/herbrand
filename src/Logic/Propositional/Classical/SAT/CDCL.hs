@@ -19,6 +19,11 @@ module Logic.Propositional.Classical.SAT.CDCL (
   solveVarId,
   solveState,
   propagateUnit,
+
+  -- * Re-exports
+  CNF (..),
+  CNFClause (..),
+  Literal (..),
 ) where
 
 import Control.Applicative
@@ -62,8 +67,8 @@ import GHC.Generics qualified as GHC
 import Logic.Propositional.Classical.SAT.CDCL.Types
 import Logic.Propositional.Classical.SAT.Types
 import Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
-import Prelude.Linear hiding (not, (&&), (+), (-), (.), (/=), (<), (==), (>), (>=), (||))
-import Prelude.Linear qualified as PL hiding ((>), (>=))
+import Prelude.Linear hiding (not, (&&), (+), (-), (.), (/=), (<), (<>), (==), (>), (>=), (||))
+import Prelude.Linear qualified as PL hiding ((<>), (>), (>=))
 import Unsafe.Linear qualified as Unsafe
 import Prelude hiding (uncurry, ($))
 import Prelude qualified as P
@@ -124,7 +129,7 @@ backHS vs =
                 ( D.fmap
                     ( fromMaybe
                         ( error
-                            $ "unrenameMode: variable out of bound: "
+                            $ "unrenameModel: variable out of bound: "
                             P.<> show v
                         )
                     )
@@ -163,7 +168,7 @@ solverLoop = fix $ \go mlit -> S.do
           Ur newDec <- S.uses stepsL LUV.size
           stepsL S.%= LUV.push 1
           valuationL
-            S.%= LUA.unsafeSet
+            S.%= LUA.set
               vid
               Definite
                 { value = True
@@ -175,7 +180,7 @@ solverLoop = fix $ \go mlit -> S.do
 
 backjump :: (HasCallStack) => ClauseId -> Lit -> S.State CDCLState FinalState
 backjump confCls lit = S.do
-  Ur c <- S.uses clausesL $ LV.unsafeGet $ fromEnum confCls
+  Ur c <- S.uses clausesL $ LV.get $ fromEnum confCls
   Ur mLearnt <- findUIP1 lit $ L.foldOver (Lens.foldring U.foldr) L.set $ lits c
   case mLearnt of
     Nothing ->
@@ -223,14 +228,14 @@ findUIP1 !lit !curCls
                   )
         Ur Nothing -> S.do
           -- Not a UIP. resolve.
-          Ur v <- S.uses valuationL $ LUA.unsafeGet $ fromEnum $ litVar lit
+          Ur v <- S.uses valuationL $ LUA.get $ fromEnum $ litVar lit
           case v of
             Indefinite -> error $ "Literal " P.<> show lit P.<> " was chosen as resolver, but indefinite!"
             Definite {..} -> S.do
               Ur cls' <- case antecedent of
                 Just ante ->
                   Ur.lift (L.foldOver (Lens.foldring U.foldr) L.set . lits)
-                    D.<$> S.uses clausesL (LV.unsafeGet (fromEnum ante))
+                    D.<$> S.uses clausesL (LV.get (fromEnum ante))
                 Nothing -> S.pure $ Ur Set.empty
               let resolved = resolve lit curCls cls'
               if Set.null resolved
@@ -240,7 +245,7 @@ findUIP1 !lit !curCls
                     foldlLin'
                       vals
                       ( \vals !mn !l ->
-                          LUA.unsafeGet (fromEnum $ litVar l) vals & \(Ur var, vals) ->
+                          LUA.get (fromEnum $ litVar l) vals & \(Ur var, vals) ->
                             ( Ur.lift (P.<> Max (Arg (introduced var) l)) mn
                             , vals
                             )
@@ -261,14 +266,14 @@ data ULS = ULS
   , _penultimateDec :: {-# UNPACK #-} !DecideLevel
   }
 
-checkUnitClauseLit :: Set Lit -> S.State CDCLState (Ur (Maybe (Lit, DecideLevel)))
+checkUnitClauseLit :: (HasCallStack) => Set Lit -> S.State CDCLState (Ur (Maybe (Lit, DecideLevel)))
 checkUnitClauseLit ls = S.do
   Ur lvl <- currentDecideLevel
   Ur lcnd <- S.uses valuationL \vals ->
     foldlLin'
       vals
       ( \vals (Ur (ULS count mcand large small)) lit ->
-          LUA.unsafeGet (fromEnum (litVar lit)) vals & \(Ur var, vals) ->
+          LUA.get (fromEnum (litVar lit)) vals & \(Ur var, vals) ->
             case var of
               Definite {..}
                 | decideLevel P.>= lvl ->
@@ -322,7 +327,7 @@ toSatResult (Ok, CDCLState steps clauses watches vals) =
 toClauseId :: Int -> ClauseId
 toClauseId = fromIntegral
 
-propagateUnit :: Maybe (Lit, ClauseId) -> S.State CDCLState (Ur PropResult)
+propagateUnit :: (HasCallStack) => Maybe (Lit, ClauseId) -> S.State CDCLState (Ur PropResult)
 propagateUnit ml = S.do
   Ur cap <- S.state numClauses
   sats <- S.state $ \st -> besides st (`LSet.emptyL` cap)
@@ -339,7 +344,7 @@ propagateUnit ml = S.do
         loop :: LSet.Set Int %1 -> [Int] -> Seq.Seq (Lit, ClauseId) -> S.State CDCLState (Ur PropResult)
         loop !sats [] !rest = go sats rest
         loop !sats (!i : !is) !rest = S.do
-          Ur c <- S.uses clausesL $ LV.unsafeGet i
+          Ur c <- S.uses clausesL $ LV.get i
           Ur resl <- S.zoom valuationL $ propLit l c
           case resl of
             Nothing -> loop sats is rest
@@ -362,15 +367,14 @@ propagateUnit ml = S.do
           ( \(vals, sats) i c ->
               LSet.member i sats & \case
                 (Ur False, sats) ->
-                  S.runState (findUnit c) vals & \(r, a) ->
-                    (r, (a, sats))
+                  S.runState (findUnit c) vals
+                    & \(Ur r, vals) -> (Ur r, (vals, sats))
                 (Ur True, sats) -> (Ur Nothing, (vals, sats))
           )
           (vals, sats)
           clauses
-          & \(ur, (vals, sats), clauses) ->
-            ((ur, sats), CDCLState steps clauses watches vals)
-
+          & \(Ur ur, (vals, sats), clauses) ->
+            ((Ur ur, sats), CDCLState steps clauses watches vals)
       case resl of
         Nothing -> sats `lseq` S.pure (Ur NoMorePropagation)
         Just (WatchChangedFromTo w old new newIdx, i) -> S.do
@@ -423,7 +427,7 @@ assertLit ante lit = S.do
 -- | Propagate Literal.
 propLit :: Lit -> Clause -> S.State Valuation (Ur (Maybe UnitResult))
 propLit trueLit c@Clause {..} =
-  let l1 = U.unsafeIndex lits watched1
+  let l1 = lits U.! watched1
    in if litVar l1 == litVar trueLit
         then -- Have the same variable as watched var #1
 
@@ -437,8 +441,8 @@ propLit trueLit c@Clause {..} =
                 Nothing -- No vacancy.
                   | watched2 < 0 -> S.pure $ Ur $ Just $ Conflict l1
                   | otherwise -> S.do
-                      let l2 = U.unsafeIndex lits watched2
-                      mval2 <- evalLit l2
+                      let l2 = (U.!) lits watched2
+                      Ur mval2 <- evalLit l2
                       case mval2 of
                         Nothing -> S.pure $ Ur $ Just $ Unit l2
                         Just True -> S.pure $ Ur $ Just $ Satisfied Nothing
@@ -447,7 +451,7 @@ propLit trueLit c@Clause {..} =
                           Ur.lift Just D.<$> reportLastAddedAsConflict c
         else -- Otherwise it must be watched var #2
 
-          let l2 = U.unsafeIndex lits watched2
+          let l2 = (U.!) lits watched2
            in if l2 == trueLit
                 then S.pure $ Ur $ Just $ Satisfied Nothing -- Satisfied
                 else S.do
@@ -455,7 +459,7 @@ propLit trueLit c@Clause {..} =
                   case mnext of
                     Just next -> S.pure $ Ur $ Just $ fromNextSlot next
                     Nothing -> S.do
-                      mval1 <- evalLit l1
+                      Ur mval1 <- evalLit l1
                       case mval1 of
                         Nothing -> S.pure $ Ur $ Just $ Unit l1
                         Just True -> S.pure $ Ur $ Just $ Satisfied Nothing
@@ -469,17 +473,17 @@ findUnit ::
 findUnit c@Clause {..}
   | watched2 < 0 = S.do
       -- Only the first literal is active.
-      let l = U.unsafeIndex lits watched1
-      mres <- evalLit l
+      let !l = (U.!) lits watched1
+      Ur mres <- evalLit l
       S.pure case mres of
         Just False -> Ur $ Just (Conflict l)
         Just True -> Ur $ Just $ Satisfied Nothing
         Nothing -> Ur $ Just (Unit l)
   | otherwise = S.do
       -- The clause has more than two literals.
-      let l1 = U.unsafeIndex lits watched1
-          l2 = U.unsafeIndex lits watched2
-      mres <- evalLit l1
+      let l1 = (U.!) lits watched1
+          l2 = (U.!) lits watched2
+      Ur mres <- evalLit l1
       case mres of
         Just True ->
           -- satisfied; nothing to do.
@@ -493,7 +497,7 @@ findUnit c@Clause {..}
               S.pure $ Ur $ Just $ fromNextSlot next
             Nothing -> S.do
               -- No vacancy. Trying to "satisfy" watched 2.
-              mres' <- evalLit l2
+              Ur mres' <- evalLit l2
               case mres' of
                 Nothing ->
                   -- w2 can be unit!
@@ -504,7 +508,7 @@ findUnit c@Clause {..}
                   Ur.lift Just D.<$> reportLastAddedAsConflict c
         Nothing -> S.do
           -- Undetermined. Check for watched2
-          mres' <- evalLit l2
+          Ur mres' <- evalLit l2
           case mres' of
             Just True ->
               -- satisfied; nothing to do.
@@ -517,14 +521,14 @@ findUnit c@Clause {..}
                 Nothing -> Just $ Unit l1 -- w1 is unit!
             Nothing -> S.pure (Ur Nothing) -- No literal changed.
 
-reportLastAddedAsConflict :: Clause -> S.State Valuation (Ur UnitResult)
+reportLastAddedAsConflict :: (HasCallStack) => Clause -> S.State Valuation (Ur UnitResult)
 reportLastAddedAsConflict c@Clause {..}
   | watched2 < 0 = S.pure $ Ur $ Conflict $ getWatchedLit W1 c
   | otherwise = S.do
       let l1 = getWatchedLit W1 c
           l2 = getWatchedLit W2 c
-      Ur v1 <- S.state $ LUA.unsafeGet (fromEnum $ litVar l1)
-      Ur v2 <- S.state $ LUA.unsafeGet (fromEnum $ litVar l2)
+      Ur v1 <- S.state $ LUA.get (fromEnum $ litVar l1)
+      Ur v2 <- S.state $ LUA.get (fromEnum $ litVar l2)
       S.pure
         $ Ur
         $ Conflict
@@ -535,8 +539,8 @@ introduced Indefinite = -1 :!: -1
 introduced Definite {..} = decideLevel :!: decisionStep
 
 getWatchedLit :: WatchVar -> Clause -> Lit
-getWatchedLit W1 Clause {..} = U.unsafeIndex lits watched1
-getWatchedLit W2 Clause {..} = U.unsafeIndex lits watched2
+getWatchedLit W1 Clause {..} = (U.!) lits watched1
+getWatchedLit W2 Clause {..} = (U.!) lits watched2
 
 fromNextSlot :: NextSlot -> UnitResult
 fromNextSlot (NextSlot True w old new lid) = Satisfied $ Just $ (w :!: old) :!: (new :!: lid)
@@ -570,11 +574,11 @@ findNextAvailable w c@Clause {..} = S.do
           cands
   case mSat of
     Just i ->
-      let v' = litVar $ U.unsafeIndex lits i
+      let v' = litVar $ (U.!) lits i
        in S.pure $ Ur $ Just $ NextSlot True w origVar v' i
     Nothing -> case mUndet of
       Just i ->
-        let v' = litVar $ U.unsafeIndex lits i
+        let v' = litVar $ (U.!) lits i
          in S.pure $ Ur $ Just $ NextSlot False w origVar v' i
       Nothing -> S.pure (Ur Nothing)
 
@@ -583,9 +587,9 @@ unassigned exc1 exc2 vals (cur, l)
   | cur == exc1 || cur == exc2 = Nothing
   | otherwise =
       S.runState (evalLit l) vals & \case
-        (Nothing, _vals) -> Just Unassigned
-        (Just True, _vals) -> Just AssignedTrue
-        (Just False, _vals) -> Nothing
+        (Ur Nothing, _vals) -> Just Unassigned
+        (Ur (Just True), _vals) -> Just AssignedTrue
+        (Ur (Just False), _vals) -> Nothing
 
 unsafeMapMaybeL ::
   forall a b s.
@@ -598,13 +602,14 @@ unsafeMapMaybeL s p vs =
   Unsafe.toLinear (\s -> (Ur (p s), s)) s & \(Ur p, s) ->
     (Ur (U.imapMaybe (traverse P.. p) P.$ U.indexed vs), s)
 
-evalLit :: Lit -> S.State Valuation (Maybe Bool)
+evalLit :: (HasCallStack) => Lit -> S.State Valuation (Ur (Maybe Bool))
 evalLit l = S.do
-  Ur m <- S.state $ LUA.unsafeGet (fromEnum $ litVar l)
+  Ur m <- S.state $ LUA.get (fromEnum $ litVar l)
   S.pure case m of
     Definite {..} ->
-      Just
+      Ur
+        $ Just
         $ if Lens.is _PosL l
           then value
           else not value
-    Indefinite -> Nothing
+    Indefinite -> Ur Nothing
