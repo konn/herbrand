@@ -184,7 +184,7 @@ executable cdcl-dry
       Paths_herbrand
   hs-source-dirs:
       app/cdcl-dry
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints "-with-rtsopts=-A32m -T --nonmoving-gc" -fproc-alignment=64 -O2
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints "-with-rtsopts=-A32m -T --nonmoving-gc" -fproc-alignment=64 -O2 -rtsopts
   build-depends:
       adjunctions
     , aeson

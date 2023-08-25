@@ -1,16 +1,30 @@
+{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE RecordWildCards #-}
+{-# OPTIONS_GHC -finfo-table-map -fdistinct-constructor-tables #-}
+
 module Main (main) where
 
+import Control.Applicative ((<**>))
+import Control.DeepSeq (force)
+import Control.Exception (evaluate)
+import Control.Lens
+import Control.Monad (void)
+import qualified Data.ByteString.Lazy as LBS
 import Logic.Propositional.Classical.SAT.CDCL
-import Logic.Propositional.Syntax.General
-import qualified Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive as CNF
+import Logic.Propositional.Classical.SAT.Format.DIMACS (parseCNFLazy)
+import qualified Options.Applicative as Opt
 
-fml :: Formula Full Int
-fml = neg ((neg (⊥) ==> (⊤) /\ Atom 0) /\ (neg (⊥) ==> (⊥) \/ Atom 0))
+newtype Opt = Opt {input :: FilePath}
+
+optP :: Opt.ParserInfo Opt
+optP = Opt.info (p <**> Opt.helper) $ Opt.progDesc "Solves SAT problem on CNF formula by CDCL"
+  where
+    p = Opt <$> Opt.strOption (Opt.long "input" <> Opt.short 'i' <> Opt.metavar "PATH" <> Opt.help "The path to the input CNF file.")
 
 main :: IO ()
 main = do
-  print fml
-  let cnf = CNF.fromFormulaFast fml
-  print cnf
+  Opt {..} <- Opt.execParser optP
+  !cnf <- either error (evaluate . force . view _3) . parseCNFLazy =<< LBS.readFile input
+  putStrLn "CNF evaluated. Solving..."
 
-  print $ solve cnf
+  void $ evaluate $ force $ solve cnf
