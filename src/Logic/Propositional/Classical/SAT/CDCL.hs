@@ -369,7 +369,7 @@ propagateUnit ml = traceStack ("propagateUnit: " <> show ml) S.do
             `lseq` S.pure (Ur (ConflictFound reason l))
         Asserted -> S.do
           Ur m <- S.uses watchesL $ LHM.lookup (litVar l)
-          traceStack ("Variables watching the lit: " <> show m) $ S.pure ()
+          traceStack ("Clauses watching the lit: " <> show m) $ S.pure ()
           case m of
             Just (IS.delete (P.fromEnum reason) -> targs)
               | not (IS.null targs) -> traceStack ("Propagating to watching clauses: " <> show targs) $ loop sats (IS.toList targs) rest
