@@ -35,6 +35,8 @@ import Data.Functor.Foldable qualified as R
 import Data.Functor.Linear qualified as Lin
 import Data.Hashable (Hashable)
 import Data.List.NonEmpty qualified as NE
+import Data.Monoid (Endo (..))
+import Data.Semigroup.Foldable (intercalateMap1)
 import Data.Unrestricted.Linear (Consumable)
 import GHC.Exts (IsList)
 import GHC.Generics (Generic, Generic1)
@@ -48,15 +50,26 @@ import Prelude hiding (foldl1)
 
 -- | Propositional formula in Conjunction Normal Form (__CNF__) with atomic formula @a@.
 newtype CNF a = CNF {cnfClauses :: [CNFClause a]}
-  deriving (Show, Eq, Ord, Generic, Generic1, Functor, Foldable, Traversable)
+  deriving (Eq, Ord, Generic, Generic1, Functor, Foldable, Traversable)
   deriving anyclass (Wrapped, NFData, Hashable)
   deriving newtype (IsList)
 
+instance (Show a) => Show (CNF a) where
+  showsPrec _ (CNF cs) = shows cs
+
 -- | Each conjunctive clause in CNF formulae, i.e. disjunction of literals.
 newtype CNFClause a = CNFClause {clauseLits :: [Literal a]}
-  deriving (Show, Eq, Ord, Generic, Generic1, Functor, Foldable, Traversable)
+  deriving (Eq, Ord, Generic, Generic1, Functor, Foldable, Traversable)
   deriving anyclass (Wrapped, NFData, Hashable)
   deriving newtype (IsList)
+
+instance (Show a) => Show (CNFClause a) where
+  showsPrec _ (CNFClause []) = showString "[]"
+  showsPrec _ (CNFClause (c : cs)) =
+    showChar '[' . appEndo (intercalateMap1 (Endo $ showString ", ") (Endo . showsLit) $ c NE.:| cs) . showChar ']'
+    where
+      showsLit (Positive a) = shows a
+      showsLit (Negative a) = showChar '-' . shows a
 
 data WithFresh a
   = Var !a
@@ -72,18 +85,14 @@ fromFormulaFast =
   CNF
     . coerce
     . uncurry ((:) . pure)
-    . fmap (FML.toList . fmap FML.toList)
-    . (\f -> evalRWS f () 0)
+    . fmap (([Positive (Fresh 1)] :) . ([Negative (Fresh 0)] :) . FML.toList . fmap FML.toList)
+    . (\f -> evalRWS f () 2)
     . R.cata \case
       AtomF a -> pure $ Positive (Var a)
       TopF _ -> do
-        e <- newFresh
-        tell $ FML.singleton $ FML.singleton e
-        pure e
+        pure $ Negative (Fresh 0)
       BotF _ -> do
-        e <- newFresh
-        tell $ FML.singleton $ FML.singleton $ negLit e
-        pure e
+        pure $ Positive (Fresh 1)
       NotF _ aSt -> do
         e <- aSt
         e' <- newFresh
