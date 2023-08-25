@@ -150,7 +150,7 @@ solveVarId cnf =
   unur PL.$ linearly \l ->
     toCDCLState cnf l PL.& \case
       Left (Ur resl) -> Ur (P.mempty P.<$ resl)
-      Right stt -> (solveState stt)
+      Right stt -> solveState stt
 
 solveState :: CDCLState %1 -> Ur (SatResult (Model VarId))
 solveState = toSatResult PL.. S.runState (solverLoop Nothing)
