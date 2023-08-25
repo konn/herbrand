@@ -85,14 +85,14 @@ fromFormulaFast =
   CNF
     . coerce
     . uncurry ((:) . pure)
-    . fmap (([Positive (Fresh 1)] :) . ([Negative (Fresh 0)] :) . FML.toList . fmap FML.toList)
-    . (\f -> evalRWS f () 2)
+    . fmap (([Positive (Fresh 0)] :) . FML.toList . fmap FML.toList)
+    . (\f -> evalRWS f () 1)
     . R.cata \case
       AtomF a -> pure $ Positive (Var a)
       TopF _ -> do
-        pure $ Negative (Fresh 0)
+        pure $ Positive (Fresh 0)
       BotF _ -> do
-        pure $ Positive (Fresh 1)
+        pure $ Negative (Fresh 0)
       NotF _ aSt -> do
         e <- aSt
         e' <- newFresh
