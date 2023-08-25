@@ -24,7 +24,7 @@ import Test.Falsify.Predicate ((.$))
 import qualified Test.Falsify.Predicate as P
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.Falsify
-import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
+import Test.Tasty.HUnit (assertBool, assertFailure, testCaseSteps, (@?=))
 
 testProverSemantics ::
   Arity ->
@@ -98,9 +98,11 @@ testSolverSemanticsWith projVar toInput vs sz solver =
                   .$ ("answer", projModel projVar <$> ans)
         , testGroup
             "Regressions"
-            [ testCase (show phi) do
+            [ testCaseSteps (show phi) \step -> do
               let consis = classifyFormula phi
-                  ans = solver $ toInput phi
+                  cnf = toInput phi
+                  ans = solver cnf
+              step $ "In CNF: " <> show cnf
               case consis of
                 Inconsistent ->
                   (projModel projVar <$> ans) @?= Unsat
@@ -140,12 +142,14 @@ testSolverSemanticsWith projVar toInput vs sz solver =
                   .$ ("answer", eval (projModel projVar m) phi')
         , testGroup
             "Regressions"
-            [ testCase "show phi" do
+            [ testCaseSteps "show phi" \step -> do
               let consis = classifyFormula phi
                   phi' = case consis of
                     Inconsistent -> neg phi
                     _ -> phi
-              case solver $ toInput phi' of
+                  cnf = toInput phi'
+              step $ "In CNF: " <> show cnf
+              case solver cnf of
                 Unsat -> assertFailure "Expected Satisfiable, but got Unsat"
                 Satisfiable m -> do
                   eval (projModel projVar m) phi' @?= Just True
