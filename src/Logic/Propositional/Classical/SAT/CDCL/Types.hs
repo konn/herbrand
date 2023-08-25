@@ -96,8 +96,8 @@ import Prelude.Linear (lseq, (&))
 import Prelude.Linear qualified as PL
 
 newtype VarId = VarId {unVarId :: Word}
-  deriving (Show, Eq, Ord, Generic)
-  deriving newtype (NFData, Hashable, Num, Enum, PL.Consumable, PL.Dupable, PL.Movable)
+  deriving (Eq, Ord, Generic)
+  deriving newtype (Show, NFData, Hashable, Num, Enum, PL.Consumable, PL.Dupable, PL.Movable)
 
 derivingUnbox "VarId" [t|VarId -> Word|] [|unVarId|] [|VarId|]
 
