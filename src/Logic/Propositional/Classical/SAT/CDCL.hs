@@ -194,17 +194,13 @@ solverLoop = fix $ \go mlit -> traceStack ("MainLoop: (mlit, clause) = " <> show
         Just vid -> traceStack ("Try to decide var #" <> show vid) S.do
           Ur newDec <- S.uses stepsL LUV.size
           traceStack ("New decision level: " <> show newDec) $ S.pure ()
-          stepsL S.%= LUV.push 1
-          valuationL
-            S.%= LUA.set
-              vid
-              Definite
-                { value = True
-                , decideLevel = fromIntegral newDec
-                , decisionStep = 0
-                , antecedent = Nothing
-                }
-          go (Just (PosL $ toEnum vid, -1))
+          stepsL S.%= LUV.push 0
+          let decLit = PosL $ toEnum vid
+          assResult <- assertLit (-1) decLit
+          case assResult of
+            Asserted -> go (Just (decLit, -1))
+            AlreadyAsserted -> error $ "Impossible:  decide variable is already asserted true: " <> show decLit
+            ContradictingAssertion -> error $ "Impossible: decide variable is contradicting!: " <> show decLit
 
 backjump :: (HasCallStack) => ClauseId -> Lit -> S.State CDCLState FinalState
 backjump confCls lit = S.do
