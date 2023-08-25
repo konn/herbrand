@@ -113,7 +113,6 @@ jobs:
   test:
     name: Test
     needs: [build]
-    continue-on-error: true
     env:
       ghc: 9.4.5
       cabal: 3.10.1.0
