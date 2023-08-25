@@ -11,7 +11,7 @@ import Logic.Propositional.Classical.SAT.BruteForce (Consistency (..))
 import qualified Logic.Propositional.Classical.SAT.DPLL as DPLL
 import Logic.Propositional.Classical.SAT.Types (SatResult (..))
 import Logic.Propositional.Classical.SAT.Types hiding (Unsat)
-import Logic.Propositional.Classical.Syntax.TestUtils (Arity, Size, genFormula, modelFor)
+import Logic.Propositional.Classical.Syntax.TestUtils (Arity, Size, genFormula, modelFor, testFormulae)
 import Logic.Propositional.Syntax.General
 import Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
 import Test.Falsify.Predicate ((.$))
@@ -21,7 +21,6 @@ import Test.Tasty.Falsify
 
 test_fromFormulaNaive :: TestTree
 test_fromFormulaNaive = testGroup "fromFormulaNaive" [checkCNFSemantics 5 64 fromFormulaNaive]
-
 
 test_fromFormulaFast :: TestTree
 test_fromFormulaFast =
@@ -57,7 +56,7 @@ checkCNFSemantics ar sz cnfy =
   testGroup
     "Behaves semantically correctly"
     [ testProperty
-        "preserves semantics"
+        "preserves semantics (Random)"
         $ do
           (fml, _consis) <- genFormula ar sz
           model <- gen $ modelFor $ L.fold L.hashSet fml
@@ -68,4 +67,17 @@ checkCNFSemantics ar sz cnfy =
             $ P.eq
             .$ ("expected", eval model fml)
             .$ ("answer", eval model $ toFormula @Full cnf)
+    , testGroup
+        "preserves semantics (regression)"
+        [ testProperty (show fml) $ do
+          model <- gen $ modelFor $ L.fold L.hashSet fml
+          let cnf = cnfy fml
+          info $ "Model: " <> show model
+          info $ "CNF: " <> show cnf
+          assert
+            $ P.eq
+            .$ ("expected", eval model fml)
+            .$ ("answer", eval model $ toFormula @Full cnf)
+        | fml <- testFormulae
+        ]
     ]

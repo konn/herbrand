@@ -13,6 +13,7 @@ module Logic.Propositional.Classical.Syntax.TestUtils (
   literal,
   cnfGen,
   projModel,
+  testFormulae,
 ) where
 
 import Herbrand.Test
@@ -76,7 +77,7 @@ testSolverSemanticsWith ::
   TestTree
 testSolverSemanticsWith projVar toInput vs sz solver =
   testGroup
-    "behaves sematically correctly"
+    "behaves semantically correctly"
     [ testGroup
         "Gives a correct decision"
         [ testProperty "Random" $ do
