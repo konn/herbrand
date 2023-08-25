@@ -2,7 +2,7 @@
 {-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE TypeApplications #-}
 
-module Logic.Propositional.Classical.SAT.CDCLSpec (test_solve) where
+module Logic.Propositional.Classical.SAT.CDCLSpec (test_solve, test_solveVarId) where
 
 import qualified Control.Foldl as L
 import Control.Lens (folded, maximumOf)
@@ -61,6 +61,42 @@ test_solve =
             $ solve
             . fmap fromWithFree
             . fromFormulaFast
+        ]
+    ]
+
+test_solveVarId :: TestTree
+test_solveVarId =
+  testGroup
+    "solveVarId"
+    [ testGroup
+        "solveVarId (CNF input)"
+        [ testProperty "Gives a correct decision" $ do
+            cnf <- gen $ fmap toEnum <$> cnfGen 10 10 ((0, 10) `withOrigin` 5)
+            collectCNF cnf
+            let ans = solveVarId cnf
+            case classifyFormula $ toFormula @Full cnf of
+              Inconsistent ->
+                assert
+                  $ P.eq
+                  .$ ("expected", Unsat)
+                  .$ ("answer", ans)
+              _ ->
+                assert
+                  $ P.satisfies
+                    ("Satisfiable", \case Satisfiable {} -> True; _ -> False)
+                  .$ ("answer", ans)
+        , testProperty "Gives a correct model" $ do
+            cnf <- gen $ fmap toEnum <$> cnfGen 10 10 ((0, 10) `withOrigin` 5)
+            collectCNF cnf
+
+            case solveVarId cnf of
+              Unsat -> discard
+              Satisfiable m -> do
+                info $ "Given model: " <> show m
+                assert
+                  $ P.eq
+                  .$ ("expected", Just True)
+                  .$ ("answer", eval m $ toFormula @Full cnf)
         ]
     ]
 

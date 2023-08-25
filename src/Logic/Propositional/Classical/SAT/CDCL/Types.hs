@@ -20,7 +20,6 @@
 
 module Logic.Propositional.Classical.SAT.CDCL.Types (
   isAssignedAfter,
-  withCDCLState,
   toCDCLState,
   CDCLState (..),
   Valuation,
@@ -266,14 +265,15 @@ valuationL = LinLens.lens \(CDCLState ss cs ws vs) -> (vs, CDCLState ss cs ws)
 
 toCDCLState :: CNF VarId -> Linearly %1 -> Either (Ur (SatResult ())) CDCLState
 toCDCLState (CNF cls) lin =
-  let (cls', truth, contradicting) =
+  let (cls', truth, contradicting, maxVar) =
         L.fold
-          ( (,,)
+          ( (,,,)
               <$> L.handles
                 #_CNFClause
                 (L.premap (L.fold L.nub . map encodeLit) L.nub)
               <*> Foldl.null
               <*> Foldl.any null
+              <*> Foldl.handles Foldl.folded Foldl.maximum
           )
           cls
       (upds, cls'') = imapAccumL buildClause Map.empty cls'
@@ -288,29 +288,7 @@ toCDCLState (CNF cls) lin =
                 PL.& \(watcheds, lin) ->
                   Right
                     PL.$ CDCLState steps clauses watcheds
-                    PL.$ LUA.allocL lin (Map.size upds) Indefinite
-
-withCDCLState :: CNF VarId -> Either (SatResult ()) ((CDCLState %1 -> Ur a) %1 -> Ur a)
-withCDCLState (CNF cls) =
-  let (cls', truth, contradicting) =
-        L.fold
-          ( (,,)
-              <$> L.handles
-                #_CNFClause
-                (L.premap (L.fold L.nub . map encodeLit) L.nub)
-              <*> Foldl.null
-              <*> Foldl.any null
-          )
-          cls
-   in if
-        | truth -> Left $ Satisfiable ()
-        | contradicting -> Left Unsat
-        | otherwise ->
-            Right
-              $ let (upds, cls'') = imapAccumL buildClause Map.empty cls'
-                 in \k -> LUV.fromList [0] \steps -> LV.fromList cls'' \clauses ->
-                      LHM.fromList (Map.toList upds) \watcheds ->
-                        LUA.alloc (Map.size upds) Indefinite (k PL.. CDCLState steps clauses watcheds)
+                    PL.$ LUA.allocL lin (maybe 0 ((+ 1) . fromEnum) maxVar) Indefinite
 
 buildClause ::
   Int ->

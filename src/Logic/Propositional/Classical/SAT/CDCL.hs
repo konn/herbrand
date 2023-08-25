@@ -35,7 +35,7 @@ import Control.Lens hiding (Index, lens, (&))
 import Control.Lens qualified as Lens
 import Control.Lens.Extras qualified as Lens
 import Control.Optics.Linear qualified as LinOpt
-import Data.Alloc.Linearly.Token (besides)
+import Data.Alloc.Linearly.Token (besides, linearly)
 import Data.Array.Mutable.Linear.Unboxed qualified as LUA
 import Data.Bifunctor.Linear qualified as BiL
 import Data.Foldable qualified as Foldable
@@ -99,9 +99,10 @@ solve cnf = unur $ LHM.empty 128 \dic ->
 
 solveVarId :: CNF VarId -> SatResult (Model VarId)
 solveVarId cnf =
-  withCDCLState cnf & \case
-    Left resl -> (P.mempty P.<$ resl)
-    Right k -> unur (k solveState)
+  unur PL.$ linearly \l ->
+    toCDCLState cnf l PL.& \case
+      Left (Ur resl) -> Ur (P.mempty P.<$ resl)
+      Right stt -> (solveState stt)
 
 unrenameModel ::
   (Hashable a) =>
