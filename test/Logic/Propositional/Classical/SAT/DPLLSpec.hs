@@ -57,10 +57,14 @@ test_solve =
         ]
     , testGroup
         "solve . fromWithFree . fromFormulaFast"
-        [ testSolverSemanticsWith projVar 10 128
-            $ solve
-            . fmap fromWithFree
-            . fromFormulaFast
+        [ testSolverSemanticsWith
+            projVar
+            ( fmap fromWithFree
+                . fromFormulaFast
+            )
+            10
+            128
+            solve
         ]
     ]
 

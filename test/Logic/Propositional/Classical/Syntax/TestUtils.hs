@@ -62,21 +62,24 @@ testSolverSemantics ::
   Size ->
   (Formula Full Int -> SatResult (Model Int)) ->
   TestTree
-testSolverSemantics = testSolverSemanticsWith Just
+testSolverSemantics = testSolverSemanticsWith Just id
 
 testSolverSemanticsWith ::
-  (Show v) =>
+  (Show v, Show x) =>
   (v -> Maybe Int) ->
+  (Formula Full Int -> x) ->
   Arity ->
   Size ->
-  (Formula Full Int -> SatResult (Model v)) ->
+  (x -> SatResult (Model v)) ->
   TestTree
-testSolverSemanticsWith projVar vs sz solver =
+testSolverSemanticsWith projVar toInput vs sz solver =
   testGroup
     "behaves sematically correctly"
     [ testProperty "Gives a correct decision" $ do
         (phi, consis) <- genFormula vs sz
-        let ans = solver phi
+        let inp = toInput phi
+        info $ "Direct Input: " <> show inp
+        let ans = solver inp
         case consis of
           Inconsistent ->
             assert
@@ -90,7 +93,6 @@ testSolverSemanticsWith projVar vs sz solver =
               .$ ("answer", projModel projVar <$> ans)
     , testProperty "Gives a correct model" $ do
         (phi, consis) <- genFormula vs sz
-
         label
           "consistency"
           [ case consis of
@@ -102,7 +104,9 @@ testSolverSemanticsWith projVar vs sz solver =
               Inconsistent -> neg phi
               _ -> phi
         info $ "Satsifiable Formula: " <> show phi'
-        case solver phi' of
+        let inp = toInput phi'
+        info $ "Direct Input: " <> show inp
+        case solver inp of
           Unsat -> testFailed "Expected Satisfiable, but got Unsat"
           Satisfiable m -> do
             info $ "Given model: " <> show m
