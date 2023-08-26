@@ -1,13 +1,13 @@
-function build_keys(comps) {
-  const fallbacks = comps
-    .reduce((accum, cur) => [accum[0].concat([cur])].concat(accum), [[]])
-    .slice(1, -1)
-    .map((e) => e.concat("").join("-"));
-
-  return { key: comps.join("-"), restore: fallbacks.join("\n") };
-}
-
 module.exports = async ({ core, glob, os, ghc, projects, prefix }) => {
+  function build_keys(comps) {
+    const fallbacks = comps
+      .reduce((accum, cur) => [accum[0].concat([cur])].concat(accum), [[]])
+      .slice(1, -1)
+      .map((e) => e.concat("").join("-"));
+
+    return { key: comps.join("-"), restore: fallbacks.join("\n") };
+  }
+
   prefix = prefix === null ? "" : `${prefix}-`;
   projects =
     projects === null
