@@ -178,7 +178,7 @@ jobs:
     env:
       ghc: 9.4.5
       cabal: 3.10.1.0
-    name: Build
+    name: Profiling
     runs-on: ubuntu-latest
     outputs:
       benchmarks: ${{steps.list-bins.outputs.benchs}}
@@ -255,5 +255,5 @@ jobs:
     - name: Upload Aritracts
       uses: actions/upload-artifact@v3
       with:
-        path: cdcl-profs.tar.zst
+        path: cdcl-profs.tar.gz
         name: cdcl-prof
