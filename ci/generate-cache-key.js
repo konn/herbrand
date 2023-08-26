@@ -8,8 +8,8 @@ function build_keys(comps) {
 }
 
 module.exports = async ({ core, glob, os, ghc, projects, prefix }) => {
-  const prefix = prefix === null ? "" : `${prefix}-`;
-  const projects =
+  prefix = prefix === null ? "" : `${prefix}-`;
+  projects =
     projects === null
       ? ["cabal.project", "cabal.project", "cabal.project.freeze"]
       : projects;
