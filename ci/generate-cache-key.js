@@ -12,10 +12,10 @@ module.exports = async ({ core, glob, os, ghc, projects, prefix }) => {
   core.info(`projects: ${JSON.stringify(projects)}`);
   core.info(`prefix: ${JSON.stringify(prefix)}`);
 
-  prefix = prefix === null ? "" : `${prefix}-`;
+  prefix = prefix == null ? "" : `${prefix}-`;
   core.info(`New prefix: ${JSON.stringify(prefix)}`);
   projects =
-    projects === null
+    projects == null
       ? ["cabal.project", "cabal.project", "cabal.project.freeze"]
       : projects;
   core.info(`New projects: ${JSON.stringify(projects)}`);
