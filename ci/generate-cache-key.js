@@ -19,7 +19,7 @@ module.exports = async ({ core, glob, os, ghc, projects, prefix }) => {
       ? ["cabal.project", "cabal.project", "cabal.project.freeze"]
       : projects;
   core.info(`New projects: ${JSON.stringify(projects)}`);
-  const project_hash = await glob.hashFiles(projects);
+  const project_hash = await glob.hashFiles(...projects);
   core.info(`project_hash: ${JSON.stringify(project_hash)}`);
   core.setOutput("project", project_hash);
 
