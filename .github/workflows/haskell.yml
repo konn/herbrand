@@ -195,7 +195,7 @@ jobs:
           const script = require('./ci/generate-cache-key.js')
           await script({
             core, glob, os: "${{runner.os}}", ghc: "${{env.ghc}}",
-            pefix: "prof",
+            prefix: "prof",
             projects: [
               "cabal-prof.project", "cabal-prof.project.local",
               "cabal.project", "cabal.project.freeze"
