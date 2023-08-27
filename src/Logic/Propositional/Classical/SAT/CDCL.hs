@@ -36,7 +36,6 @@ import Control.Lens qualified as Lens
 import Control.Lens.Extras qualified as Lens
 import Control.Monad (guard)
 import Control.Monad.Trans.Class qualified as MT
-import Control.Monad.Trans.Except (runExceptT, throwE)
 import Control.Monad.Trans.Maybe (MaybeT (..), runMaybeT)
 import Control.Optics.Linear qualified as LinOpt
 import Data.Alloc.Linearly.Token (besides, linearly)
@@ -408,16 +407,16 @@ toSatResult (Ok, CDCLState numOrig steps clauses watches vals vids) =
 toClauseId :: Int -> ClauseId
 toClauseId = fromIntegral
 
-newtype Early c m a = Early {runEarly :: m (Maybe c)}
+newtype Early c m a = Early {runEarly :: m (St.Maybe c)}
   deriving (Functor)
 
-yield :: (Applicative m) => c -> Early c m a
-yield c = Early $ pure $ Just c
-
-instance (Applicative m) => Applicative (Early c m) where
-  pure = P.const $ Early $ pure Nothing
+instance (Monad m) => Applicative (Early c m) where
+  pure = P.const $ Early $ pure St.Nothing
   Early mf <*> Early mx = Early do
-    P.maybe P.id (P.const . P.Just) <$> mf <*> mx
+    f <- mf
+    case f of
+      St.Nothing -> mx
+      St.Just x -> pure $ St.Just x
 
 propagateUnit :: (HasCallStack) => Maybe (Lit, ClauseId) -> S.State CDCLState (Ur PropResult)
 propagateUnit ml = S.do
@@ -462,29 +461,27 @@ propagateUnit ml = S.do
       Ur cands <- S.uses unsatisfiedsL $ BiL.first LSet.toList PL.. dup2
       Ur mresl <-
         runUrT
-          $ fmap (P.either Just (P.const Nothing))
-          $ runExceptT
-          $ getAp
-          $ Foldable.foldMap
-            ( \ !i -> Ap $ do
-                c <- MT.lift $ UrT $ S.uses clausesL $ LV.get $ unClauseId i
-                resl <- MT.lift $ UrT $ S.zoom valuationL (findUnit c)
+          $ runEarly
+          $ Foldable.traverse_
+            ( \ !i -> Early do
+                c <- UrT $ S.uses clausesL $ LV.get $ unClauseId i
+                resl <- UrT $ S.zoom valuationL (findUnit c)
                 case resl of
-                  Nothing -> pure ()
+                  Nothing -> pure St.Nothing
                   Just (WatchChangedFromTo w old new newIdx) -> S.do
-                    MT.lift $ liftUrT $ updateWatchLit i w old new newIdx
+                    St.Nothing <$ liftUrT (updateWatchLit i w old new newIdx)
                   Just (Satisfied m) -> S.do
-                    MT.lift $ liftUrT $ setSatisfied m i
+                    St.Nothing <$ liftUrT (setSatisfied m i)
                   Just (Conflict ml) -> S.do
-                    throwE (Left (i, ml))
+                    pure $ St.Just $ Left (i, ml)
                   Just (Unit l) -> S.do
-                    throwE (Right (l, i))
+                    pure $ St.Just $ Right (l, i)
             )
             cands
       case mresl of
-        Nothing -> S.pure (Ur NoMorePropagation)
-        Just (Left (i, ml)) -> S.pure $ Ur (ConflictFound i ml)
-        Just (Right (l, i)) -> S.do
+        St.Nothing -> S.pure (Ur NoMorePropagation)
+        St.Just (Left (i, ml)) -> S.pure $ Ur (ConflictFound i ml)
+        St.Just (Right (l, i)) -> S.do
           go (Seq.singleton (l, i))
 
 setSatisfied :: Maybe (Pair (Pair WatchVar VarId) (Pair VarId Index)) -> ClauseId -> S.StateT CDCLState Identity ()
