@@ -726,9 +726,7 @@ evalLit l = S.do
     Definite {..} ->
       Ur
         $ Just
-        $ if Lens.is _PosL l
-          then value
-          else not value
+        $ if isPositive l then value else not value
     Indefinite -> Ur Nothing
 
 evalClause :: Clause -> S.State Valuation (Ur (Maybe Bool))
