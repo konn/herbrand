@@ -41,7 +41,6 @@ import Control.Optics.Linear qualified as LinOpt
 import Data.Alloc.Linearly.Token (besides, linearly)
 import Data.Array.Mutable.Linear.Unboxed qualified as LUA
 import Data.Bifunctor.Linear qualified as BiL
-import Data.Coerce (coerce)
 import Data.Foldable qualified as Foldable
 import Data.Function (fix)
 import Data.Functor.Linear qualified as D
@@ -447,33 +446,33 @@ propagateUnit ml = S.do
     go Seq.Empty = S.do
       -- No literal given a priori. Find first literal.
       -- FIXME: Use heuristics for variable selection.
-      (Ur resl) <- S.state \(CDCLState numCls steps clauses watches vals vids) ->
-        dup2 vids & BiL.first LSet.toList & \(Ur targs, vids) ->
-          LV.unsafeFindAtWith
-            ( \vals c -> S.do
-                if satisfiedAt c P.< 0
-                  then
-                    S.runState (findUnit c) vals
-                      & \(Ur r, vals) -> (Ur r, vals)
-                  else (Ur Nothing, vals)
-            )
-            vals
-            (coerce targs)
-            clauses
-            & \(Ur ur, vals, clauses) ->
-              (Ur ur, CDCLState numCls steps clauses watches vals vids)
-      case resl of
+      Ur cands <- S.uses unsatisfiedsL $ BiL.first LSet.toList PL.. dup2
+      Ur mresl <-
+        fix
+          ( \continue -> \case
+              [] -> S.pure $ Ur Nothing
+              (i : is) -> S.do
+                Ur c <- S.uses clausesL $ LV.get $ unClauseId i
+                Ur resl <- S.zoom valuationL (findUnit c)
+                case resl of
+                  Nothing -> continue is
+                  Just (WatchChangedFromTo w old new newIdx) -> S.do
+                    updateWatchLit i w old new newIdx
+                    continue is
+                  Just (Satisfied m) -> S.do
+                    setSatisfied m i
+                    continue is
+                  Just (Conflict ml) -> S.do
+                    S.pure (Ur $ Just (Left (i, ml)))
+                  Just (Unit l) -> S.do
+                    S.pure (Ur $ Just $ Right (l, i))
+          )
+          cands
+      case mresl of
         Nothing -> S.pure (Ur NoMorePropagation)
-        Just (WatchChangedFromTo w old new newIdx, i) -> S.do
-          updateWatchLit (ClauseId i) w old new newIdx
-          go Seq.Empty
-        Just (Satisfied m, i) -> S.do
-          setSatisfied m (ClauseId i)
-          go Seq.Empty
-        Just (Conflict ml, i) -> S.do
-          S.pure (Ur (ConflictFound (toClauseId i) ml))
-        Just (Unit l, i) -> S.do
-          go (Seq.singleton (l, toClauseId i))
+        Just (Left (i, ml)) -> S.pure $ Ur (ConflictFound i ml)
+        Just (Right (l, i)) -> S.do
+          go (Seq.singleton (l, i))
 
 setSatisfied :: Maybe (Pair (Pair WatchVar VarId) (Pair VarId Index)) -> ClauseId -> S.StateT CDCLState Identity ()
 setSatisfied m i = S.do
