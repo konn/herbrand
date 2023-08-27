@@ -53,6 +53,8 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   encodeLit,
   decodeLit,
   VarId (..),
+  fromVarId,
+  toVarId,
   DecideLevel (..),
   Step (..),
   ClauseId (..),
@@ -106,6 +108,12 @@ import Prelude.Linear qualified as PL
 newtype VarId = VarId {unVarId :: Word}
   deriving (Eq, Ord, Generic)
   deriving newtype (Show, NFData, Hashable, Num, Enum, PL.Consumable, PL.Dupable, PL.Movable)
+
+fromVarId :: VarId -> Int
+fromVarId = fromIntegral . unVarId
+
+toVarId :: Int -> VarId
+toVarId = fromIntegral
 
 derivingUnbox "VarId" [t|VarId -> Word|] [|unVarId|] [|VarId|]
 

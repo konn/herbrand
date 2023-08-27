@@ -206,13 +206,13 @@ solverLoop = fix $ \go mlit -> S.do
               S.pure Ok -- No vacant variable - model is full!
             Just vid -> S.do
               stepsL S.%= LUV.push 0
-              let decLit = PosL $ toEnum vid
+              let decLit = PosL $ toVarId vid
               C.void $ assertLit (-1) decLit
               go (Just (decLit, -1))
 
 backjump :: ClauseId -> Lit -> S.State CDCLState FinalState
 backjump confCls lit = S.do
-  Ur c <- S.uses clausesL $ LV.unsafeGet $ fromEnum confCls
+  Ur c <- S.uses clausesL $ LV.unsafeGet $ unClauseId confCls
   Ur mLearnt <- findUIP1 lit $ L.foldOver (Lens.foldring U.foldr) L.set $ lits c
   case mLearnt of
     Nothing ->
@@ -274,14 +274,14 @@ findUIP1 !lit !curCls
             $ mkLearntClause decLvl l' curCls
         Ur Nothing -> S.do
           -- Not a UIP. resolve.
-          Ur v <- S.uses valuationL $ LUA.unsafeGet $ fromEnum $ litVar lit
+          Ur v <- S.uses valuationL $ LUA.unsafeGet $ fromVarId $ litVar lit
           case v of
             Indefinite -> error $ "Literal " P.<> show lit P.<> " was chosen as resolver, but indefinite!"
             Definite {..} -> S.do
               Ur cls' <- case antecedent of
                 Just ante ->
                   Ur.lift (L.foldOver (Lens.foldring U.foldr) L.set . lits)
-                    D.<$> S.uses clausesL (LV.unsafeGet (fromEnum ante))
+                    D.<$> S.uses clausesL (LV.unsafeGet (unClauseId ante))
                 Nothing -> S.pure $ Ur Set.empty
               let resolved = resolve lit curCls cls'
               if Set.null resolved
@@ -318,7 +318,7 @@ findConflictingLit lits = S.uses valuationL \vals ->
   foldlLin'
     vals
     ( \vals !mn !l ->
-        LUA.unsafeGet (fromEnum $ litVar l) vals & \(Ur var, vals) ->
+        LUA.unsafeGet (fromVarId $ litVar l) vals & \(Ur var, vals) ->
           let intro = introduced var
            in ( Ur.lift (P.<> Max (Arg intro (St.Just l))) mn
               , vals
@@ -348,7 +348,7 @@ checkUnitClauseLit ls = S.do
     foldlLin'
       vals
       ( \vals (Ur (ULS count mcand large small)) lit ->
-          LUA.unsafeGet (fromEnum (litVar lit)) vals & \(Ur var, vals) ->
+          LUA.unsafeGet (fromVarId (litVar lit)) vals & \(Ur var, vals) ->
             case var of
               Definite {..} ->
                 let (large', small')
@@ -420,7 +420,7 @@ propagateUnit ml = S.do
         Asserted -> S.do
           Ur dest <-
             C.fmap
-              (Ur.lift (P.maybe [] (IS.toList . IS.delete (P.fromEnum reason))))
+              (Ur.lift (P.maybe [] (IS.toList . IS.delete (unClauseId reason))))
               $ S.uses watchesL
               $ LHM.lookup (litVar l)
           loop dest rest
@@ -495,7 +495,7 @@ watch :: ClauseId -> VarId -> S.State CDCLState ()
 watch cid v =
   watchesL
     S.%= LHM.alter
-      (Just . P.maybe (IS.singleton $ fromEnum cid) (IS.insert $ fromEnum cid))
+      (Just . P.maybe (IS.singleton $ unClauseId cid) (IS.insert $ unClauseId cid))
       v
 
 unwatch :: ClauseId -> VarId -> S.State CDCLState ()
@@ -503,14 +503,14 @@ unwatch cid v =
   watchesL
     S.%= LHM.alter
       ( >>=
-          IS.delete (fromEnum cid) >>> \s ->
+          IS.delete (unClauseId cid) >>> \s ->
             if IS.null s then Nothing else Just s
       )
       v
 
 assertLit :: (HasCallStack) => ClauseId -> Lit -> S.State CDCLState AssertionResult
 assertLit ante lit = S.do
-  let vid = fromEnum $ litVar lit :: Int
+  let vid = fromVarId $ litVar lit :: Int
   mres <- S.uses valuationL (LUA.unsafeGet vid)
   case mres of
     -- Unassigned. We can safely assign
@@ -634,8 +634,8 @@ reportLastAddedAsConflict c@Clause {..}
   | otherwise = S.do
       let l1 = getWatchedLit W1 c
           l2 = getWatchedLit W2 c
-      Ur v1 <- S.state $ LUA.unsafeGet (fromEnum $ litVar l1)
-      Ur v2 <- S.state $ LUA.unsafeGet (fromEnum $ litVar l2)
+      Ur v1 <- S.state $ LUA.unsafeGet (fromVarId $ litVar l1)
+      Ur v2 <- S.state $ LUA.unsafeGet (fromVarId $ litVar l2)
       S.pure
         $ Ur
         $ Conflict
@@ -711,7 +711,7 @@ unsafeMapMaybeL s p vs =
 
 evalLit :: Lit -> S.State Valuation (Ur (Maybe Bool))
 evalLit l = S.do
-  Ur m <- S.state $ LUA.unsafeGet (fromEnum $ litVar l)
+  Ur m <- S.state $ LUA.unsafeGet (fromVarId $ litVar l)
   S.pure case m of
     Definite {..} ->
       Ur
