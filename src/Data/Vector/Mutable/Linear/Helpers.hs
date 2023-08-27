@@ -13,6 +13,7 @@ module Data.Vector.Mutable.Linear.Helpers (
   ifindIndexM,
   ifindWithIndexM,
   allFirstN,
+  unsafeFindAtWith,
 ) where
 
 import Control.Functor.Linear (Monad, pure)
@@ -53,10 +54,27 @@ findWith p = go 0
         if i >= l
           then (Ur Nothing, b, v)
           else
-            get i v & \(Ur a, v) ->
+            unsafeGet i v & \(Ur a, v) ->
               p b a & \case
                 (Ur (Just c), b) -> (Ur (Just (c, i)), b, v)
                 (Ur Nothing, b) -> go (i + 1) b v
+
+unsafeFindAtWith ::
+  forall a b c.
+  (b %1 -> a -> (Ur (Maybe c), b)) ->
+  b %1 ->
+  [Int] ->
+  Vector a %1 ->
+  (Ur (Maybe (c, Int)), b, Vector a)
+unsafeFindAtWith p = go
+  where
+    go :: b %1 -> [Int] -> Vector a %1 -> (Ur (Maybe (c, Int)), b, Vector a)
+    go !b [] !v = (Ur Nothing, b, v)
+    go !b (!i : !is) !v =
+      unsafeGet i v & \(Ur a, v) ->
+        p b a & \case
+          (Ur (Just c), b) -> (Ur (Just (c, i)), b, v)
+          (Ur Nothing, b) -> go b is v
 
 ifindWithIndexM :: (Monad m) => (Int -> a -> m (Ur (Maybe b))) -> Vector a %1 -> m (Ur (Maybe (b, Int)), Vector a)
 ifindWithIndexM (p :: Int -> a -> m (Ur (Maybe b))) v = size v & \(Ur sz, v) -> go 0 sz v

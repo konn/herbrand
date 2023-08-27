@@ -31,6 +31,7 @@ module Control.Functor.Linear.State.Extra (
   gets,
   zoom,
   (%=),
+  (.=),
   pure,
   (>>=),
   return,
@@ -64,6 +65,8 @@ zoom l (StateT f) = StateT \ !s0 ->
   Optic.reifyLens l s0 & \(!t, !back) ->
     fmap back <$> f t
 
+infix 4 %=, .=
+
 (%=) ::
   (Applicative m) =>
   Optics.Optic_ (Kleisli (Compose ((,) t) (FUN 'One t'))) s s t t' ->
@@ -73,6 +76,16 @@ zoom l (StateT f) = StateT \ !s0 ->
 l %= f = StateT \s0 ->
   Optic.reifyLens l s0 & \(!t, !back) ->
     pure ((), back $! f t)
+
+(.=) ::
+  (Applicative m, Consumable t) =>
+  Optics.Optic_ (Kleisli (Compose ((,) t) (FUN 'One t'))) s s t t' ->
+  t' %1 ->
+  StateT s m ()
+{-# INLINE (.=) #-}
+l .= a = StateT \s0 ->
+  Optic.reifyLens l s0 & \(!t, !back) ->
+    t `lseq` pure ((), back a)
 
 uses ::
   (Applicative m) =>
