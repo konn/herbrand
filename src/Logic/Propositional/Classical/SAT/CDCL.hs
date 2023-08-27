@@ -692,11 +692,14 @@ findNextAvailable :: WatchVar -> Clause -> S.State Valuation (Ur (Maybe NextSlot
 findNextAvailable w c@Clause {..} = S.do
   let lit = getWatchedLit w c
       origVar = litVar lit
-  Ur cands <- S.state \vals ->
-    unsafeMapMaybeL
-      vals
-      (P.curry P.. unassigned watched1 watched2)
-      lits
+  Ur cands <- runUrT $ P.flip U.imapMaybeM lits \i l -> UrT S.do
+    if i == watched1 || i == watched2
+      then S.pure (Ur Nothing)
+      else
+        evalLit l C.<&> \case
+          Ur Nothing -> Ur (Just (i, Unassigned))
+          Ur (Just True) -> Ur $ Just (i, AssignedTrue)
+          Ur (Just False) -> Ur Nothing
 
   let (mSat, mUndet) =
         L.foldOver
@@ -715,26 +718,6 @@ findNextAvailable w c@Clause {..} = S.do
         let v' = litVar $ (U.!) lits i
          in S.pure $ Ur $ Just $ NextSlot False w origVar v' i
       Nothing -> S.pure (Ur Nothing)
-
-unassigned :: Index -> Index -> Valuation -> (Int, Lit) -> Maybe AssignmentState
-unassigned exc1 exc2 vals (cur, l)
-  | cur == exc1 || cur == exc2 = Nothing
-  | otherwise =
-      S.runState (evalLit l) vals & \case
-        (Ur Nothing, _vals) -> Just Unassigned
-        (Ur (Just True), _vals) -> Just AssignedTrue
-        (Ur (Just False), _vals) -> Nothing
-
-unsafeMapMaybeL ::
-  forall a b s.
-  (U.Unbox a, U.Unbox b) =>
-  s %1 ->
-  (s -> Int -> a -> Maybe b) ->
-  U.Vector a ->
-  (Ur (U.Vector (Int, b)), s)
-unsafeMapMaybeL s p vs =
-  Unsafe.toLinear (\s -> (Ur (p s), s)) s & \(Ur p, s) ->
-    (Ur (U.imapMaybe (traverse P.. p) P.$ U.indexed vs), s)
 
 evalLit :: Lit -> S.State Valuation (Ur (Maybe Bool))
 evalLit l = S.do
