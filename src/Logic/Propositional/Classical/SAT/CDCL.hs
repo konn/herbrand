@@ -699,14 +699,14 @@ findNextAvailable :: WatchVar -> Clause -> S.State Valuation (Maybe NextSlot)
 findNextAvailable w c@Clause {..} = S.do
   let lit = getWatchedLit w c
       origVar = litVar lit
-  Ur cands <- runUrT $ P.flip U.imapMaybeM lits \i l -> UrT S.do
+  Ur cands <- runUrT $ P.flip U.imapMaybeM lits \i l -> liftUrT S.do
     if i == watched1 || i == watched2
-      then S.pure (Ur Nothing)
+      then S.pure Nothing
       else
         evalLit l C.<&> \case
-          Nothing -> Ur (Just (i, Unassigned))
-          (Just True) -> Ur $ Just (i, AssignedTrue)
-          (Just False) -> Ur Nothing
+          Nothing -> (Just (i, Unassigned))
+          (Just True) -> Just (i, AssignedTrue)
+          (Just False) -> Nothing
 
   let (mSat, mUndet) =
         L.foldOver
