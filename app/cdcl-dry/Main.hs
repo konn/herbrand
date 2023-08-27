@@ -31,8 +31,8 @@ cnf1 =
 
 main :: IO ()
 main = do
-  -- Opt {..} <- Opt.execParser optP
-  !cnf <- evaluate $ force cnf1
+  Opt {..} <- Opt.execParser optP
+  !cnf <- either error (evaluate . force . view _3) . parseCNFLazy =<< LBS.readFile input
   putStrLn "CNF evaluated. Solving..."
 
-  print $ solveVarId cnf
+  void $ evaluate $ force $ solve cnf
