@@ -136,6 +136,8 @@ regressionCNFs :: [CNF VarId]
 regressionCNFs =
   [ CNF [[Negative 0, Negative 1], [Negative 0, Positive 1]]
   , CNF [[Negative 1, Negative 0], [Negative 1, Positive 0]]
+  , CNF [[Negative 1], [Positive 1]]
+  , CNF [[Negative 2], [Positive 2]]
   , CNF [CNFClause [Positive 1, Negative 0, Positive 1, Positive 1, Positive 1]]
   , CNF
       [ [Positive 1, Negative 0, Positive 1, Positive 1, Positive 1]
