@@ -508,6 +508,7 @@ setSatisfied m i = S.do
     Nothing -> S.pure ()
 
 updateWatchLit :: ClauseId -> WatchVar %1 -> VarId %1 -> VarId %1 -> Index %1 -> S.State CDCLState ()
+{-# INLINE updateWatchLit #-}
 updateWatchLit cid w old new idx = S.do
   moveCursor w idx
   unwatch cid old
@@ -520,10 +521,12 @@ updateWatchLit cid w old new idx = S.do
       2.  Use of Unsafe.toLienar is safe here because vid = Int is freely dupable.
     -}
     moveCursor :: WatchVar %1 -> Index %1 -> S.State CDCLState ()
-    moveCursor W1 = Unsafe.toLinear \vid ->
-      S.zoom clausesL $ S.modify $ LV.modify_ (#watched1 .~ vid) $ unClauseId cid
-    moveCursor W2 = Unsafe.toLinear \vid ->
-      S.zoom clausesL $ S.modify $ LV.modify_ (#watched2 .~ vid) $ unClauseId cid
+    {-# INLINE moveCursor #-}
+    moveCursor = \case
+      W1 -> Unsafe.toLinear \vid ->
+        S.zoom clausesL $ S.modify $ LV.modify_ (#watched1 .~ vid) $ unClauseId cid
+      W2 -> Unsafe.toLinear \vid ->
+        S.zoom clausesL $ S.modify $ LV.modify_ (#watched2 .~ vid) $ unClauseId cid
 
 watch :: ClauseId -> VarId %1 -> S.State CDCLState ()
 watch cid =
