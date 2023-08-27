@@ -6,7 +6,6 @@ import Control.DeepSeq (force)
 import Control.Exception (evaluate)
 import Herbrand.Bench
 import qualified Logic.Propositional.Classical.SAT.CDCL as CDCL
-import qualified Logic.Propositional.Classical.SAT.CDCL.Old as CDCL.Old
 import qualified Logic.Propositional.Classical.SAT.DPLL as DPLL
 import qualified Logic.Propositional.Classical.SAT.Tableaux as Tableaux
 import System.Mem (performGC)
@@ -26,13 +25,11 @@ main = do
         [ withCnfs "tiny" tinys $ \fml ->
             [ bench "tableaux" $ nfAppIO (fmap $ Tableaux.solve . snd) fml
             , bench "DPLL" $ nfAppIO (fmap $ DPLL.solve . fst) fml
-            , bench "CDCL (old)" $ nfAppIO (fmap $ CDCL.Old.solve . fst) fml
             , bench "CDCL" $ nfAppIO (fmap $ CDCL.solve . fst) fml
             ]
         , withCnfs "small" smalls $ \fml ->
             [ bench "tableaux" $ nfAppIO (fmap $ Tableaux.solve . snd) fml
             , bench "DPLL" $ nfAppIO (fmap $ DPLL.solve . fst) fml
-            , bench "CDCL (old)" $ nfAppIO (fmap $ CDCL.Old.solve . fst) fml
             , bench "CDCL" $ nfAppIO (fmap $ CDCL.solve . fst) fml
             ]
         , withCnfs "medium" mediums $ \fml ->
@@ -41,7 +38,6 @@ main = do
                 $ bench "tableaux"
                 $ nfAppIO (fmap $ Tableaux.solve . snd) fml
             , bench "DPLL" $ nfAppIO (fmap $ DPLL.solve . fst) fml
-            , bench "CDCL (old)" $ nfAppIO (fmap $ CDCL.Old.solve . fst) fml
             , bench "CDCL" $ nfAppIO (fmap $ CDCL.solve . fst) fml
             ]
         , withCnfs "large" larges $ \fml ->
@@ -50,7 +46,6 @@ main = do
                 $ bench "tableaux"
                 $ nfAppIO (fmap $ Tableaux.solve . snd) fml
             , bench "DPLL" $ nfAppIO (fmap $ DPLL.solve . fst) fml
-            , bench "CDCL (old)" $ nfAppIO (fmap $ CDCL.Old.solve . fst) fml
             , bench "CDCL" $ nfAppIO (fmap $ CDCL.solve . fst) fml
             ]
         , withCnfs "huge" huges $ \fml ->
@@ -59,7 +54,6 @@ main = do
                 $ bench "tableaux"
                 $ nfAppIO (fmap $ Tableaux.solve . snd) fml
             , bench "DPLL" $ nfAppIO (fmap $ DPLL.solve . fst) fml
-            , bench "CDCL (old)" $ nfAppIO (fmap $ CDCL.Old.solve . fst) fml
             , bench "CDCL" $ nfAppIO (fmap $ CDCL.solve . fst) fml
             ]
         ]
