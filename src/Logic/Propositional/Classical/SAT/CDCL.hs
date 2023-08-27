@@ -490,7 +490,8 @@ propagateUnit ml = S.do
         St.Nothing -> S.pure NoMorePropagation
         St.Just (Left (i, ml)) -> S.pure $ ConflictFound i ml
         St.Just (Right (l, i)) ->
-          move (l, i) & \(Ur (l, i)) -> go $ Seq.singleton (l, i)
+          -- NOTE: this Unsafe.toLinear is safe because (l, i) ~= (Int, Int).
+          Unsafe.toLinear (go P.. Seq.singleton) (l, i)
 
 setSatisfied :: Maybe (Pair (Pair WatchVar VarId) (Pair VarId Index)) %1 -> ClauseId -> S.StateT CDCLState Identity ()
 {-# INLINE setSatisfied #-}
