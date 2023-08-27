@@ -36,9 +36,9 @@ imapAccumL' f = go 0
         if i >= l
           then (s, v')
           else
-            get i v' & \(Ur a, v'') ->
+            unsafeGet i v' & \(Ur a, v'') ->
               f i s a & \(s', Ur a') ->
-                go (i + 1) s' (set i a' v'')
+                go (i + 1) s' (unsafeSet i a' v'')
 
 findWith ::
   forall a b c.
