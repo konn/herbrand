@@ -60,7 +60,7 @@ import Data.Strict (Pair (..))
 import Data.Strict.Classes qualified as St
 import Data.Strict.Maybe qualified as St
 import Data.Tuple qualified as P
-import Data.Unrestricted.Linear (UrT (..), liftUrT, runUrT)
+import Data.Unrestricted.Linear (UrT (..), evalUrT, liftUrT, runUrT)
 import Data.Unrestricted.Linear qualified as Ur
 import Data.Vector.Generic.Lens (vectorTraverse)
 import Data.Vector.Mutable.Linear.Helpers qualified as LV
@@ -167,23 +167,20 @@ solverLoop = fix $ \go mlit -> S.do
   -- Without this, CDCL solver seems at most x1000 slower than DPLL and even Naïve tableaux...
   Ur numIniCls <- move C.<$> S.use numInitialClausesL
 
-  Ur mstt <-
+  mstt <-
     fix
-      ( \self !i -> S.do
+      ( \self !i ->
           (i == numIniCls) & \case
-            True -> S.do
-              S.pure $ Ur True
+            True -> S.pure True
             False -> S.do
               Ur c <- S.uses clausesL $ LV.unsafeGet i
-              Ur val <- S.zoom valuationL (evalClause c)
+              val <- S.zoom valuationL (evalClause c)
               val & \case
                 Just True -> S.do
                   unsatisfiedsL S.%= LSet.delete (ClauseId i)
                   self PL.$! i + 1
-                Just False -> S.do
-                  S.pure $ Ur False
-                Nothing -> S.do
-                  S.pure $ Ur False
+                Just False -> S.pure False
+                Nothing -> S.pure False
       )
       0
   -- S.uses clausesL $ LV.allFirstN numIniCls ((>= 0) . satisfiedAt)
@@ -576,7 +573,7 @@ propLit trueLit c@Clause {..}
                       | watched2 < 0 -> S.pure $ Ur $ Just $ Conflict l1
                       | otherwise -> S.do
                           let l2 = (U.!) lits watched2
-                          Ur mval2 <- evalLit l2
+                          mval2 <- evalLit l2
                           case mval2 of
                             Nothing -> S.pure $ Ur $ Just $ Unit l2
                             Just True -> S.pure $ Ur $ Just $ Satisfied Nothing
@@ -593,7 +590,7 @@ propLit trueLit c@Clause {..}
                       case mnext of
                         Just next -> S.pure $ Ur $ Just $ fromNextSlot next
                         Nothing -> S.do
-                          Ur mval1 <- evalLit l1
+                          mval1 <- evalLit l1
                           case mval1 of
                             Nothing -> S.pure $ Ur $ Just $ Unit l1
                             Just True -> S.pure $ Ur $ Just $ Satisfied Nothing
@@ -608,7 +605,7 @@ findUnit c@Clause {..}
   | watched2 < 0 = S.do
       -- Only the first literal is active.
       let !l = (U.!) lits watched1
-      Ur mres <- evalLit l
+      mres <- evalLit l
       S.pure case mres of
         Just False -> Ur $ Just (Conflict l)
         Just True -> Ur $ Just $ Satisfied Nothing
@@ -617,7 +614,7 @@ findUnit c@Clause {..}
       -- The clause has more than two literals.
       let l1 = (U.!) lits watched1
           l2 = (U.!) lits watched2
-      Ur mres <- evalLit l1
+      mres <- evalLit l1
       case mres of
         Just True ->
           -- satisfied; nothing to do.
@@ -631,7 +628,7 @@ findUnit c@Clause {..}
               S.pure $ Ur $ Just $ fromNextSlot next
             Nothing -> S.do
               -- No vacancy. Trying to "satisfy" watched 2.
-              Ur mres' <- evalLit l2
+              mres' <- evalLit l2
               case mres' of
                 Nothing ->
                   -- w2 can be unit!
@@ -642,7 +639,7 @@ findUnit c@Clause {..}
                   Ur.lift Just D.<$> reportLastAddedAsConflict c
         Nothing -> S.do
           -- Undetermined. Check for watched2
-          Ur mres' <- evalLit l2
+          mres' <- evalLit l2
           case mres' of
             Just True ->
               -- satisfied; nothing to do.
@@ -697,9 +694,9 @@ findNextAvailable w c@Clause {..} = S.do
       then S.pure (Ur Nothing)
       else
         evalLit l C.<&> \case
-          Ur Nothing -> Ur (Just (i, Unassigned))
-          Ur (Just True) -> Ur $ Just (i, AssignedTrue)
-          Ur (Just False) -> Ur Nothing
+          Nothing -> Ur (Just (i, Unassigned))
+          (Just True) -> Ur $ Just (i, AssignedTrue)
+          (Just False) -> Ur Nothing
 
   let (mSat, mUndet) =
         L.foldOver
@@ -719,26 +716,23 @@ findNextAvailable w c@Clause {..} = S.do
          in S.pure $ Ur $ Just $ NextSlot False w origVar v' i
       Nothing -> S.pure (Ur Nothing)
 
-evalLit :: Lit -> S.State Valuation (Ur (Maybe Bool))
+evalLit :: Lit -> S.State Valuation (Maybe Bool)
 evalLit l = S.do
   Ur m <- S.state $ LUA.unsafeGet (fromVarId $ litVar l)
   S.pure case m of
-    Definite {..} ->
-      Ur
-        $ Just
-        $ if isPositive l then value else not value
-    Indefinite -> Ur Nothing
+    Definite {..} -> Just $ isPositive l == value
+    Indefinite -> Nothing
 
-evalClause :: Clause -> S.State Valuation (Ur (Maybe Bool))
+evalClause :: Clause -> S.State Valuation (Maybe Bool)
 evalClause Clause {..}
-  | satisfiedAt >= 0 = S.pure $ Ur $ Just True
+  | satisfiedAt >= 0 = S.pure $ Just True
   | otherwise = S.do
-      runUrT
+      evalUrT
         $ runMaybeT
           ( L.foldOverM
               vectorTraverse
               ( L.premapM
-                  (MT.lift . UrT . evalLit)
+                  (\l -> MT.lift (liftUrT $ evalLit l))
                   $ L.handlesM _Just orLE
                   *> L.generalize (L.any P.isNothing)
               )
