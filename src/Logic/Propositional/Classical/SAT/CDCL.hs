@@ -27,7 +27,6 @@ module Logic.Propositional.Classical.SAT.CDCL (
 ) where
 
 import Control.Applicative
-import Control.Arrow ((>>>))
 import Control.Foldl qualified as L
 import Control.Functor.Linear qualified as C
 import Control.Functor.Linear.State.Extra qualified as S
@@ -39,6 +38,7 @@ import Control.Monad.Trans.Class qualified as MT
 import Control.Monad.Trans.Maybe (MaybeT (..), runMaybeT)
 import Control.Optics.Linear qualified as LinOpt
 import Data.Alloc.Linearly.Token (besides, linearly)
+import Data.Array.Mutable.Linear qualified as LA
 import Data.Array.Mutable.Linear.Unboxed qualified as LUA
 import Data.Bifunctor.Linear qualified as BiL
 import Data.Foldable qualified as Foldable
@@ -440,9 +440,9 @@ propagateUnit ml = S.do
         Asserted -> S.do
           Ur dest <-
             C.fmap
-              (Ur.lift (P.maybe [] (IS.toList . IS.delete (unClauseId reason))))
+              (Ur.lift IS.toList)
               $ S.uses watchesL
-              $ LHM.lookup (litVar l)
+              $ LA.unsafeGet (fromEnum $ litVar l)
           loop dest rest
       where
         loop :: [Int] -> Seq.Seq (Lit, ClauseId) -> S.State CDCLState PropResult
@@ -534,21 +534,18 @@ watch cid =
   -- NOTE: This toLinear is safe b/c VarId ~ Int.
   Unsafe.toLinear \v ->
     watchesL
-      S.%= LHM.alter
-        (Just . P.maybe (IS.singleton $ unClauseId cid) (IS.insert $ unClauseId cid))
-        v
+      S.%= \ws ->
+        LA.unsafeGet (fromEnum v) ws & \(Ur xs, ws) ->
+          LA.set (fromEnum v) (IS.insert (unClauseId cid) xs) ws
 
 unwatch :: ClauseId -> VarId %1 -> S.State CDCLState ()
 unwatch cid =
   -- NOTE: This toLinear is safe b/c VarId ~ Int.
   Unsafe.toLinear \v ->
     watchesL
-      S.%= LHM.alter
-        ( >>=
-            IS.delete (unClauseId cid) >>> \s ->
-              if IS.null s then Nothing else Just s
-        )
-        v
+      S.%= \ws ->
+        LA.unsafeGet (fromEnum v) ws & \(Ur xs, ws) ->
+          LA.set (fromEnum v) (IS.delete (unClauseId cid) xs) ws
 
 assertLit :: (HasCallStack) => ClauseId -> Lit -> S.State CDCLState AssertionResult
 assertLit ante lit = S.do

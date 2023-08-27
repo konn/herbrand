@@ -76,12 +76,12 @@ import Control.Monad (guard)
 import Control.Optics.Linear qualified as LinLens
 import Data.Alloc.Linearly.Token
 import Data.Alloc.Linearly.Token.Unsafe (HasLinearWitness)
+import Data.Array.Mutable.Linear.Extra qualified as LA
 import Data.Array.Mutable.Linear.Unboxed qualified as LUA
 import Data.Bit (Bit (..))
 import Data.Bits (xor, (.&.), (.|.))
 import Data.Coerce (coerce)
 import Data.Generics.Labels ()
-import Data.HashMap.Mutable.Linear.Extra qualified as LHM
 import Data.Hashable (Hashable)
 import Data.IntSet (IntSet)
 import Data.IntSet qualified as IS
@@ -93,6 +93,7 @@ import Data.Strict.Tuple (Pair (..))
 import Data.Unrestricted.Linear (Ur (..))
 import Data.Unrestricted.Linear qualified as L
 import Data.Unrestricted.Linear.Orphans ()
+import Data.Vector qualified as V
 import Data.Vector.Mutable.Linear.Extra qualified as LV
 import Data.Vector.Mutable.Linear.Unboxed qualified as LUV
 import Data.Vector.Unboxed qualified as U
@@ -247,7 +248,7 @@ data Clause = Clause
 
 type Valuation = LUA.UArray Variable
 
-type WatchMap = LHM.HashMap VarId IntSet
+type WatchMap = LA.Array IntSet
 
 type Clauses = LV.Vector Clause
 
@@ -314,7 +315,9 @@ toCDCLState (CNF cls) lin =
               <*> Foldl.handles Foldl.folded Foldl.maximum
           )
           cls
+      numVars = maybe 0 ((+ 1) . fromEnum) maxVar
       (numOrigCls :!: upds, cls'') = mapAccumL buildClause (0 :!: Map.empty) cls'
+      watches0 = V.toList $ V.update (V.replicate numVars mempty) (V.fromList $ Map.toList upds)
    in case () of
         _
           | truth -> lin `lseq` Left (Ur $ Satisfiable ())
@@ -322,20 +325,20 @@ toCDCLState (CNF cls) lin =
         _ ->
           besides lin (`LUV.fromListL` [0]) PL.& \(steps, lin) ->
             besides lin (`LV.fromListL` cls'') PL.& \(clauses, lin) ->
-              besides lin (`LHM.fromListL` Map.toList upds) & \(watcheds, lin) ->
+              besides lin (`LA.fromListL` watches0) & \(watcheds, lin) ->
                 besides lin (\lin -> LUA.allocL lin (maybe 0 ((+ 1) . fromEnum) maxVar) Indefinite) PL.& \(vals, lin) ->
                   Right
                     PL.$ CDCLState numOrigCls steps clauses watcheds vals
                     PL.$ LSet.fromListL lin [ClauseId 0 .. ClauseId (numOrigCls - 1)]
 
 buildClause ::
-  Pair Int (Map.Map VarId IntSet) ->
+  Pair Int (Map.Map Int IntSet) ->
   [Lit] ->
-  (Pair Int (Map.Map VarId IntSet), Clause)
+  (Pair Int (Map.Map Int IntSet), Clause)
 buildClause (i :!: watches) [] =
   (i :!: watches, Clause {lits = mempty, satisfiedAt = -1, watched1 = -1, watched2 = -1})
 buildClause (i :!: watches) [x] =
-  ( (i + 1) :!: Map.insertWith IS.union (litVar x) (IS.singleton i) watches
+  ( (i + 1) :!: Map.insertWith IS.union (fromEnum $ litVar x) (IS.singleton i) watches
   , Clause {lits = U.singleton x, satisfiedAt = -1, watched1 = 0, watched2 = -1}
   )
 buildClause (i :!: watches) xs =
@@ -343,11 +346,11 @@ buildClause (i :!: watches) xs =
       + 1
       :!: Map.insertWith
         IS.union
-        (litVar $ head xs)
+        (fromEnum $ litVar $ head xs)
         (IS.singleton i)
         ( Map.insertWith
             IS.union
-            (litVar $ xs !! 1)
+            (fromEnum $ litVar $ xs !! 1)
             (IS.singleton i)
             watches
         )
