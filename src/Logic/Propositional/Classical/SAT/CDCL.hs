@@ -534,46 +534,48 @@ assertLit ante lit = S.do
 
 -- | Propagate Literal.
 propLit :: Lit -> Clause -> S.State Valuation (Ur (Maybe UnitResult))
-propLit trueLit c@Clause {..} =
-  let l1 = lits U.! watched1
-   in if litVar l1 == litVar trueLit
-        then -- Have the same variable as watched var #1
+propLit trueLit c@Clause {..}
+  | satisfiedAt >= 0 = S.pure $ Ur $ Just $ Satisfied Nothing
+  | otherwise =
+      let l1 = lits U.! watched1
+       in if litVar l1 == litVar trueLit
+            then -- Have the same variable as watched var #1
 
-          if l1 == trueLit
-            then S.pure $ Ur $ Just $ Satisfied Nothing -- Satisfied.
-            else S.do
-              -- False. Find next watched lit.
-              Ur mnext <- findNextAvailable W1 c
-              case mnext of
-                Just next -> S.pure $ Ur $ Just $ fromNextSlot next
-                Nothing -- No vacancy.
-                  | watched2 < 0 -> S.pure $ Ur $ Just $ Conflict l1
-                  | otherwise -> S.do
-                      let l2 = (U.!) lits watched2
-                      Ur mval2 <- evalLit l2
-                      case mval2 of
-                        Nothing -> S.pure $ Ur $ Just $ Unit l2
-                        Just True -> S.pure $ Ur $ Just $ Satisfied Nothing
-                        Just False ->
-                          -- Unsatifiable! pick the oldest variable as conflicting lit.
-                          Ur.lift Just D.<$> reportLastAddedAsConflict c
-        else -- Otherwise it must be watched var #2
-
-          let l2 = (U.!) lits watched2
-           in if l2 == trueLit
-                then S.pure $ Ur $ Just $ Satisfied Nothing -- Satisfied
+              if l1 == trueLit
+                then S.pure $ Ur $ Just $ Satisfied Nothing -- Satisfied.
                 else S.do
-                  Ur mnext <- findNextAvailable W2 c
+                  -- False. Find next watched lit.
+                  Ur mnext <- findNextAvailable W1 c
                   case mnext of
                     Just next -> S.pure $ Ur $ Just $ fromNextSlot next
-                    Nothing -> S.do
-                      Ur mval1 <- evalLit l1
-                      case mval1 of
-                        Nothing -> S.pure $ Ur $ Just $ Unit l1
-                        Just True -> S.pure $ Ur $ Just $ Satisfied Nothing
-                        Just False ->
-                          -- Unsatifiable! pick the oldest variable as conflicting lit.
-                          Ur.lift Just D.<$> reportLastAddedAsConflict c
+                    Nothing -- No vacancy.
+                      | watched2 < 0 -> S.pure $ Ur $ Just $ Conflict l1
+                      | otherwise -> S.do
+                          let l2 = (U.!) lits watched2
+                          Ur mval2 <- evalLit l2
+                          case mval2 of
+                            Nothing -> S.pure $ Ur $ Just $ Unit l2
+                            Just True -> S.pure $ Ur $ Just $ Satisfied Nothing
+                            Just False ->
+                              -- Unsatifiable! pick the oldest variable as conflicting lit.
+                              Ur.lift Just D.<$> reportLastAddedAsConflict c
+            else -- Otherwise it must be watched var #2
+
+              let l2 = (U.!) lits watched2
+               in if l2 == trueLit
+                    then S.pure $ Ur $ Just $ Satisfied Nothing -- Satisfied
+                    else S.do
+                      Ur mnext <- findNextAvailable W2 c
+                      case mnext of
+                        Just next -> S.pure $ Ur $ Just $ fromNextSlot next
+                        Nothing -> S.do
+                          Ur mval1 <- evalLit l1
+                          case mval1 of
+                            Nothing -> S.pure $ Ur $ Just $ Unit l1
+                            Just True -> S.pure $ Ur $ Just $ Satisfied Nothing
+                            Just False ->
+                              -- Unsatifiable! pick the oldest variable as conflicting lit.
+                              Ur.lift Just D.<$> reportLastAddedAsConflict c
 
 findUnit ::
   Clause ->
