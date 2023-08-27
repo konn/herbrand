@@ -35,4 +35,5 @@ main = do
   !cnf <- either error (evaluate . force . view _3) . parseCNFLazy =<< LBS.readFile input
   putStrLn "CNF evaluated. Solving..."
 
-  void $ evaluate $ force $ solve cnf
+  resl <- evaluate $ force $ solve cnf
+  print $ () <$ resl
