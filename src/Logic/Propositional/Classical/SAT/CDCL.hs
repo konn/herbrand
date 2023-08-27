@@ -426,7 +426,7 @@ instance Applicative Early where
       St.Nothing -> mx
       St.Just x -> pure $ St.Just x
 
-propagateUnit :: (HasCallStack) => Maybe (Lit, ClauseId) -> S.State CDCLState (PropResult)
+propagateUnit :: (HasCallStack) => Maybe (Lit, ClauseId) -> S.State CDCLState PropResult
 propagateUnit ml = S.do
   go (P.maybe Seq.empty Seq.singleton ml)
   where
@@ -492,7 +492,7 @@ propagateUnit ml = S.do
         St.Just (Right (l, i)) ->
           move (l, i) & \(Ur (l, i)) -> go $ Seq.singleton (l, i)
 
-setSatisfied :: Maybe (Pair (Pair WatchVar VarId) (Pair VarId Index)) -> ClauseId -> S.StateT CDCLState Identity ()
+setSatisfied :: Maybe (Pair (Pair WatchVar VarId) (Pair VarId Index)) %1 -> ClauseId -> S.StateT CDCLState Identity ()
 {-# INLINE setSatisfied #-}
 setSatisfied m i = S.do
   Ur lvl <- currentDecideLevel
@@ -503,28 +503,44 @@ setSatisfied m i = S.do
       updateWatchLit i w old new newIdx
     Nothing -> S.pure ()
 
-updateWatchLit :: ClauseId -> WatchVar -> VarId -> VarId -> Index -> S.State CDCLState ()
-updateWatchLit cid w old new vid = S.do
-  S.zoom clausesL $ S.modify $ LV.modify_ (watchVarL w .~ vid) $ unClauseId cid
+updateWatchLit :: ClauseId -> WatchVar %1 -> VarId %1 -> VarId %1 -> Index %1 -> S.State CDCLState ()
+updateWatchLit cid w old new idx = S.do
+  moveCursor w idx
   unwatch cid old
   watch cid new
+  where
+    {- NOTE:
 
-watch :: ClauseId -> VarId -> S.State CDCLState ()
-watch cid v =
-  watchesL
-    S.%= LHM.alter
-      (Just . P.maybe (IS.singleton $ unClauseId cid) (IS.insert $ unClauseId cid))
-      v
+      1.  We cannot use 'watchVarL' here because `LV.modify_` consumes
+          the first argument non-linearly!
+      2.  Use of Unsafe.toLienar is safe here because vid = Int is freely dupable.
+    -}
+    moveCursor :: WatchVar %1 -> Index %1 -> S.State CDCLState ()
+    moveCursor W1 = Unsafe.toLinear \vid ->
+      S.zoom clausesL $ S.modify $ LV.modify_ (#watched1 .~ vid) $ unClauseId cid
+    moveCursor W2 = Unsafe.toLinear \vid ->
+      S.zoom clausesL $ S.modify $ LV.modify_ (#watched2 .~ vid) $ unClauseId cid
 
-unwatch :: ClauseId -> VarId -> S.State CDCLState ()
-unwatch cid v =
-  watchesL
-    S.%= LHM.alter
-      ( >>=
-          IS.delete (unClauseId cid) >>> \s ->
-            if IS.null s then Nothing else Just s
-      )
-      v
+watch :: ClauseId -> VarId %1 -> S.State CDCLState ()
+watch cid =
+  -- NOTE: This toLinear is safe b/c VarId ~ Int.
+  Unsafe.toLinear \v ->
+    watchesL
+      S.%= LHM.alter
+        (Just . P.maybe (IS.singleton $ unClauseId cid) (IS.insert $ unClauseId cid))
+        v
+
+unwatch :: ClauseId -> VarId %1 -> S.State CDCLState ()
+unwatch cid =
+  -- NOTE: This toLinear is safe b/c VarId ~ Int.
+  Unsafe.toLinear \v ->
+    watchesL
+      S.%= LHM.alter
+        ( >>=
+            IS.delete (unClauseId cid) >>> \s ->
+              if IS.null s then Nothing else Just s
+        )
+        v
 
 assertLit :: (HasCallStack) => ClauseId -> Lit -> S.State CDCLState AssertionResult
 assertLit ante lit = S.do
