@@ -67,6 +67,7 @@ import Data.Vector.Generic.Lens (vectorTraverse)
 import Data.Vector.Mutable.Linear.Helpers qualified as LV
 import Data.Vector.Mutable.Linear.Unboxed qualified as LUV
 import Data.Vector.Unboxed qualified as U
+import Debug.Trace.Lienar.Extra qualified as DT
 import GHC.Generics qualified as GHC
 import Logic.Propositional.Classical.SAT.CDCL.Types
 import Logic.Propositional.Classical.SAT.Types
@@ -161,25 +162,41 @@ solveState = toSatResult PL.. S.runState (solverLoop Nothing)
 
 solverLoop :: Maybe (Lit, ClauseId) -> S.State CDCLState FinalState
 solverLoop = fix $ \go mlit -> S.do
+  DT.traceStackM $ "Loop: New decision: " <> show mlit
   -- First, check if the original clauses are all satisfied (at the current stage)
   -- We only have to traverse the initial segment, as the lerant clauses are always
   -- deducible from the original clauses.
   -- Without this, CDCL solver seems at most x1000 slower than DPLL and even Naïve tableaux...
   Ur numIniCls <- move C.<$> S.use numInitialClausesL
 
-  mstt <-
+  Ur vals <- S.uses valuationL $ BiL.first LUA.freeze PL.. dup2
+  DT.traceStackM $ "Traversing first " <> show numIniCls <> " clauses for satcheck"
+  DT.traceStackM $ "Current valuation: " <> show vals
+  Ur mstt <-
     fix
       ( \self !i -> S.do
           (i == numIniCls) & \case
-            True -> S.pure False
+            True -> S.do
+              DT.traceStackM "All the clauses true!"
+              S.pure $ Ur True
             False -> S.do
               Ur c <- S.uses clausesL $ LV.unsafeGet i
-              S.zoom valuationL (evalClause c) S.>>= \case
-                Ur (Just True) -> self PL.$! i + 1
-                Ur (Just False) -> S.pure False
-                Ur Nothing -> S.pure False
+              DT.traceStackM $ "Checking eval clause: " <> show (i, c)
+              Ur val <- S.zoom valuationL (evalClause c)
+              DT.traceStackM $ "Clause value: " <> show (i, val)
+              val & \case
+                Just True -> S.do
+                  unsatisfiedsL S.%= LSet.delete (ClauseId i)
+                  self PL.$! i + 1
+                Just False -> S.do
+                  DT.traceStackM "Falsity found! Ignores, but reporting not satisified"
+                  S.pure $ Ur False
+                Nothing -> S.do
+                  DT.traceStackM "Unassigned value found. Returning."
+                  S.pure $ Ur False
       )
       0
+  DT.traceStackM $ "Satisfiedness check: " <> show mstt
   -- S.uses clausesL $ LV.allFirstN numIniCls ((>= 0) . satisfiedAt)
   mstt & \case
     True -> S.pure Ok
@@ -729,4 +746,4 @@ evalClause Clause {..}
             | otherwise -> Just False
 
 orLE :: (Monad m) => L.FoldM (MaybeT m) Bool ()
-orLE = L.FoldM (P.const guard) (pure ()) pure
+orLE = L.FoldM (P.const $ guard P.. not) (pure ()) pure
