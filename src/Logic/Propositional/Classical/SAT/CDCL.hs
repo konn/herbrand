@@ -367,6 +367,7 @@ foldlLin' b f x =
     (Ur x)
 
 currentDecideLevel :: S.State CDCLState (Ur DecideLevel)
+{-# INLINE currentDecideLevel #-}
 currentDecideLevel =
   Ur.lift (fromIntegral P.. P.subtract 1)
     D.<$> S.uses stepsL LUV.size
