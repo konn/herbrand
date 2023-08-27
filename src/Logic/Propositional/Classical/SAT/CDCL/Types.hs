@@ -33,7 +33,9 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   getNumClauses,
   setWatchVar,
   setSatisfiedLevel,
+  getSatisfiedLevel,
   watchesL,
+  clausesL,
   valuationL,
   numInitialClausesL,
   unsatisfiedsL,
@@ -70,6 +72,10 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   PropResult (..),
   WatchVar (..),
   watchVarL,
+  WatchedLits (..),
+  getWatchedLits,
+  getLit1,
+  getLit2,
 ) where
 
 import Control.DeepSeq (NFData)
@@ -607,3 +613,41 @@ setSatisfiedLevel cid lvl =
   clausesL S.%= \(Clauses litss bs) ->
     LUV.modify_ (#satAt .~ lvl) (unClauseId cid) bs & \bs ->
       Clauses litss bs
+
+getSatisfiedLevel :: ClauseId -> S.State CDCLState (Ur DecideLevel)
+getSatisfiedLevel cid =
+  S.uses clausesL \(Clauses ls bs) ->
+    LUV.unsafeGet (unClauseId cid) bs & \(Ur ClauseBody {..}, bs) ->
+      (Ur satAt, Clauses ls bs)
+
+data WatchedLits
+  = WatchOne {-# UNPACK #-} !Lit
+  | WatchThese {-# UNPACK #-} !Lit !Lit
+  deriving (Show, Eq, Ord, Generic)
+
+deriveGeneric ''WatchedLits
+
+deriving via L.AsMovable WatchedLits instance PL.Consumable WatchedLits
+
+deriving via L.AsMovable WatchedLits instance PL.Dupable WatchedLits
+
+deriving via L.Generically WatchedLits instance PL.Movable WatchedLits
+
+getWatchedLits :: ClauseId -> S.State Clauses (Ur WatchedLits)
+getWatchedLits cid = S.state \(Clauses ls bs) ->
+  LUV.unsafeGet (unClauseId cid) bs & \(Ur ClauseBody {..}, bs) ->
+    LUM.unsafeGetEntry (unClauseId cid) wat1 ls & \(Ur l1, ls) ->
+      wat2 >= 0 & \case
+        True ->
+          LUM.unsafeGetEntry (unClauseId cid) wat2 ls & \(Ur l2, ls) ->
+            (Ur (WatchThese l1 l2), Clauses ls bs)
+        False ->
+          (Ur (WatchOne l1), Clauses ls bs)
+
+getLit1 :: WatchedLits -> Lit
+getLit1 (WatchOne l) = l
+getLit1 (WatchThese l _) = l
+
+getLit2 :: WatchedLits -> Maybe Lit
+getLit2 WatchOne {} = Nothing
+getLit2 (WatchThese _ l) = Just l

@@ -172,8 +172,7 @@ solverLoop = fix $ \go mlit -> S.do
           (i == numIniCls) & \case
             True -> S.pure True
             False -> S.do
-              Ur c <- getClause $ ClauseId i
-              val <- S.zoom valuationL (evalClause c)
+              val <- evalClause $ ClauseId i
               val & \case
                 Just True -> S.do
                   unsatisfiedsL S.%= LSet.delete (ClauseId i)
@@ -207,8 +206,8 @@ solverLoop = fix $ \go mlit -> S.do
 
 backjump :: ClauseId -> Lit -> S.State CDCLState FinalState
 backjump confCls lit = S.do
-  Ur c <- getClause confCls
-  mLearnt <- findUIP1 lit $ L.foldOver (Lens.foldring U.foldr) L.set $ lits c
+  Ur confLits <- getClauseLits confCls
+  mLearnt <- findUIP1 lit $ L.foldOver (Lens.foldring U.foldr) L.set confLits
   case mLearnt of
     Nothing ->
       -- No valid backjumping destination found. Unsat.
@@ -220,8 +219,8 @@ backjump confCls lit = S.do
             if i == numCls
               then S.pure ()
               else S.do
-                Ur Clause {satisfiedAt} <- getClause $ ClauseId i
-                satisfiedAt > decLvl & \case
+                Ur satAt <- getSatisfiedLevel $ ClauseId i
+                satAt > decLvl & \case
                   True -> S.do
                     setSatisfiedLevel (ClauseId i) (-1)
                     unsatisfiedsL S.%= LSet.insert (ClauseId i)
@@ -447,8 +446,8 @@ propagateUnit ml = S.do
         loop [] !rest = S.do
           go rest
         loop (!i : !is) !rest = S.do
-          Ur c <- getClause $ ClauseId i
-          resl <- S.zoom valuationL $ propLit l c
+          let cid = ClauseId i
+          resl <- propLit l cid
           case resl of
             Nothing -> S.do
               loop is rest
@@ -474,8 +473,8 @@ propagateUnit ml = S.do
           $ runEarly
           $ Foldable.traverse_
             ( \ !i -> Early do
-                c <- UrT $ getClause i
-                resl <- liftUrT $ S.zoom valuationL (findUnit c)
+                w <- UrT $ S.zoom clausesL $ getWatchedLits i
+                resl <- liftUrT $ findUnit i w
                 case resl of
                   Nothing -> pure St.Nothing
                   Just (WatchChangedFromTo w old new newIdx) -> S.do
@@ -553,115 +552,115 @@ assertLit ante lit = S.do
       | otherwise -> S.pure ContradictingAssertion
 
 -- | Propagate Literal.
-propLit :: Lit -> Clause -> S.State Valuation (Maybe UnitResult)
-propLit trueLit c@Clause {..}
-  | satisfiedAt >= 0 = S.pure $ Just $ Satisfied Nothing
-  | otherwise =
-      let l1 = lits U.! watched1
-       in if litVar l1 == litVar trueLit
-            then -- Have the same variable as watched var #1
+propLit :: Lit -> ClauseId -> S.State CDCLState (Maybe UnitResult)
+propLit trueLit cid = S.do
+  Ur satLvl <- getSatisfiedLevel cid
+  if satLvl >= 0
+    then S.pure $ Just $ Satisfied Nothing
+    else S.do
+      Ur wlits <- S.zoom clausesL (getWatchedLits cid)
+      let !l1 = getLit1 wlits
+      if litVar l1 == litVar trueLit
+        then -- Have the same variable as watched var #1
 
-              if l1 == trueLit
-                then S.pure $ Just $ Satisfied Nothing -- Satisfied.
+          if l1 == trueLit
+            then S.pure $ Just $ Satisfied Nothing -- Satisfied.
+            else S.do
+              -- False. Find next watched lit.
+              mnext <- findNextAvailable W1 cid
+              case mnext of
+                Just next -> S.pure $ Just $ fromNextSlot next
+                Nothing -> case getLit2 wlits of
+                  Nothing ->
+                    -- No vacancy
+                    S.pure $ Just $ Conflict l1
+                  Just l2 -> S.do
+                    mval2 <- S.zoom valuationL $ evalLit l2
+                    case mval2 of
+                      Nothing -> S.pure $ Just $ Unit l2
+                      Just True -> S.pure $ Just $ Satisfied Nothing
+                      Just False ->
+                        -- Unsatifiable! pick the oldest variable as conflicting lit.
+                        Just D.<$> S.zoom valuationL (reportLastAddedAsConflict wlits)
+        else -- Otherwise it must be watched var #2
+
+          let !l2 =
+                P.fromMaybe (error $ "Impossible: propagated literal matched neither of lits! (prop, watcheds) = " <> show (trueLit, wlits))
+                  $ getLit2 wlits
+           in if l2 == trueLit
+                then S.pure $ Just $ Satisfied Nothing -- Satisfied
                 else S.do
-                  -- False. Find next watched lit.
-                  mnext <- findNextAvailable W1 c
+                  mnext <- findNextAvailable W2 cid
                   case mnext of
                     Just next -> S.pure $ Just $ fromNextSlot next
-                    Nothing -- No vacancy.
-                      | watched2 < 0 -> S.pure $ Just $ Conflict l1
-                      | otherwise -> S.do
-                          let l2 = (U.!) lits watched2
-                          mval2 <- evalLit l2
-                          case mval2 of
-                            Nothing -> S.pure $ Just $ Unit l2
-                            Just True -> S.pure $ Just $ Satisfied Nothing
-                            Just False ->
-                              -- Unsatifiable! pick the oldest variable as conflicting lit.
-                              Just D.<$> reportLastAddedAsConflict c
-            else -- Otherwise it must be watched var #2
-
-              let l2 = (U.!) lits watched2
-               in if l2 == trueLit
-                    then S.pure $ Just $ Satisfied Nothing -- Satisfied
-                    else S.do
-                      mnext <- findNextAvailable W2 c
-                      case mnext of
-                        Just next -> S.pure $ Just $ fromNextSlot next
-                        Nothing -> S.do
-                          mval1 <- evalLit l1
-                          case mval1 of
-                            Nothing -> S.pure $ Just $ Unit l1
-                            Just True -> S.pure $ Just $ Satisfied Nothing
-                            Just False ->
-                              -- Unsatifiable! pick the oldest variable as conflicting lit.
-                              Just D.<$> reportLastAddedAsConflict c
+                    Nothing -> S.do
+                      mval1 <- S.zoom valuationL (evalLit l1)
+                      case mval1 of
+                        Nothing -> S.pure $ Just $ Unit l1
+                        Just True -> S.pure $ Just $ Satisfied Nothing
+                        Just False ->
+                          -- Unsatifiable! pick the oldest variable as conflicting lit.
+                          S.zoom valuationL $ Just D.<$> reportLastAddedAsConflict wlits
 
 findUnit ::
-  Clause ->
-  S.State Valuation (Maybe UnitResult)
-findUnit c@Clause {..}
-  | watched2 < 0 = S.do
-      -- Only the first literal is active.
-      let !l = (U.!) lits watched1
-      mres <- evalLit l
-      S.pure case mres of
-        Just False -> Just (Conflict l)
-        Just True -> Just $ Satisfied Nothing
-        Nothing -> Just (Unit l)
-  | otherwise = S.do
-      -- The clause has more than two literals.
-      let l1 = (U.!) lits watched1
-          l2 = (U.!) lits watched2
-      mres <- evalLit l1
+  ClauseId ->
+  WatchedLits ->
+  S.State CDCLState (Maybe UnitResult)
+findUnit _ (WatchOne l) = S.do
+  -- Only the first literal is active.
+  mres <- S.zoom valuationL $ evalLit l
+  S.pure case mres of
+    Just False -> Just (Conflict l)
+    Just True -> Just $ Satisfied Nothing
+    Nothing -> Just (Unit l)
+findUnit cid w@(WatchThese l1 l2) = S.do
+  -- The clause has more than two literals.
+  mres <- S.zoom valuationL $ evalLit l1
+  case mres of
+    Just True ->
+      -- satisfied; nothing to do.
+      S.pure $ Just $ Satisfied Nothing
+    Just False -> S.do
+      -- Unsatisfiable literal: find next available literal for watched1
+      mres <- findNextAvailable W1 cid
       case mres of
+        Just next ->
+          -- Next slot found. Move to it.
+          S.pure $ Just $ fromNextSlot next
+        Nothing -> S.do
+          -- No vacancy. Trying to "satisfy" watched 2.
+          mres' <- S.zoom valuationL $ evalLit l2
+          case mres' of
+            Nothing ->
+              -- w2 can be unit!
+              S.pure $ Just $ Unit l2
+            Just True -> S.pure $ Just $ Satisfied Nothing
+            Just False ->
+              -- Unsatifiable! pick the oldest variable as conflicting lit.
+              S.zoom valuationL $ Just D.<$> reportLastAddedAsConflict w
+    Nothing -> S.do
+      -- Undetermined. Check for watched2
+      mres' <- S.zoom valuationL $ evalLit l2
+      case mres' of
         Just True ->
           -- satisfied; nothing to do.
           S.pure $ Just $ Satisfied Nothing
         Just False -> S.do
-          -- Unsatisfiable literal: find next available literal for watched1
-          mres <- findNextAvailable W1 c
-          case mres of
-            Just next ->
-              -- Next slot found. Move to it.
-              S.pure $ Just $ fromNextSlot next
-            Nothing -> S.do
-              -- No vacancy. Trying to "satisfy" watched 2.
-              mres' <- evalLit l2
-              case mres' of
-                Nothing ->
-                  -- w2 can be unit!
-                  S.pure $ Just $ Unit l2
-                Just True -> S.pure $ Just $ Satisfied Nothing
-                Just False ->
-                  -- Unsatifiable! pick the oldest variable as conflicting lit.
-                  Just D.<$> reportLastAddedAsConflict c
-        Nothing -> S.do
-          -- Undetermined. Check for watched2
-          mres' <- evalLit l2
-          case mres' of
-            Just True ->
-              -- satisfied; nothing to do.
-              S.pure $ Just $ Satisfied Nothing
-            Just False -> S.do
-              -- Unsatisfiable literal: find next available literal for watched2
-              mres'' <- findNextAvailable W2 c
-              S.pure $ case mres'' of
-                Just next -> Just $ fromNextSlot next
-                Nothing -> Just $ Unit l1 -- w1 is unit!
-            Nothing -> S.pure Nothing -- No literal changed.
+          -- Unsatisfiable literal: find next available literal for watched2
+          mres'' <- findNextAvailable W2 cid
+          S.pure $ case mres'' of
+            Just next -> Just $ fromNextSlot next
+            Nothing -> Just $ Unit l1 -- w1 is unit!
+        Nothing -> S.pure Nothing -- No literal changed.
 
-reportLastAddedAsConflict :: Clause -> S.State Valuation UnitResult
-reportLastAddedAsConflict c@Clause {..}
-  | watched2 < 0 = S.pure $ Conflict $ getWatchedLit W1 c
-  | otherwise = S.do
-      let l1 = getWatchedLit W1 c
-          l2 = getWatchedLit W2 c
-      Ur v1 <- S.state $ LUA.unsafeGet (fromVarId $ litVar l1)
-      Ur v2 <- S.state $ LUA.unsafeGet (fromVarId $ litVar l2)
-      S.pure
-        $ Conflict
-        $ if introduced v1 > introduced v2 then l1 else l2
+reportLastAddedAsConflict :: WatchedLits -> S.State Valuation UnitResult
+reportLastAddedAsConflict (WatchOne l1) = S.pure $ Conflict l1
+reportLastAddedAsConflict (WatchThese l1 l2) = S.do
+  Ur v1 <- S.state $ LUA.unsafeGet (fromVarId $ litVar l1)
+  Ur v2 <- S.state $ LUA.unsafeGet (fromVarId $ litVar l2)
+  S.pure
+    $ Conflict
+    $ if introduced v1 > introduced v2 then l1 else l2
 
 introduced :: Variable -> Pair DecideLevel Step
 introduced Indefinite = -1 :!: -1
@@ -683,15 +682,16 @@ data NextSlot = NextSlot
   }
   deriving (Show, P.Eq, P.Ord, GHC.Generic)
 
-findNextAvailable :: WatchVar -> Clause -> S.State Valuation (Maybe NextSlot)
-findNextAvailable w c@Clause {..} = S.do
+findNextAvailable :: WatchVar -> ClauseId -> S.State CDCLState (Maybe NextSlot)
+findNextAvailable w cid = S.do
+  Ur c@Clause {..} <- getClause cid
   let lit = getWatchedLit w c
       origVar = litVar lit
   Ur cands <- runUrT $ P.flip U.imapMaybeM lits \i l -> liftUrT S.do
     if i == watched1 || i == watched2
       then S.pure Nothing
       else
-        evalLit l C.<&> \case
+        S.zoom valuationL (evalLit l) C.<&> \case
           Nothing -> (Just (i, Unassigned))
           (Just True) -> Just (i, AssignedTrue)
           (Just False) -> Nothing
@@ -721,11 +721,15 @@ evalLit l = S.do
     Definite {..} -> Just $ isPositive l == value
     Indefinite -> Nothing
 
-evalClause :: Clause -> S.State Valuation (Maybe Bool)
-evalClause Clause {..}
-  | satisfiedAt >= 0 = S.pure $ Just True
-  | otherwise = S.do
-      evalUrT
+evalClause :: ClauseId -> S.State CDCLState (Maybe Bool)
+evalClause cid = S.do
+  Ur lvl <- getSatisfiedLevel cid
+  lvl >= 0 & \case
+    True -> S.pure $ Just True
+    False -> S.do
+      Ur lits <- getClauseLits cid
+      S.zoom valuationL
+        $ evalUrT
         $ runMaybeT
           ( L.foldOverM
               vectorTraverse
