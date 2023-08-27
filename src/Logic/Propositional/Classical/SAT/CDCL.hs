@@ -35,6 +35,8 @@ import Control.Functor.Linear.State.Extra qualified as S
 import Control.Lens hiding (Index, lens, (%=), (&), (.=))
 import Control.Lens qualified as Lens
 import Control.Lens.Extras qualified as Lens
+import Control.Monad (guard)
+import Control.Monad.Trans.Maybe (MaybeT (..))
 import Control.Optics.Linear qualified as LinOpt
 import Data.Alloc.Linearly.Token (besides, linearly)
 import Data.Array.Mutable.Linear.Unboxed qualified as LUA
@@ -49,7 +51,6 @@ import Data.HashSet qualified as HS
 import Data.Hashable
 import Data.IntSet qualified as IS
 import Data.Maybe qualified as P
-import Data.Monoid (Ap (..))
 import Data.Semigroup (Arg (..), Max (..))
 import Data.Sequence (Seq (..))
 import Data.Sequence qualified as Seq
@@ -709,16 +710,23 @@ evalLit l = S.do
 evalClause :: Clause -> S.State Valuation (Ur (Maybe Bool))
 evalClause Clause {..}
   | satisfiedAt >= 0 = S.pure $ Ur $ Just True
-  | otherwise =
+  | otherwise = S.do
       runUrT
-        $ getAp
-        $ foldMapByOf
-          vectorTraverse
-          ( liftA2 \case
-              Just True -> P.const $ Just True
-              Just False -> P.id
-              Nothing -> P.id
+        $ runMaybeT
+          ( L.foldOverM
+              vectorTraverse
+              ( L.premapM
+                  (MaybeT . fmap Just . UrT . evalLit)
+                  $ L.handlesM _Just orLE
+                  *> L.generalize (L.any P.isNothing)
+              )
+              lits
           )
-          (pure Nothing)
-          (Ap . UrT . evalLit)
-          lits
+        <&> \case
+          Nothing -> Just True
+          Just anyIndef
+            | anyIndef -> Nothing
+            | otherwise -> Just False
+
+orLE :: (Monad m) => L.FoldM (MaybeT m) Bool ()
+orLE = L.FoldM (P.const guard) (pure ()) pure
