@@ -553,10 +553,10 @@ unwatch cid =
 assertLit :: (HasCallStack) => ClauseId -> Lit -> S.State CDCLState AssertionResult
 assertLit ante lit = S.do
   let vid = fromVarId $ litVar lit :: Int
-  Ur mres <- S.uses valuationL (LUA.unsafeGet vid)
+  mres <- S.uses valuationL (LUA.unsafeGet vid)
   case mres of
     -- Unassigned. We can safely assign
-    Indefinite {} -> S.do
+    Ur Indefinite {} -> S.do
       let antecedent
             | ante < 0 = Nothing
             | otherwise = Just ante
@@ -567,7 +567,7 @@ assertLit ante lit = S.do
       valuationL
         S.%= LUA.unsafeSet vid Definite {value = isPositive lit, ..}
       S.pure Asserted
-    Definite {..}
+    Ur Definite {..}
       | isPositive lit == value -> S.pure Asserted
       | otherwise -> S.pure ContradictingAssertion
 
