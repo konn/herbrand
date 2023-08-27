@@ -502,6 +502,7 @@ propagateUnit ml = S.do
           go (Seq.singleton (l, i))
 
 setSatisfied :: Maybe (Pair (Pair WatchVar VarId) (Pair VarId Index)) -> ClauseId -> S.StateT CDCLState Identity ()
+{-# INLINE setSatisfied #-}
 setSatisfied m i = S.do
   Ur lvl <- currentDecideLevel
   clausesL S.%= LV.modify_ (\c -> c {satisfiedAt = lvl}) (unClauseId i)
