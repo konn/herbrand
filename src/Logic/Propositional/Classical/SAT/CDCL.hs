@@ -189,10 +189,11 @@ solverLoop = fix $ \go mlit -> S.do
       S.pure Ok
     -- Contracdiction! The last assigned variable must be
     False -> S.do
-      Ur resl <- propagateUnit mlit
+      resl <- propagateUnit mlit
       case resl of
-        ConflictFound cid l -> S.do
-          backjump cid l -- Conflict found. Let's Backjump!
+        ConflictFound cid l ->
+          move (cid, l) & \(Ur (cid, l)) -> S.do
+            backjump cid l -- Conflict found. Let's Backjump!
         NoMorePropagation -> S.do
           -- Decide indefinite variable
           -- FIXME: Use heuristics for variable selection.
@@ -209,12 +210,12 @@ solverLoop = fix $ \go mlit -> S.do
 backjump :: ClauseId -> Lit -> S.State CDCLState FinalState
 backjump confCls lit = S.do
   Ur c <- S.uses clausesL $ LV.unsafeGet $ unClauseId confCls
-  Ur mLearnt <- findUIP1 lit $ L.foldOver (Lens.foldring U.foldr) L.set $ lits c
+  mLearnt <- findUIP1 lit $ L.foldOver (Lens.foldring U.foldr) L.set $ lits c
   case mLearnt of
     Nothing ->
       -- No valid backjumping destination found. Unsat.
       S.pure Failed
-    Just (decLvl, mlearnt, truth) -> S.do
+    Just (Ur (decLvl, mlearnt, truth)) -> S.do
       Ur numCls <- S.uses clausesL LV.size
       fix
         ( \self !i ->
@@ -255,19 +256,16 @@ backjump confCls lit = S.do
 findUIP1 ::
   Lit ->
   Set Lit ->
-  S.State CDCLState (Ur (Maybe (DecideLevel, Maybe Clause, Lit)))
+  S.State CDCLState (Maybe (Ur (DecideLevel, Maybe Clause, Lit)))
 findUIP1 !lit !curCls
   | Set.null curCls = S.do
-      S.pure $ Ur Nothing
+      S.pure Nothing
   | otherwise = S.do
       ml <- checkUnitClauseLit curCls
       case ml of
         Ur (Just (l', decLvl)) -> S.do
           -- Already Unit clause. Learn it!
-          S.pure
-            $ Ur
-            $ Just
-            $ mkLearntClause decLvl l' curCls
+          S.pure $ Just $ Ur $ mkLearntClause decLvl l' curCls
         Ur Nothing -> S.do
           -- Not a UIP. resolve.
           Ur v <- S.uses valuationL $ LUA.unsafeGet $ fromVarId $ litVar lit
@@ -282,7 +280,7 @@ findUIP1 !lit !curCls
               let resolved = resolve lit curCls cls'
               if Set.null resolved
                 then S.do
-                  S.pure $ Ur Nothing -- Conflicting clause
+                  S.pure Nothing -- Conflicting clause
                 else S.do
                   Ur mlit' <- findConflictingLit resolved
                   case mlit' of
@@ -290,10 +288,7 @@ findUIP1 !lit !curCls
                     Nothing -> S.do
                       Ur lvl <- currentDecideLevel
                       -- the literal is decision variable
-                      S.pure
-                        $ Ur
-                        $ Just
-                          (lvl - 1, Nothing, lit)
+                      S.pure $ Just $ Ur (lvl - 1, Nothing, lit)
 
 mkLearntClause :: DecideLevel -> Lit -> Set Lit -> (DecideLevel, Maybe Clause, Lit)
 mkLearntClause decLvl l' curCls =
@@ -432,16 +427,16 @@ instance Applicative Early where
       St.Nothing -> mx
       St.Just x -> pure $ St.Just x
 
-propagateUnit :: (HasCallStack) => Maybe (Lit, ClauseId) -> S.State CDCLState (Ur PropResult)
+propagateUnit :: (HasCallStack) => Maybe (Lit, ClauseId) -> S.State CDCLState (PropResult)
 propagateUnit ml = S.do
   go (P.maybe Seq.empty Seq.singleton ml)
   where
-    go :: Seq.Seq (Lit, ClauseId) -> S.State CDCLState (Ur PropResult)
+    go :: Seq.Seq (Lit, ClauseId) -> S.State CDCLState PropResult
     go ((l, reason) :<| rest) = S.do
       assResl <- assertLit reason l
       case assResl of
         ContradictingAssertion -> S.do
-          S.pure (Ur (ConflictFound reason l))
+          S.pure (ConflictFound reason l)
         Asserted -> S.do
           Ur dest <-
             C.fmap
@@ -450,7 +445,7 @@ propagateUnit ml = S.do
               $ LHM.lookup (litVar l)
           loop dest rest
       where
-        loop :: [Int] -> Seq.Seq (Lit, ClauseId) -> S.State CDCLState (Ur PropResult)
+        loop :: [Int] -> Seq.Seq (Lit, ClauseId) -> S.State CDCLState PropResult
         loop [] !rest = S.do
           go rest
         loop (!i : !is) !rest = S.do
@@ -460,7 +455,7 @@ propagateUnit ml = S.do
             Nothing -> S.do
               loop is rest
             Just (Conflict confLit) -> S.do
-              S.pure (Ur (ConflictFound (toClauseId i) confLit))
+              S.pure (ConflictFound (toClauseId i) confLit)
             Just (Satisfied m) -> S.do
               setSatisfied m (ClauseId i)
               loop is rest
@@ -479,7 +474,7 @@ propagateUnit ml = S.do
           $ Foldable.traverse_
             ( \ !i -> Early do
                 c <- UrT $ S.uses clausesL $ LV.get $ unClauseId i
-                resl <- UrT $ S.zoom valuationL (findUnit c)
+                resl <- liftUrT $ S.zoom valuationL (findUnit c)
                 case resl of
                   Nothing -> pure St.Nothing
                   Just (WatchChangedFromTo w old new newIdx) -> S.do
@@ -493,10 +488,10 @@ propagateUnit ml = S.do
             )
             cands
       case mresl of
-        St.Nothing -> S.pure (Ur NoMorePropagation)
-        St.Just (Left (i, ml)) -> S.pure $ Ur (ConflictFound i ml)
-        St.Just (Right (l, i)) -> S.do
-          go (Seq.singleton (l, i))
+        St.Nothing -> S.pure NoMorePropagation
+        St.Just (Left (i, ml)) -> S.pure $ ConflictFound i ml
+        St.Just (Right (l, i)) ->
+          move (l, i) & \(Ur (l, i)) -> go $ Seq.singleton (l, i)
 
 setSatisfied :: Maybe (Pair (Pair WatchVar VarId) (Pair VarId Index)) -> ClauseId -> S.StateT CDCLState Identity ()
 {-# INLINE setSatisfied #-}
@@ -566,9 +561,9 @@ propLit trueLit c@Clause {..}
                 then S.pure $ Ur $ Just $ Satisfied Nothing -- Satisfied.
                 else S.do
                   -- False. Find next watched lit.
-                  Ur mnext <- findNextAvailable W1 c
+                  mnext <- findNextAvailable W1 c
                   case mnext of
-                    Just next -> S.pure $ Ur $ Just $ fromNextSlot next
+                    Just next -> S.pure $ move $ Just $ fromNextSlot next
                     Nothing -- No vacancy.
                       | watched2 < 0 -> S.pure $ Ur $ Just $ Conflict l1
                       | otherwise -> S.do
@@ -579,16 +574,16 @@ propLit trueLit c@Clause {..}
                             Just True -> S.pure $ Ur $ Just $ Satisfied Nothing
                             Just False ->
                               -- Unsatifiable! pick the oldest variable as conflicting lit.
-                              Ur.lift Just D.<$> reportLastAddedAsConflict c
+                              move PL.. Just D.<$> reportLastAddedAsConflict c
             else -- Otherwise it must be watched var #2
 
               let l2 = (U.!) lits watched2
                in if l2 == trueLit
                     then S.pure $ Ur $ Just $ Satisfied Nothing -- Satisfied
                     else S.do
-                      Ur mnext <- findNextAvailable W2 c
+                      mnext <- findNextAvailable W2 c
                       case mnext of
-                        Just next -> S.pure $ Ur $ Just $ fromNextSlot next
+                        Just next -> S.pure $ move $ Just $ fromNextSlot next
                         Nothing -> S.do
                           mval1 <- evalLit l1
                           case mval1 of
@@ -596,20 +591,20 @@ propLit trueLit c@Clause {..}
                             Just True -> S.pure $ Ur $ Just $ Satisfied Nothing
                             Just False ->
                               -- Unsatifiable! pick the oldest variable as conflicting lit.
-                              Ur.lift Just D.<$> reportLastAddedAsConflict c
+                              move PL.. Just D.<$> reportLastAddedAsConflict c
 
 findUnit ::
   Clause ->
-  S.State Valuation (Ur (Maybe UnitResult))
+  S.State Valuation (Maybe UnitResult)
 findUnit c@Clause {..}
   | watched2 < 0 = S.do
       -- Only the first literal is active.
       let !l = (U.!) lits watched1
       mres <- evalLit l
       S.pure case mres of
-        Just False -> Ur $ Just (Conflict l)
-        Just True -> Ur $ Just $ Satisfied Nothing
-        Nothing -> Ur $ Just (Unit l)
+        Just False -> Just (Conflict l)
+        Just True -> Just $ Satisfied Nothing
+        Nothing -> Just (Unit l)
   | otherwise = S.do
       -- The clause has more than two literals.
       let l1 = (U.!) lits watched1
@@ -618,50 +613,49 @@ findUnit c@Clause {..}
       case mres of
         Just True ->
           -- satisfied; nothing to do.
-          S.pure $ Ur $ Just $ Satisfied Nothing
+          S.pure $ Just $ Satisfied Nothing
         Just False -> S.do
           -- Unsatisfiable literal: find next available literal for watched1
-          Ur mres <- findNextAvailable W1 c
+          mres <- findNextAvailable W1 c
           case mres of
             Just next ->
               -- Next slot found. Move to it.
-              S.pure $ Ur $ Just $ fromNextSlot next
+              S.pure $ Just $ fromNextSlot next
             Nothing -> S.do
               -- No vacancy. Trying to "satisfy" watched 2.
               mres' <- evalLit l2
               case mres' of
                 Nothing ->
                   -- w2 can be unit!
-                  S.pure $ Ur $ Just $ Unit l2
-                Just True -> S.pure $ Ur $ Just $ Satisfied Nothing
+                  S.pure $ Just $ Unit l2
+                Just True -> S.pure $ Just $ Satisfied Nothing
                 Just False ->
                   -- Unsatifiable! pick the oldest variable as conflicting lit.
-                  Ur.lift Just D.<$> reportLastAddedAsConflict c
+                  Just D.<$> reportLastAddedAsConflict c
         Nothing -> S.do
           -- Undetermined. Check for watched2
           mres' <- evalLit l2
           case mres' of
             Just True ->
               -- satisfied; nothing to do.
-              S.pure (Ur (Just $ Satisfied Nothing))
+              S.pure $ Just $ Satisfied Nothing
             Just False -> S.do
               -- Unsatisfiable literal: find next available literal for watched2
-              Ur mres'' <- findNextAvailable W2 c
-              S.pure $ Ur $ case mres'' of
+              mres'' <- findNextAvailable W2 c
+              S.pure $ case mres'' of
                 Just next -> Just $ fromNextSlot next
                 Nothing -> Just $ Unit l1 -- w1 is unit!
-            Nothing -> S.pure (Ur Nothing) -- No literal changed.
+            Nothing -> S.pure Nothing -- No literal changed.
 
-reportLastAddedAsConflict :: Clause -> S.State Valuation (Ur UnitResult)
+reportLastAddedAsConflict :: Clause -> S.State Valuation UnitResult
 reportLastAddedAsConflict c@Clause {..}
-  | watched2 < 0 = S.pure $ Ur $ Conflict $ getWatchedLit W1 c
+  | watched2 < 0 = S.pure $ Conflict $ getWatchedLit W1 c
   | otherwise = S.do
       let l1 = getWatchedLit W1 c
           l2 = getWatchedLit W2 c
       Ur v1 <- S.state $ LUA.unsafeGet (fromVarId $ litVar l1)
       Ur v2 <- S.state $ LUA.unsafeGet (fromVarId $ litVar l2)
       S.pure
-        $ Ur
         $ Conflict
         $ if introduced v1 > introduced v2 then l1 else l2
 
@@ -673,7 +667,7 @@ getWatchedLit :: WatchVar -> Clause -> Lit
 getWatchedLit W1 Clause {..} = (U.!) lits watched1
 getWatchedLit W2 Clause {..} = (U.!) lits watched2
 
-fromNextSlot :: NextSlot -> UnitResult
+fromNextSlot :: NextSlot %1 -> UnitResult
 fromNextSlot (NextSlot True w old new lid) = Satisfied $ Just $ (w :!: old) :!: (new :!: lid)
 fromNextSlot (NextSlot False w old new lid) = WatchChangedFromTo w old new lid
 
@@ -685,7 +679,7 @@ data NextSlot = NextSlot
   }
   deriving (Show, P.Eq, P.Ord, GHC.Generic)
 
-findNextAvailable :: WatchVar -> Clause -> S.State Valuation (Ur (Maybe NextSlot))
+findNextAvailable :: WatchVar -> Clause -> S.State Valuation (Maybe NextSlot)
 findNextAvailable w c@Clause {..} = S.do
   let lit = getWatchedLit w c
       origVar = litVar lit
@@ -709,12 +703,12 @@ findNextAvailable w c@Clause {..} = S.do
   case mSat of
     Just i ->
       let v' = litVar $ (U.!) lits i
-       in S.pure $ Ur $ Just $ NextSlot True w origVar v' i
+       in S.pure $ Just $ NextSlot True w origVar v' i
     Nothing -> case mUndet of
       Just i ->
         let v' = litVar $ (U.!) lits i
-         in S.pure $ Ur $ Just $ NextSlot False w origVar v' i
-      Nothing -> S.pure (Ur Nothing)
+         in S.pure $ Just $ NextSlot False w origVar v' i
+      Nothing -> S.pure Nothing
 
 evalLit :: Lit -> S.State Valuation (Maybe Bool)
 evalLit l = S.do
