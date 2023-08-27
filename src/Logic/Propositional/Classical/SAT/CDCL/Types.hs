@@ -27,6 +27,11 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   Clauses,
   WatchMap,
   stepsL,
+  pushClause,
+  getClause,
+  getNumClauses,
+  setWatchVar,
+  setSatisfiedLevel,
   clausesL,
   watchesL,
   valuationL,
@@ -71,7 +76,8 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
 import Control.DeepSeq (NFData)
 import Control.Foldl qualified as Foldl
 import Control.Foldl qualified as L
-import Control.Lens (Lens', Prism', lens, prism')
+import Control.Functor.Linear.State.Extra qualified as S
+import Control.Lens (Lens', Prism', lens, prism', (.~))
 import Control.Monad (guard)
 import Control.Optics.Linear qualified as LinLens
 import Data.Alloc.Linearly.Token
@@ -105,6 +111,7 @@ import Logic.Propositional.Classical.SAT.Types (SatResult (..))
 import Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
 import Prelude.Linear (lseq, (&))
 import Prelude.Linear qualified as PL
+import Unsafe.Linear qualified as Unsafe
 
 newtype VarId = VarId {unVarId :: Word}
   deriving (Eq, Ord, Generic)
@@ -269,6 +276,19 @@ data CDCLState where
     CDCLState
   deriving anyclass (HasLinearWitness)
 
+pushClause :: Clause -> S.State CDCLState ()
+{-# INLINE pushClause #-}
+{- HLINT ignore pushClause "Redundant lambda" -}
+pushClause = \x -> clausesL S.%= LV.push x
+
+getClause :: Int -> S.State CDCLState (Ur Clause)
+{-# INLINE getClause #-}
+getClause i = S.uses clausesL (LV.unsafeGet i)
+
+getNumClauses :: S.State CDCLState (Ur Int)
+{-# INLINE getNumClauses #-}
+getNumClauses = S.uses clausesL LV.size
+
 stepsL :: LinLens.Lens' CDCLState (LUV.Vector Step)
 {-# INLINE stepsL #-}
 stepsL = LinLens.lens \(CDCLState numOrig ss cs ws vs vids) ->
@@ -429,6 +449,7 @@ watchVarL W1 = #watched1
 watchVarL W2 = #watched2
 
 numTotalClauses :: CDCLState %1 -> (Ur Int, CDCLState)
+{-# INLINE numTotalClauses #-}
 numTotalClauses (CDCLState numOrig steps clauses watches vals vids) =
   LV.size clauses & \(sz, clauses) ->
     (sz, CDCLState numOrig steps clauses watches vals vids)
@@ -443,3 +464,21 @@ deriving via L.AsMovable AssertionResult instance L.Consumable AssertionResult
 deriving via L.AsMovable AssertionResult instance L.Dupable AssertionResult
 
 deriving via L.Generically AssertionResult instance L.Movable AssertionResult
+
+{- NOTE:
+
+  1.  We cannot use 'watchVarL' here because `LV.modify_` consumes
+      the first argument non-linearly!
+  2.  Use of Unsafe.toLienar is safe here because vid = Int is freely dupable.
+-}
+setWatchVar :: ClauseId -> WatchVar %1 -> Index %1 -> S.State CDCLState ()
+{-# INLINE setWatchVar #-}
+setWatchVar cid W1 = Unsafe.toLinear \vid ->
+  clausesL S.%= LV.modify_ (#watched1 .~ vid) (unClauseId cid)
+setWatchVar cid W2 = Unsafe.toLinear \vid ->
+  clausesL S.%= LV.modify_ (#watched2 .~ vid) (unClauseId cid)
+
+setSatisfiedLevel :: ClauseId -> DecideLevel -> S.State CDCLState ()
+{-# INLINE setSatisfiedLevel #-}
+setSatisfiedLevel cid lvl =
+  clausesL S.%= LV.modify_ (\c -> c {satisfiedAt = lvl}) (unClauseId cid)

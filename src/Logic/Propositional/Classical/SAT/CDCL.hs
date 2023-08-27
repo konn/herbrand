@@ -63,7 +63,6 @@ import Data.Tuple qualified as P
 import Data.Unrestricted.Linear (UrT (..), evalUrT, liftUrT, runUrT)
 import Data.Unrestricted.Linear qualified as Ur
 import Data.Vector.Generic.Lens (vectorTraverse)
-import Data.Vector.Mutable.Linear.Helpers qualified as LV
 import Data.Vector.Mutable.Linear.Unboxed qualified as LUV
 import Data.Vector.Unboxed qualified as U
 import GHC.Generics qualified as GHC
@@ -173,7 +172,7 @@ solverLoop = fix $ \go mlit -> S.do
           (i == numIniCls) & \case
             True -> S.pure True
             False -> S.do
-              Ur c <- S.uses clausesL $ LV.unsafeGet i
+              Ur c <- getClause i
               val <- S.zoom valuationL (evalClause c)
               val & \case
                 Just True -> S.do
@@ -183,7 +182,6 @@ solverLoop = fix $ \go mlit -> S.do
                 Nothing -> S.pure False
       )
       0
-  -- S.uses clausesL $ LV.allFirstN numIniCls ((>= 0) . satisfiedAt)
   mstt & \case
     True -> S.do
       S.pure Ok
@@ -209,23 +207,23 @@ solverLoop = fix $ \go mlit -> S.do
 
 backjump :: ClauseId -> Lit -> S.State CDCLState FinalState
 backjump confCls lit = S.do
-  Ur c <- S.uses clausesL $ LV.unsafeGet $ unClauseId confCls
+  Ur c <- getClause $ unClauseId confCls
   mLearnt <- findUIP1 lit $ L.foldOver (Lens.foldring U.foldr) L.set $ lits c
   case mLearnt of
     Nothing ->
       -- No valid backjumping destination found. Unsat.
       S.pure Failed
     Just (Ur (decLvl, mlearnt, truth)) -> S.do
-      Ur numCls <- S.uses clausesL LV.size
+      Ur numCls <- getNumClauses
       fix
         ( \self !i ->
             if i == numCls
               then S.pure ()
               else S.do
-                Ur Clause {..} <- S.uses clausesL $ LV.unsafeGet i
+                Ur Clause {..} <- getClause i
                 satisfiedAt > decLvl & \case
                   True -> S.do
-                    clausesL S.%= LV.modify_ (\c -> c {satisfiedAt = -1}) i
+                    setSatisfiedLevel (ClauseId i) (-1)
                     unsatisfiedsL S.%= LSet.insert (ClauseId i)
                   False -> S.pure ()
                 self (i + 1)
@@ -235,8 +233,8 @@ backjump confCls lit = S.do
       Ur reason <- case mlearnt of
         Just learnt -> S.do
           stepsL S.%= LUV.slice 0 (unDecideLevel decLvl + 1)
-          clausesL S.%= LV.push learnt
-          Ur reason <- Ur.lift (fromIntegral . subtract 1) C.<$> S.uses clausesL LV.size
+          pushClause learnt
+          Ur reason <- Ur.lift (fromIntegral . subtract 1) C.<$> getNumClauses
           watch reason $ litVar (lits learnt U.! watched1 learnt)
           if watched2 learnt >= 0
             then watch reason $ litVar (lits learnt U.! watched2 learnt)
@@ -274,7 +272,7 @@ findUIP1 !lit !curCls
               Ur cls' <- case antecedent of
                 Just ante ->
                   Ur.lift (L.foldOver (Lens.foldring U.foldr) L.set . lits)
-                    D.<$> S.uses clausesL (LV.unsafeGet (unClauseId ante))
+                    D.<$> getClause (unClauseId ante)
                 Nothing -> S.pure $ Ur Set.empty
               let resolved = resolve lit curCls cls'
               if Set.null resolved
@@ -449,7 +447,7 @@ propagateUnit ml = S.do
         loop [] !rest = S.do
           go rest
         loop (!i : !is) !rest = S.do
-          Ur c <- S.uses clausesL $ LV.unsafeGet i
+          Ur c <- getClause i
           resl <- S.zoom valuationL $ propLit l c
           case resl of
             Nothing -> S.do
@@ -476,7 +474,7 @@ propagateUnit ml = S.do
           $ runEarly
           $ Foldable.traverse_
             ( \ !i -> Early do
-                c <- UrT $ S.uses clausesL $ LV.get $ unClauseId i
+                c <- UrT $ getClause $ unClauseId i
                 resl <- liftUrT $ S.zoom valuationL (findUnit c)
                 case resl of
                   Nothing -> pure St.Nothing
@@ -501,7 +499,7 @@ setSatisfied :: Maybe (Pair (Pair WatchVar VarId) (Pair VarId Index)) %1 -> Clau
 {-# INLINE setSatisfied #-}
 setSatisfied m i = S.do
   Ur lvl <- currentDecideLevel
-  clausesL S.%= LV.modify_ (\c -> c {satisfiedAt = lvl}) (unClauseId i)
+  setSatisfiedLevel i lvl
   unsatisfiedsL S.%= LSet.delete i
   case m of
     Just ((w :!: old) :!: (new :!: newIdx)) ->
@@ -511,23 +509,9 @@ setSatisfied m i = S.do
 updateWatchLit :: ClauseId -> WatchVar %1 -> VarId %1 -> VarId %1 -> Index %1 -> S.State CDCLState ()
 {-# INLINE updateWatchLit #-}
 updateWatchLit cid w old new idx = S.do
-  moveCursor w idx
+  setWatchVar cid w idx
   unwatch cid old
   watch cid new
-  where
-    {- NOTE:
-
-      1.  We cannot use 'watchVarL' here because `LV.modify_` consumes
-          the first argument non-linearly!
-      2.  Use of Unsafe.toLienar is safe here because vid = Int is freely dupable.
-    -}
-    moveCursor :: WatchVar %1 -> Index %1 -> S.State CDCLState ()
-    {-# INLINE moveCursor #-}
-    moveCursor = \case
-      W1 -> Unsafe.toLinear \vid ->
-        S.zoom clausesL $ S.modify $ LV.modify_ (#watched1 .~ vid) $ unClauseId cid
-      W2 -> Unsafe.toLinear \vid ->
-        S.zoom clausesL $ S.modify $ LV.modify_ (#watched2 .~ vid) $ unClauseId cid
 
 watch :: ClauseId -> VarId %1 -> S.State CDCLState ()
 watch cid =
