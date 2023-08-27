@@ -175,7 +175,6 @@ jobs:
         name: ${{matrix.bench}}.svg
 
   profiling: 
-    if: false
     env:
       ghc: 9.4.5
       cabal: 3.10.1.0
@@ -244,7 +243,7 @@ jobs:
     - name: Run profiling
       run: >
         cabal --project-file=cabal-prof.project run --
-        cdcl-dry -i data/Bejing/2bitmax_6.cnf
+        cdcl-dry -i data/Bejing/2bitadd_10.cnf
         +RTS --copying-gc -hi -l -p -i1
     - name: Collect profiling results
       continue-on-error: true
