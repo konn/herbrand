@@ -199,7 +199,6 @@ solverLoop = fix $ \go mlit -> S.do
               assResult <- assertLit (-1) decLit
               case assResult of
                 Asserted -> go (Just (decLit, -1))
-                AlreadyAsserted -> error $ "Impossible:  decide variable is already asserted true: " <> show decLit
                 ContradictingAssertion -> error $ "Impossible: decide variable is contradicting!: " <> show decLit
 
 backjump :: ClauseId -> Lit -> S.State CDCLState FinalState
@@ -245,11 +244,8 @@ backjump confCls lit = S.do
             then Indefinite
             else v
 
-      assResl <- assertLit reason truth
-      case assResl of
-        Asserted -> solverLoop $ Just (truth, reason)
-        ContradictingAssertion -> error "Impossible: Assertion must be undone (contra)"
-        AlreadyAsserted -> error "Assertion must be undone (consis)"
+      C.void $ assertLit reason truth
+      solverLoop $ Just (truth, reason)
 
 findUIP1 ::
   Lit ->
@@ -408,7 +404,6 @@ propagateUnit ml = S.do
     go ((l, reason) :<| rest) = S.do
       assResl <- assertLit reason l
       case assResl of
-        AlreadyAsserted -> go rest
         ContradictingAssertion -> S.pure (Ur (ConflictFound reason l))
         Asserted -> S.do
           Ur m <- S.uses watchesL $ LHM.lookup (litVar l)
@@ -498,9 +493,6 @@ unwatch cid v =
       )
       v
 
-data AssertionResult = Asserted | AlreadyAsserted | ContradictingAssertion
-  deriving (Show)
-
 assertLit :: ClauseId -> Lit -> S.State CDCLState AssertionResult
 assertLit ante lit = S.do
   let vid = fromEnum $ litVar lit :: Int
@@ -519,7 +511,7 @@ assertLit ante lit = S.do
         S.%= LUA.unsafeSet vid Definite {value = isPositive lit, ..}
       S.pure Asserted
     Ur Definite {..}
-      | isPositive lit == value -> S.pure AlreadyAsserted
+      | isPositive lit == value -> S.pure Asserted
       | otherwise -> S.pure ContradictingAssertion
 
 -- | Propagate Literal.

@@ -22,6 +22,7 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   isAssignedAfter,
   toCDCLState,
   CDCLState (..),
+  AssertionResult (..),
   Valuation,
   Clauses,
   WatchMap,
@@ -420,3 +421,14 @@ numTotalClauses :: CDCLState %1 -> (Ur Int, CDCLState)
 numTotalClauses (CDCLState numOrig steps clauses watches vals vids) =
   LV.size clauses & \(sz, clauses) ->
     (sz, CDCLState numOrig steps clauses watches vals vids)
+
+data AssertionResult = Asserted | ContradictingAssertion
+  deriving (Show)
+
+deriveGeneric ''AssertionResult
+
+deriving via L.AsMovable AssertionResult instance L.Consumable AssertionResult
+
+deriving via L.AsMovable AssertionResult instance L.Dupable AssertionResult
+
+deriving via L.Generically AssertionResult instance L.Movable AssertionResult
