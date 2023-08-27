@@ -30,11 +30,14 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   watchesL,
   valuationL,
   numInitialClausesL,
+  unsatisfiedsL,
+  clausesValsAndUnsatsL,
   Index,
 
   -- * Compact literal
   Lit (PosL, NegL),
   litVar,
+  negL,
   _PosL,
   _NegL,
   isPositive,
@@ -72,7 +75,8 @@ import Data.Alloc.Linearly.Token
 import Data.Alloc.Linearly.Token.Unsafe (HasLinearWitness)
 import Data.Array.Mutable.Linear.Unboxed qualified as LUA
 import Data.Bit (Bit (..))
-import Data.Bits ((.&.), (.|.))
+import Data.Bits (xor, (.&.), (.|.))
+import Data.Coerce (coerce)
 import Data.Generics.Labels ()
 import Data.HashMap.Mutable.Linear.Extra qualified as LHM
 import Data.Hashable (Hashable)
@@ -81,6 +85,7 @@ import Data.IntSet qualified as IS
 import Data.List (mapAccumL)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe)
+import Data.Set.Mutable.Linear.Extra qualified as LSet
 import Data.Strict.Tuple (Pair (..))
 import Data.Unrestricted.Linear (Ur (..))
 import Data.Unrestricted.Linear qualified as L
@@ -155,6 +160,9 @@ litVar = VarId . (.&. idMask) . runLit
 litVarL :: Lens' Lit VarId
 {-# INLINE litVarL #-}
 litVarL = lens litVar \l (VarId v) -> Lit (negateMask .&. runLit l .|. idMask .&. v)
+
+negL :: Lit -> Lit
+negL = coerce $ xor negateMask
 
 instance Show Lit where
   showsPrec d = showsPrec d . decodeLit
@@ -246,31 +254,43 @@ data CDCLState where
     {-# UNPACK #-} !WatchMap %1 ->
     -- | Valuations
     {-# UNPACK #-} !Valuation %1 ->
+    -- | Unsatisfied Clauses
+    {-# UNPACK #-} !(LSet.Set ClauseId) %1 ->
     CDCLState
   deriving anyclass (HasLinearWitness)
 
 stepsL :: LinLens.Lens' CDCLState (LUV.Vector Step)
 {-# INLINE stepsL #-}
-stepsL = LinLens.lens \(CDCLState numOrig ss cs ws vs) ->
-  (ss, \ss -> CDCLState numOrig ss cs ws vs)
+stepsL = LinLens.lens \(CDCLState numOrig ss cs ws vs vids) ->
+  (ss, \ss -> CDCLState numOrig ss cs ws vs vids)
 
 numInitialClausesL :: LinLens.Lens' CDCLState Int
-numInitialClausesL = LinLens.lens \(CDCLState numOrig ss cs ws vs) ->
-  (numOrig, \numOrig -> CDCLState numOrig ss cs ws vs)
+numInitialClausesL = LinLens.lens \(CDCLState numOrig ss cs ws vs vids) ->
+  (numOrig, \numOrig -> CDCLState numOrig ss cs ws vs vids)
 
 clausesL :: LinLens.Lens' CDCLState (LV.Vector Clause)
 {-# INLINE clausesL #-}
-clausesL = LinLens.lens \(CDCLState numOrig ss cs ws vs) ->
-  (cs, \cs -> CDCLState numOrig ss cs ws vs)
+clausesL = LinLens.lens \(CDCLState numOrig ss cs ws vs vids) ->
+  (cs, \cs -> CDCLState numOrig ss cs ws vs vids)
 
 watchesL :: LinLens.Lens' CDCLState WatchMap
 {-# INLINE watchesL #-}
-watchesL = LinLens.lens \(CDCLState numOrig ss cs ws vs) ->
-  (ws, \ws -> CDCLState numOrig ss cs ws vs)
+watchesL = LinLens.lens \(CDCLState numOrig ss cs ws vs vids) ->
+  (ws, \ws -> CDCLState numOrig ss cs ws vs vids)
 
 valuationL :: LinLens.Lens CDCLState CDCLState Valuation Valuation
 {-# INLINE valuationL #-}
-valuationL = LinLens.lens \(CDCLState norig ss cs ws vs) -> (vs, CDCLState norig ss cs ws)
+valuationL = LinLens.lens \(CDCLState norig ss cs ws vs vids) ->
+  (vs, \vs -> CDCLState norig ss cs ws vs vids)
+
+unsatisfiedsL :: LinLens.Lens' CDCLState (LSet.Set ClauseId)
+{-# INLINE unsatisfiedsL #-}
+unsatisfiedsL = LinLens.lens \(CDCLState norig ss cs ws vs vids) ->
+  (vids, CDCLState norig ss cs ws vs)
+
+clausesValsAndUnsatsL :: LinLens.Lens' CDCLState (Clauses, Valuation, LSet.Set ClauseId)
+clausesValsAndUnsatsL = LinLens.lens \(CDCLState norig ss cs ws vs vids) ->
+  ((cs, vs, vids), \(cs, vs, vids) -> CDCLState norig ss cs ws vs vids)
 
 toCDCLState :: CNF VarId -> Linearly %1 -> Either (Ur (SatResult ())) CDCLState
 toCDCLState (CNF cls) lin =
@@ -293,11 +313,11 @@ toCDCLState (CNF cls) lin =
         _ ->
           besides lin (`LUV.fromListL` [0]) PL.& \(steps, lin) ->
             besides lin (`LV.fromListL` cls'') PL.& \(clauses, lin) ->
-              besides lin (`LHM.fromListL` Map.toList upds)
-                PL.& \(watcheds, lin) ->
+              besides lin (`LHM.fromListL` Map.toList upds) & \(watcheds, lin) ->
+                besides lin (\lin -> LUA.allocL lin (maybe 0 ((+ 1) . fromEnum) maxVar) Indefinite) PL.& \(vals, lin) ->
                   Right
-                    PL.$ CDCLState numOrigCls steps clauses watcheds
-                    PL.$ LUA.allocL lin (maybe 0 ((+ 1) . fromEnum) maxVar) Indefinite
+                    PL.$ CDCLState numOrigCls steps clauses watcheds vals
+                    PL.$ LSet.fromListL lin [ClauseId 0 .. ClauseId (numOrigCls - 1)]
 
 buildClause ::
   Pair Int (Map.Map VarId IntSet) ->
@@ -397,6 +417,6 @@ watchVarL W1 = #watched1
 watchVarL W2 = #watched2
 
 numTotalClauses :: CDCLState %1 -> (Ur Int, CDCLState)
-numTotalClauses (CDCLState numOrig steps clauses watches vals) =
+numTotalClauses (CDCLState numOrig steps clauses watches vals vids) =
   LV.size clauses & \(sz, clauses) ->
-    (sz, CDCLState numOrig steps clauses watches vals)
+    (sz, CDCLState numOrig steps clauses watches vals vids)

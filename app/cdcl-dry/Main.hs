@@ -1,4 +1,5 @@
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE OverloadedLists #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# OPTIONS_GHC -finfo-table-map -fdistinct-constructor-tables #-}
 
@@ -21,10 +22,17 @@ optP = Opt.info (p <**> Opt.helper) $ Opt.progDesc "Solves SAT problem on CNF fo
   where
     p = Opt <$> Opt.strOption (Opt.long "input" <> Opt.short 'i' <> Opt.metavar "PATH" <> Opt.help "The path to the input CNF file.")
 
+cnf0, cnf1 :: CNF VarId
+cnf0 = [[Positive 1, Negative 0, Positive 1, Positive 1, Positive 1]]
+cnf1 =
+  [ [Positive 1, Negative 0, Positive 1, Positive 1, Positive 1]
+  , [Positive 0, Positive 0, Positive 0, Positive 0, Positive 1]
+  ]
+
 main :: IO ()
 main = do
-  Opt {..} <- Opt.execParser optP
-  !cnf <- either error (evaluate . force . view _3) . parseCNFLazy =<< LBS.readFile input
+  -- Opt {..} <- Opt.execParser optP
+  !cnf <- evaluate $ force cnf1
   putStrLn "CNF evaluated. Solving..."
 
-  void $ evaluate $ force $ solve cnf
+  print $ solveVarId cnf
