@@ -104,6 +104,8 @@ use l = uses l dup2
 
 instance D.Functor (FUN 'One t) where
   fmap = (.)
+  {-# INLINE fmap #-}
 
 instance Functor (FUN 'One t) where
   fmap = (.)
+  {-# INLINE fmap #-}
