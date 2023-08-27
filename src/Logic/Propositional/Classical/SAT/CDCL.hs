@@ -63,7 +63,6 @@ import Data.Tuple qualified as P
 import Data.Unrestricted.Linear (UrT (..), liftUrT, runUrT)
 import Data.Unrestricted.Linear qualified as Ur
 import Data.Vector.Generic.Lens (vectorTraverse)
-import Data.Vector.Internal.Check
 import Data.Vector.Mutable.Linear.Helpers qualified as LV
 import Data.Vector.Mutable.Linear.Unboxed qualified as LUV
 import Data.Vector.Unboxed qualified as U
@@ -159,7 +158,7 @@ solveVarId cnf =
 solveState :: CDCLState %1 -> Ur (SatResult (Model VarId))
 solveState = toSatResult PL.. S.runState (solverLoop Nothing)
 
-solverLoop :: (HasCallStack) => Maybe (Lit, ClauseId) -> S.State CDCLState FinalState
+solverLoop :: Maybe (Lit, ClauseId) -> S.State CDCLState FinalState
 solverLoop = fix $ \go mlit -> S.do
   -- First, check if the original clauses are all satisfied (at the current stage)
   -- We only have to traverse the initial segment, as the lerant clauses are always
@@ -181,7 +180,7 @@ solverLoop = fix $ \go mlit -> S.do
       )
       0
   -- S.uses clausesL $ LV.allFirstN numIniCls ((>= 0) . satisfiedAt)
-  case mstt of
+  mstt & \case
     True -> S.pure Ok
     -- Contracdiction! The last assigned variable must be
     False -> S.do
@@ -203,7 +202,7 @@ solverLoop = fix $ \go mlit -> S.do
                 AlreadyAsserted -> error $ "Impossible:  decide variable is already asserted true: " <> show decLit
                 ContradictingAssertion -> error $ "Impossible: decide variable is contradicting!: " <> show decLit
 
-backjump :: (HasCallStack) => ClauseId -> Lit -> S.State CDCLState FinalState
+backjump :: ClauseId -> Lit -> S.State CDCLState FinalState
 backjump confCls lit = S.do
   Ur c <- S.uses clausesL $ LV.unsafeGet $ fromEnum confCls
   Ur mLearnt <- findUIP1 lit $ L.foldOver (Lens.foldring U.foldr) L.set $ lits c
@@ -253,7 +252,6 @@ backjump confCls lit = S.do
         AlreadyAsserted -> error "Assertion must be undone (consis)"
 
 findUIP1 ::
-  (HasCallStack) =>
   Lit ->
   Set Lit ->
   S.State CDCLState (Ur (Maybe (DecideLevel, Maybe Clause, Lit)))
@@ -402,7 +400,7 @@ toSatResult (Ok, CDCLState numOrig steps clauses watches vals vids) =
 toClauseId :: Int -> ClauseId
 toClauseId = fromIntegral
 
-propagateUnit :: (HasCallStack) => Maybe (Lit, ClauseId) -> S.State CDCLState (Ur PropResult)
+propagateUnit :: Maybe (Lit, ClauseId) -> S.State CDCLState (Ur PropResult)
 propagateUnit ml = S.do
   go (P.maybe Seq.empty Seq.singleton ml)
   where
