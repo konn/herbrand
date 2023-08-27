@@ -234,8 +234,7 @@ backjump confCls lit = S.do
     Nothing ->
       -- No valid backjumping destination found. Unsat.
       S.pure Failed
-    Just (decLvl, learnt, truth) -> S.do
-      stepsL S.%= LUV.slice 0 (unDecideLevel decLvl + 1)
+    Just (decLvl, mlearnt, truth) -> S.do
       clausesL S.%= D.fmap \Clause {..} ->
         move satisfiedAt & \(Ur satisfiedAt) ->
           Clause
@@ -243,18 +242,24 @@ backjump confCls lit = S.do
                 if satisfiedAt > decLvl then -1 else satisfiedAt
             , ..
             }
-      clausesL S.%= LV.push learnt
-      Ur sz <- S.uses clausesL LV.size
+      Ur reason <- case mlearnt of
+        Just learnt -> S.do
+          stepsL S.%= LUV.slice 0 (unDecideLevel decLvl + 1)
+          clausesL S.%= LV.push learnt
+          Ur reason <- Ur.lift (fromIntegral . subtract 1) C.<$> S.uses clausesL LV.size
+          watch reason $ litVar (lits learnt U.! watched1 learnt)
+          if watched2 learnt >= 0
+            then watch reason $ litVar (lits learnt U.! watched2 learnt)
+            else S.pure ()
+          S.pure $ Ur reason
+        Nothing -> S.pure $ Ur confCls
+
       valuationL S.%= LUA.mapSame \v ->
         PL.move v & \(Ur v) ->
           if isAssignedAfter decLvl v
             then Indefinite
             else v
-      let reason = fromIntegral $ sz - 1
-      watch reason $ litVar (lits learnt U.! watched1 learnt)
-      if watched2 learnt >= 0
-        then watch reason $ litVar (lits learnt U.! watched2 learnt)
-        else S.pure ()
+
       assResl <- assertLit reason truth
       case assResl of
         Asserted -> solverLoop $ Just (truth, reason)
@@ -265,7 +270,7 @@ findUIP1 ::
   (HasCallStack) =>
   Lit ->
   Set Lit ->
-  S.State CDCLState (Ur (Maybe (DecideLevel, Clause, Lit)))
+  S.State CDCLState (Ur (Maybe (DecideLevel, Maybe Clause, Lit)))
 findUIP1 !lit !curCls
   | Set.null curCls = S.pure $ Ur Nothing
   | otherwise = S.do
@@ -301,18 +306,19 @@ findUIP1 !lit !curCls
                       S.pure
                         $ Ur
                         $ Just
-                        $ mkLearntClause (lvl - 1) lit curCls
+                          (lvl - 1, Nothing, lit)
 
-mkLearntClause :: DecideLevel -> Lit -> Set Lit -> (DecideLevel, Clause, Lit)
+mkLearntClause :: DecideLevel -> Lit -> Set Lit -> (DecideLevel, Maybe Clause, Lit)
 mkLearntClause decLvl l' curCls =
   let cls' = U.cons l' $ L.fold L.vector $ Set.delete l' curCls
    in ( decLvl
-      , Clause
-          { watched2 = if U.length cls' > 1 then 1 else -1
-          , watched1 = 0
-          , satisfiedAt = decLvl
-          , lits = cls'
-          }
+      , Just
+          Clause
+            { watched2 = if U.length cls' > 1 then 1 else -1
+            , watched1 = 0
+            , satisfiedAt = decLvl
+            , lits = cls'
+            }
       , l'
       )
 
