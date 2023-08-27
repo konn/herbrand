@@ -15,11 +15,13 @@ import Control.Functor.Linear qualified as PL
 import Debug.Trace.Linear qualified as NDTL
 import GHC.Stack
 import Prelude.Linear qualified as PL
+import Unsafe.Linear qualified as Unsafe
 import Prelude
 import Prelude qualified as P
 
 traceStackM :: (HasCallStack, PL.Applicative m) => String %1 -> m ()
-traceStackM msg = traceStack msg (PL.pure ())
+traceStackM = withFrozenCallStack $ Unsafe.toLinear \msg ->
+  traceStack msg (PL.pure ())
 
 traceStack :: (HasCallStack) => String %1 -> a %1 -> a
 traceStack msg =
