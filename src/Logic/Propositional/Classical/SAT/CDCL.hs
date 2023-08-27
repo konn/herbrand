@@ -723,16 +723,18 @@ evalLit l = S.do
     Indefinite -> Ur Nothing
 
 evalClause :: (HasCallStack) => Clause -> S.State Valuation (Ur (Maybe Bool))
-evalClause Clause {..} =
-  runUrT
-    $ getAp
-    $ foldMapByOf
-      vectorTraverse
-      ( liftA2 \case
-          Just True -> P.const $ Just True
-          Just False -> P.id
-          Nothing -> P.id
-      )
-      (pure Nothing)
-      (Ap . UrT . evalLit)
-      lits
+evalClause Clause {..}
+  | satisfiedAt >= 0 = S.pure $ Ur $ Just True
+  | otherwise =
+      runUrT
+        $ getAp
+        $ foldMapByOf
+          vectorTraverse
+          ( liftA2 \case
+              Just True -> P.const $ Just True
+              Just False -> P.id
+              Nothing -> P.id
+          )
+          (pure Nothing)
+          (Ap . UrT . evalLit)
+          lits
