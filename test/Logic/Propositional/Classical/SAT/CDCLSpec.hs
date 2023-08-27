@@ -1,11 +1,14 @@
+{-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedLabels #-}
+{-# LANGUAGE OverloadedLists #-}
 {-# LANGUAGE TypeApplications #-}
 
 module Logic.Propositional.Classical.SAT.CDCLSpec (test_solve, test_solveVarId) where
 
 import qualified Control.Foldl as L
 import Control.Lens (folded, maximumOf)
+import Control.Lens.Extras (is)
 import qualified Control.Lens.Getter as Lens
 import Data.Generics.Labels ()
 import qualified Data.Set as Set
@@ -20,6 +23,7 @@ import qualified Test.Falsify.Predicate as P
 import Test.Falsify.Range (withOrigin)
 import Test.Tasty
 import Test.Tasty.Falsify
+import Test.Tasty.HUnit (assertBool, testCase, (@?=))
 
 test_solve :: TestTree
 test_solve =
@@ -72,35 +76,93 @@ test_solveVarId =
     "solveVarId"
     [ testGroup
         "solveVarId (CNF input)"
-        [ testProperty "Gives a correct decision" $ do
-            cnf <- gen $ fmap toEnum <$> cnfGen 10 10 ((0, 10) `withOrigin` 5)
-            collectCNF cnf
-            let ans = solveVarId cnf
-            case classifyFormula $ toFormula @Full cnf of
-              Inconsistent ->
-                assert
-                  $ P.eq
-                  .$ ("expected", Unsat)
-                  .$ ("answer", ans)
-              _ ->
-                assert
-                  $ P.satisfies
-                    ("Satisfiable", \case Satisfiable {} -> True; _ -> False)
-                  .$ ("answer", ans)
-        , testProperty "Gives a correct model" $ do
-            cnf <- gen $ fmap toEnum <$> cnfGen 10 10 ((0, 10) `withOrigin` 5)
-            collectCNF cnf
+        [ testGroup
+            "Gives a correct decision"
+            [ testProperty "Random" $ do
+                cnf <- gen $ fmap toEnum <$> cnfGen 10 10 ((0, 10) `withOrigin` 5)
+                collectCNF cnf
+                let ans = solveVarId cnf
+                case classifyFormula $ toFormula @Full cnf of
+                  Inconsistent ->
+                    assert
+                      $ P.eq
+                      .$ ("expected", Unsat)
+                      .$ ("answer", ans)
+                  _ ->
+                    assert
+                      $ P.satisfies
+                        ("Satisfiable", \case Satisfiable {} -> True; _ -> False)
+                      .$ ("answer", ans)
+            , testGroup
+                "regressions"
+                [ testCase (show cnf) do
+                  let ans = solveVarId cnf
+                  case classifyFormula $ toFormula @Full cnf of
+                    Inconsistent -> ans @?= Unsat
+                    _ ->
+                      assertBool ("Satisfiable expected, but got: " <> show ans)
+                        $ is #_Satisfiable ans
+                | cnf <- regressionCNFs
+                ]
+            ]
+        , testGroup
+            "Gives a correct model"
+            [ testProperty "Random" $ do
+                cnf <- gen $ fmap toEnum <$> cnfGen 10 10 ((0, 10) `withOrigin` 5)
+                collectCNF cnf
 
-            case solveVarId cnf of
-              Unsat -> discard
-              Satisfiable m -> do
-                info $ "Given model: " <> show m
-                assert
-                  $ P.eq
-                  .$ ("expected", Just True)
-                  .$ ("answer", eval m $ toFormula @Full cnf)
+                case solveVarId cnf of
+                  Unsat -> discard
+                  Satisfiable m -> do
+                    info $ "Given model: " <> show m
+                    assert
+                      $ P.eq
+                      .$ ("expected", Just True)
+                      .$ ("answer", eval m $ toFormula @Full cnf)
+            , testGroup
+                "regressions"
+                [ testCase (show cnf) do
+                  case solveVarId cnf of
+                    Unsat -> pure ()
+                    Satisfiable m -> do
+                      eval m (toFormula @Full cnf) @?= Just True
+                | cnf <- regressionCNFs
+                ]
+            ]
         ]
     ]
+
+regressionCNFs :: [CNF VarId]
+regressionCNFs =
+  [ CNF [CNFClause [Positive 1, Negative 0, Positive 1, Positive 1, Positive 1]]
+  , CNF
+      [ [Positive 1, Negative 0, Positive 1, Positive 1, Positive 1]
+      , [Positive 0, Positive 0, Positive 0, Positive 0, Positive 1]
+      ]
+  , CNF
+      [ [Positive 13]
+      , [Positive 1]
+      , [Negative 3, Positive 1]
+      , [Negative 3, Positive 0]
+      , [Positive 3, Negative 1, Negative 0]
+      , [Negative 5, Negative 1, Positive 3]
+      , [Positive 5, Positive 1]
+      , [Positive 5, Negative 3]
+      , [Negative 7, Negative 1, Positive 0]
+      , [Positive 7, Positive 1]
+      , [Positive 7, Negative 0]
+      , [Negative 9, Negative 1, Positive 7]
+      , [Positive 9, Positive 1]
+      , [Positive 9, Negative 7]
+      , [Negative 11, Positive 5]
+      , [Negative 11, Positive 9]
+      , [Positive 11, Negative 5, Negative 9]
+      , [Negative 13, Positive 1]
+      , [Negative 13, Negative 11]
+      , [Positive 13, Negative 1, Positive 11]
+      ]
+  , CNF [[Negative 5], [Positive 1], [Negative 3, Positive 1], [Negative 3, Positive 0], [Positive 3, Negative 1, Negative 0], [Negative 5, Negative 3], [Negative 5, Negative 1], [Positive 5, Positive 3, Positive 1]]
+  ]
 
 collectCNF :: (Ord v) => CNF v -> Property ()
 collectCNF cnf@(CNF cls) = do

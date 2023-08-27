@@ -31,6 +31,7 @@ library
       Data.Set.Mutable.Linear.Extra
       Data.Unrestricted.Linear.Orphans
       Data.Vector.Mutable.Linear.Helpers
+      Debug.Trace.Lienar.Extra
       Logic.Propositional.Classical.SAT.BruteForce
       Logic.Propositional.Classical.SAT.CDCL
       Logic.Propositional.Classical.SAT.DPLL
