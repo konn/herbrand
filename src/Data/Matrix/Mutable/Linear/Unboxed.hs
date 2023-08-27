@@ -17,11 +17,14 @@ module Data.Matrix.Mutable.Linear.Unboxed (
   pushRow,
   getRow,
   unsafeGetRow,
+  getEntry,
+  unsafeGetEntry,
   popRow,
   dropRowsEnd,
   shrinkToFit,
 ) where
 
+import qualified Control.Functor.Linear as C
 import Data.Alloc.Linearly.Token (Linearly, besides)
 import qualified Data.Array.Polarized as PV
 import qualified Data.Array.Polarized.Pull.Extra as Pull
@@ -124,6 +127,32 @@ getRow i mat =
     (0 <= i && i < n) & \case
       True -> unsafeGetRow i mat
       False -> error ("getRow: row index out of bound: " <> show (i, n)) mat
+
+unsafeGetEntry :: (U.Unbox a) => Int -> Int -> Matrix a %1 -> (Ur a, Matrix a)
+{-# INLINE unsafeGetEntry #-}
+unsafeGetEntry i j (Matrix offs ents) =
+  LUV.unsafeGet i offs & \(Ur start, offs) ->
+    C.fmap (Matrix offs) (LUV.unsafeGet (start + j) ents)
+
+getEntry :: (HasCallStack, U.Unbox a) => Int -> Int -> Matrix a %1 -> (Ur a, Matrix a)
+{-# INLINE getEntry #-}
+getEntry i j mat =
+  numRows mat & \(Ur rowCount, Matrix offs ents) ->
+    i >= rowCount & \case
+      True ->
+        offs
+          `lseq` ents
+          `lseq` error ("getEntry: row index out of bound: " <> show (i, rowCount))
+      False ->
+        LUV.unsafeGet i offs & \(Ur off, offs) ->
+          LUV.unsafeGet (i + 1) offs & \(Ur end, offs) ->
+            let len = end - off
+             in j >= len & \case
+                  True ->
+                    offs
+                      `lseq` ents
+                      `lseq` error ("getEntry: column index out of bound: " <> show (j, len))
+                  False -> unsafeGetEntry i j (Matrix offs ents)
 
 -- | shrinkToFit
 shrinkToFit :: (U.Unbox a) => Matrix a %1 -> Matrix a
