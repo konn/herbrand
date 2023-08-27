@@ -34,6 +34,8 @@ library
       Debug.Trace.Lienar.Extra
       Logic.Propositional.Classical.SAT.BruteForce
       Logic.Propositional.Classical.SAT.CDCL
+      Logic.Propositional.Classical.SAT.CDCL.Old
+      Logic.Propositional.Classical.SAT.CDCL.Old.Types
       Logic.Propositional.Classical.SAT.DPLL
       Logic.Propositional.Classical.SAT.Format.DIMACS
       Logic.Propositional.Classical.SAT.Tableaux
