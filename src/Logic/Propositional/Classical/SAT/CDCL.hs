@@ -408,6 +408,17 @@ toSatResult (Ok, CDCLState numOrig steps clauses watches vals vids) =
 toClauseId :: Int -> ClauseId
 toClauseId = fromIntegral
 
+newtype Early c m a = Early {runEarly :: m (Maybe c)}
+  deriving (Functor)
+
+yield :: (Applicative m) => c -> Early c m a
+yield c = Early $ pure $ Just c
+
+instance (Applicative m) => Applicative (Early c m) where
+  pure = P.const $ Early $ pure Nothing
+  Early mf <*> Early mx = Early do
+    P.maybe P.id (P.const . P.Just) <$> mf <*> mx
+
 propagateUnit :: (HasCallStack) => Maybe (Lit, ClauseId) -> S.State CDCLState (Ur PropResult)
 propagateUnit ml = S.do
   go (P.maybe Seq.empty Seq.singleton ml)
@@ -454,7 +465,7 @@ propagateUnit ml = S.do
           $ fmap (P.either Just (P.const Nothing))
           $ runExceptT
           $ getAp
-          $ Foldable.foldMap'
+          $ Foldable.foldMap
             ( \ !i -> Ap $ do
                 c <- MT.lift $ UrT $ S.uses clausesL $ LV.get $ unClauseId i
                 resl <- MT.lift $ UrT $ S.zoom valuationL (findUnit c)
