@@ -245,10 +245,9 @@ backjump confCls lit = S.do
         Nothing -> S.pure $ Ur confCls
 
       valuationL S.%= LUA.mapSame \v ->
-        PL.move v & \(Ur v) ->
-          if isAssignedAfter decLvl v
-            then Indefinite
-            else v
+        if isAssignedAfter decLvl v
+          then Indefinite
+          else v
 
       C.void $ assertLit reason truth
       solverLoop $ Just (truth, reason)
