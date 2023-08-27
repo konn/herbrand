@@ -666,10 +666,6 @@ introduced :: Variable -> Pair DecideLevel Step
 introduced Indefinite = -1 :!: -1
 introduced Definite {..} = decideLevel :!: decisionStep
 
-getWatchedLit :: WatchVar -> Clause -> Lit
-getWatchedLit W1 Clause {..} = (U.!) lits watched1
-getWatchedLit W2 Clause {..} = (U.!) lits watched2
-
 fromNextSlot :: NextSlot %1 -> UnitResult
 fromNextSlot (NextSlot True w old new lid) = Satisfied $ Just $ (w :!: old) :!: (new :!: lid)
 fromNextSlot (NextSlot False w old new lid) = WatchChangedFromTo w old new lid
@@ -684,11 +680,11 @@ data NextSlot = NextSlot
 
 findNextAvailable :: WatchVar -> ClauseId -> S.State CDCLState (Maybe NextSlot)
 findNextAvailable w cid = S.do
-  Ur c@Clause {..} <- getClause cid
-  let lit = getWatchedLit w c
-      origVar = litVar lit
+  Ur wlits <- S.zoom clausesL $ getWatchedLits cid
+  let origVar = litVar $ watchLitOf w wlits
+  Ur lits <- getClauseLits cid
   Ur cands <- runUrT $ P.flip U.imapMaybeM lits \i l -> liftUrT S.do
-    if i == watched1 || i == watched2
+    if l `elemWatchLit` wlits
       then S.pure Nothing
       else
         S.zoom valuationL (evalLit l) C.<&> \case
@@ -706,12 +702,10 @@ findNextAvailable w cid = S.do
           cands
   case mSat of
     Just i ->
-      let v' = litVar $ (U.!) lits i
-       in S.pure $ Just $ NextSlot True w origVar v' i
+      S.pure $ Just $ NextSlot True w origVar (litVar $ U.unsafeIndex lits i) i
     Nothing -> case mUndet of
       Just i ->
-        let v' = litVar $ (U.!) lits i
-         in S.pure $ Just $ NextSlot False w origVar v' i
+        S.pure $ Just $ NextSlot False w origVar (litVar $ U.unsafeIndex lits i) i
       Nothing -> S.pure Nothing
 
 evalLit :: Lit -> S.State Valuation (Maybe Bool)

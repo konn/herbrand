@@ -28,7 +28,6 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   WatchMap,
   stepsL,
   pushClause,
-  getClause,
   getClauseLits,
   getNumClauses,
   setWatchVar,
@@ -76,6 +75,9 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   getWatchedLits,
   getLit1,
   getLit2,
+  getClauseLitAt,
+  elemWatchLit,
+  watchLitOf,
 ) where
 
 import Control.DeepSeq (NFData)
@@ -390,15 +392,6 @@ pushClause = \Clause {..} ->
       & \bs ->
         LUM.pushRow lits litss & \litss -> Clauses litss bs
 
-getClause :: ClauseId -> S.State CDCLState (Ur Clause)
-{-# INLINE getClause #-}
-getClause i = S.uses clausesL \(Clauses litss bs) ->
-  LUV.unsafeGet (unClauseId i) bs & \(Ur ClauseBody {..}, bs) ->
-    LUM.unsafeGetRow (unClauseId i) litss & \(Ur lits, litss) ->
-      ( Ur (Clause {lits, satisfiedAt = satAt, watched1 = wat1, watched2 = wat2})
-      , Clauses litss bs
-      )
-
 getClauseLits :: ClauseId -> S.State CDCLState (Ur (U.Vector Lit))
 getClauseLits i = S.uses clausesL \(Clauses litss bs) ->
   LUM.unsafeGetRow (unClauseId i) litss & \(lits, litss) ->
@@ -622,7 +615,7 @@ getSatisfiedLevel cid =
 
 data WatchedLits
   = WatchOne {-# UNPACK #-} !Lit
-  | WatchThese {-# UNPACK #-} !Lit !Lit
+  | WatchThese {-# UNPACK #-} !Lit {-# UNPACK #-} !Lit
   deriving (Show, Eq, Ord, Generic)
 
 deriveGeneric ''WatchedLits
@@ -651,3 +644,16 @@ getLit1 (WatchThese l _) = l
 getLit2 :: WatchedLits -> Maybe Lit
 getLit2 WatchOne {} = Nothing
 getLit2 (WatchThese _ l) = Just l
+
+watchLitOf :: WatchVar -> WatchedLits -> Lit
+watchLitOf W1 = getLit1
+watchLitOf W2 = fromMaybe (error "watchLitOf: no lit2") . getLit2
+
+getClauseLitAt :: ClauseId -> Index -> S.State Clauses (Ur Lit)
+getClauseLitAt cid j = S.state \(Clauses ls bs) ->
+  LUM.unsafeGetEntry (unClauseId cid) j ls & \(Ur l1, ls) ->
+    (Ur l1, Clauses ls bs)
+
+elemWatchLit :: Lit -> WatchedLits -> Bool
+elemWatchLit l (WatchOne l1) = l == l1
+elemWatchLit l (WatchThese l1 l2) = l == l1 || l == l2
