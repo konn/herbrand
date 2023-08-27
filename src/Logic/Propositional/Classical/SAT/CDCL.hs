@@ -406,11 +406,29 @@ toSatResult (Ok, CDCLState numOrig steps clauses watches vals vids) =
 toClauseId :: Int -> ClauseId
 toClauseId = fromIntegral
 
-newtype Early c m a = Early {runEarly :: m (St.Maybe c)}
+newtype Early a = Early {runEarly :: UrT (S.State CDCLState) (St.Maybe (Either (ClauseId, Lit) (Lit, ClauseId)))}
   deriving (Functor)
 
-instance (Monad m) => Applicative (Early c m) where
+instance Applicative Early where
   pure = P.const $ Early $ pure St.Nothing
+  liftA2 _ (Early mf) (Early mx) = Early do
+    f <- mf
+    case f of
+      St.Nothing -> mx
+      St.Just x -> pure $ St.Just x
+
+  Early mf <* Early mx = Early do
+    f <- mf
+    case f of
+      St.Nothing -> mx
+      St.Just x -> pure $ St.Just x
+
+  Early mf *> Early mx = Early do
+    f <- mf
+    case f of
+      St.Nothing -> mx
+      St.Just x -> pure $ St.Just x
+
   Early mf <*> Early mx = Early do
     f <- mf
     case f of
