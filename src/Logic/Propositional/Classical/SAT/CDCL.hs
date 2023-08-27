@@ -50,7 +50,6 @@ import Data.HashSet qualified as HS
 import Data.Hashable
 import Data.IntSet qualified as IS
 import Data.Maybe qualified as P
-import Data.Monoid (Ap (..))
 import Data.Semigroup (Arg (..), Max (..))
 import Data.Sequence (Seq (..))
 import Data.Sequence qualified as Seq
