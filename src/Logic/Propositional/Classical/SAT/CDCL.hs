@@ -36,6 +36,7 @@ import Control.Lens qualified as Lens
 import Control.Lens.Extras qualified as Lens
 import Control.Monad (guard)
 import Control.Monad.Trans.Class qualified as MT
+import Control.Monad.Trans.Except (runExceptT, throwE)
 import Control.Monad.Trans.Maybe (MaybeT (..), runMaybeT)
 import Control.Optics.Linear qualified as LinOpt
 import Data.Alloc.Linearly.Token (besides, linearly)
@@ -50,6 +51,7 @@ import Data.HashSet qualified as HS
 import Data.Hashable
 import Data.IntSet qualified as IS
 import Data.Maybe qualified as P
+import Data.Monoid (Ap (..))
 import Data.Semigroup (Arg (..), Max (..))
 import Data.Sequence (Seq (..))
 import Data.Sequence qualified as Seq
@@ -448,26 +450,26 @@ propagateUnit ml = S.do
       -- FIXME: Use heuristics for variable selection.
       Ur cands <- S.uses unsatisfiedsL $ BiL.first LSet.toList PL.. dup2
       Ur mresl <-
-        fix
-          ( \continue -> \case
-              [] -> S.pure $ Ur Nothing
-              (i : is) -> S.do
-                Ur c <- S.uses clausesL $ LV.get $ unClauseId i
-                Ur resl <- S.zoom valuationL (findUnit c)
+        runUrT
+          $ fmap (P.either Just (P.const Nothing))
+          $ runExceptT
+          $ getAp
+          $ Foldable.foldMap'
+            ( \ !i -> Ap $ do
+                c <- MT.lift $ UrT $ S.uses clausesL $ LV.get $ unClauseId i
+                resl <- MT.lift $ UrT $ S.zoom valuationL (findUnit c)
                 case resl of
-                  Nothing -> continue is
+                  Nothing -> pure ()
                   Just (WatchChangedFromTo w old new newIdx) -> S.do
-                    updateWatchLit i w old new newIdx
-                    continue is
+                    MT.lift $ liftUrT $ updateWatchLit i w old new newIdx
                   Just (Satisfied m) -> S.do
-                    setSatisfied m i
-                    continue is
+                    MT.lift $ liftUrT $ setSatisfied m i
                   Just (Conflict ml) -> S.do
-                    S.pure (Ur $ Just (Left (i, ml)))
+                    throwE (Left (i, ml))
                   Just (Unit l) -> S.do
-                    S.pure (Ur $ Just $ Right (l, i))
-          )
-          cands
+                    throwE (Right (l, i))
+            )
+            cands
       case mresl of
         Nothing -> S.pure (Ur NoMorePropagation)
         Just (Left (i, ml)) -> S.pure $ Ur (ConflictFound i ml)
