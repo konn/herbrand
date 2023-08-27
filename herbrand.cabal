@@ -365,6 +365,7 @@ benchmark herbrand-cnf-bench
     , transformers
     , unordered-containers
     , vector
+  buildable: False
   default-language: Haskell2010
 
 benchmark herbrand-sat-bench

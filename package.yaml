@@ -142,6 +142,7 @@ tests:
 
 benchmarks:
   herbrand-cnf-bench:
+    buildable:           false
     main:                cnf.hs
     source-dirs:         bench
     ghc-options:
