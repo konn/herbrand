@@ -105,7 +105,7 @@ popRow mat =
       mlen & \case
         Nothing -> (Ur Nothing, Matrix offs ents)
         Just len ->
-          LUV.slice' (origEnts - len) len ents & \(ents, popped) ->
+          LUV.unsafeSlice' (origEnts - len) len ents & \(ents, popped) ->
             (Ur.lift Just (LUV.freeze popped), Matrix offs ents)
 
 -- |  Retrievies a row copying.
@@ -114,14 +114,14 @@ unsafeGetRow :: (U.Unbox a) => Int -> Matrix a %1 -> (Ur (U.Vector a), Matrix a)
 unsafeGetRow i (Matrix offs ents) =
   LUV.unsafeGet i offs & \(Ur start, offs) ->
     LUV.unsafeGet (i + 1) offs & \(Ur end, offs) ->
-      LUV.slice' start (end - start) ents & \(ents, uvSeed) ->
+      LUV.unsafeSlice' start (end - start) ents & \(ents, uvSeed) ->
         (LUV.freeze uvSeed, Matrix offs ents)
 
 getRow :: (HasCallStack, U.Unbox a) => Int -> Matrix a %1 -> (Ur (U.Vector a), Matrix a)
 {-# INLINE getRow #-}
 getRow i mat =
   numRows mat & \(Ur n, mat) ->
-    i < n & \case
+    (0 <= i && i < n) & \case
       True -> unsafeGetRow i mat
       False -> error ("getRow: row index out of bound: " <> show (i, n)) mat
 
@@ -134,7 +134,7 @@ dropRowsEnd :: (U.Unbox a) => Int -> Matrix a %1 -> Matrix a
 dropRowsEnd n mat =
   numRows mat & \(Ur nrows, Matrix offs ents) ->
     n >= nrows & \case
-      True -> Matrix (LUV.slice 0 0 offs) (LUV.slice 0 0 ents)
+      True -> Matrix (LUV.unsafeSlice 0 0 offs) (LUV.unsafeSlice 0 0 ents)
       False ->
         LUV.unsafeGet n offs & \(Ur k, offs) ->
-          Matrix (LUV.slice 0 n offs) (LUV.slice 0 k ents)
+          Matrix (LUV.unsafeSlice 0 n offs) (LUV.unsafeSlice 0 k ents)

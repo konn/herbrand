@@ -172,7 +172,7 @@ solverLoop = fix $ \go mlit -> S.do
           (i == numIniCls) & \case
             True -> S.pure True
             False -> S.do
-              Ur c <- getClause i
+              Ur c <- getClause $ ClauseId i
               val <- S.zoom valuationL (evalClause c)
               val & \case
                 Just True -> S.do
@@ -207,7 +207,7 @@ solverLoop = fix $ \go mlit -> S.do
 
 backjump :: ClauseId -> Lit -> S.State CDCLState FinalState
 backjump confCls lit = S.do
-  Ur c <- getClause $ unClauseId confCls
+  Ur c <- getClause confCls
   mLearnt <- findUIP1 lit $ L.foldOver (Lens.foldring U.foldr) L.set $ lits c
   case mLearnt of
     Nothing ->
@@ -220,7 +220,7 @@ backjump confCls lit = S.do
             if i == numCls
               then S.pure ()
               else S.do
-                Ur Clause {..} <- getClause i
+                Ur Clause {satisfiedAt} <- getClause $ ClauseId i
                 satisfiedAt > decLvl & \case
                   True -> S.do
                     setSatisfiedLevel (ClauseId i) (-1)
@@ -271,8 +271,8 @@ findUIP1 !lit !curCls
             Definite {..} -> S.do
               Ur cls' <- case antecedent of
                 Just ante ->
-                  Ur.lift (L.foldOver (Lens.foldring U.foldr) L.set . lits)
-                    D.<$> getClause (unClauseId ante)
+                  Ur.lift (L.foldOver (Lens.foldring U.foldr) L.set)
+                    D.<$> getClauseLits ante
                 Nothing -> S.pure $ Ur Set.empty
               let resolved = resolve lit curCls cls'
               if Set.null resolved
@@ -447,7 +447,7 @@ propagateUnit ml = S.do
         loop [] !rest = S.do
           go rest
         loop (!i : !is) !rest = S.do
-          Ur c <- getClause i
+          Ur c <- getClause $ ClauseId i
           resl <- S.zoom valuationL $ propLit l c
           case resl of
             Nothing -> S.do
@@ -474,7 +474,7 @@ propagateUnit ml = S.do
           $ runEarly
           $ Foldable.traverse_
             ( \ !i -> Early do
-                c <- UrT $ getClause $ unClauseId i
+                c <- UrT $ getClause i
                 resl <- liftUrT $ S.zoom valuationL (findUnit c)
                 case resl of
                   Nothing -> pure St.Nothing

@@ -29,6 +29,7 @@ library
       Control.Functor.Linear.State.Extra
       Data.HashMap.Mutable.Linear.Extra
       Data.Matrix.Mutable.Linear.Unboxed
+      Data.Monoid.Linear.Orphans
       Data.Set.Mutable.Linear.Extra
       Data.Unrestricted.Linear.Orphans
       Data.Vector.Mutable.Linear.Helpers

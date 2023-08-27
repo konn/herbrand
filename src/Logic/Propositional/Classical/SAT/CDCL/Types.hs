@@ -29,10 +29,10 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   stepsL,
   pushClause,
   getClause,
+  getClauseLits,
   getNumClauses,
   setWatchVar,
   setSatisfiedLevel,
-  clausesL,
   watchesL,
   valuationL,
   numInitialClausesL,
@@ -70,7 +70,6 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   PropResult (..),
   WatchVar (..),
   watchVarL,
-  numTotalClauses,
 ) where
 
 import Control.DeepSeq (NFData)
@@ -84,23 +83,29 @@ import Data.Alloc.Linearly.Token
 import Data.Alloc.Linearly.Token.Unsafe (HasLinearWitness)
 import Data.Array.Mutable.Linear.Extra qualified as LA
 import Data.Array.Mutable.Linear.Unboxed qualified as LUA
+import Data.Array.Polarized.Push.Extra qualified as Push
 import Data.Bit (Bit (..))
 import Data.Bits (xor, (.&.), (.|.))
 import Data.Coerce (coerce)
+import Data.DList qualified as DL
+import Data.Foldable qualified as F
 import Data.Generics.Labels ()
 import Data.Hashable (Hashable)
 import Data.IntSet (IntSet)
 import Data.IntSet qualified as IS
 import Data.List (mapAccumL)
 import Data.Map.Strict qualified as Map
+import Data.Matrix.Mutable.Linear.Unboxed qualified as LUM
 import Data.Maybe (fromMaybe)
+import Data.Monoid.Linear.Orphans ()
 import Data.Set.Mutable.Linear.Extra qualified as LSet
 import Data.Strict.Tuple (Pair (..))
 import Data.Unrestricted.Linear (Ur (..))
 import Data.Unrestricted.Linear qualified as L
 import Data.Unrestricted.Linear.Orphans ()
 import Data.Vector qualified as V
-import Data.Vector.Mutable.Linear.Extra qualified as LV
+import Data.Vector.Generic qualified as G
+import Data.Vector.Generic.Mutable qualified as MG
 import Data.Vector.Mutable.Linear.Unboxed qualified as LUV
 import Data.Vector.Unboxed qualified as U
 import Data.Vector.Unboxed.Deriving (derivingUnbox)
@@ -257,7 +262,90 @@ type Valuation = LUA.UArray Variable
 
 type WatchMap = LA.Array IntSet
 
-type Clauses = LV.Vector Clause
+data ClauseBody = ClauseBody
+  { satAt :: {-# UNPACK #-} !DecideLevel
+  , wat1, wat2 :: {-# UNPACK #-} !Index
+  }
+  deriving (Show, Eq, Ord, Generic)
+
+data instance U.Vector ClauseBody
+  = V_CB
+      {-# UNPACK #-} !Int
+      {-# UNPACK #-} !(U.Vector Int)
+
+data instance U.MVector s ClauseBody
+  = MV_CB
+      {-# UNPACK #-} !Int
+      {-# UNPACK #-} !(U.MVector s Int)
+
+instance U.Unbox ClauseBody
+
+{- HLINT ignore "Redundant lambda" -}
+instance G.Vector U.Vector ClauseBody where
+  basicUnsafeFreeze (MV_CB i mu) = V_CB i <$> G.basicUnsafeFreeze mu
+  {-# INLINE basicUnsafeFreeze #-}
+  basicUnsafeThaw (V_CB i mu) = MV_CB i <$> G.basicUnsafeThaw mu
+  {-# INLINE basicUnsafeThaw #-}
+  basicLength = \(V_CB l _) -> l
+  {-# INLINE basicLength #-}
+  basicUnsafeSlice off len = \(V_CB _ v) ->
+    V_CB len (G.basicUnsafeSlice (off * 3) (len * 3) v)
+  {-# INLINE basicUnsafeSlice #-}
+  basicUnsafeIndexM = \(V_CB _ v) i -> do
+    satAt <- DecideLevel <$> G.basicUnsafeIndexM v (3 * i)
+    wat1 <- G.basicUnsafeIndexM v (3 * i + 1)
+    wat2 <- G.basicUnsafeIndexM v (3 * i + 2)
+    pure $! ClauseBody {..}
+  {-# INLINE basicUnsafeIndexM #-}
+  basicUnsafeCopy = \(MV_CB _ mv) (V_CB _ v) ->
+    G.basicUnsafeCopy mv v
+  {-# INLINE basicUnsafeCopy #-}
+
+instance MG.MVector U.MVector ClauseBody where
+  basicLength = \(MV_CB l _) -> l
+  {-# INLINE basicLength #-}
+  basicUnsafeSlice off len = \(MV_CB _ v) ->
+    MV_CB len (MG.basicUnsafeSlice (off * 3) (len * 3) v)
+  {-# INLINE basicUnsafeSlice #-}
+  basicOverlaps = \(MV_CB _ l) (MV_CB _ r) -> MG.basicOverlaps l r
+  {-# INLINE basicOverlaps #-}
+  basicUnsafeNew l = MV_CB l <$> MG.unsafeNew (3 * l)
+  {-# INLINE basicUnsafeNew #-}
+  basicInitialize (MV_CB _ l) = MG.basicInitialize l
+  {-# INLINE basicInitialize #-}
+  basicUnsafeRead (MV_CB _ v) i = do
+    satAt <- DecideLevel <$> MG.basicUnsafeRead v (3 * i)
+    wat1 <- MG.basicUnsafeRead v (3 * i + 1)
+    wat2 <- MG.basicUnsafeRead v (3 * i + 2)
+    pure $! ClauseBody {..}
+  {-# INLINE basicUnsafeRead #-}
+  basicUnsafeWrite (MV_CB _ v) i ClauseBody {..} = do
+    MG.basicUnsafeWrite v (3 * i) $ unDecideLevel satAt
+    MG.basicUnsafeWrite v (3 * i + 1) wat1
+    MG.basicUnsafeWrite v (3 * i + 2) wat2
+  {-# INLINE basicUnsafeWrite #-}
+  basicClear (MV_CB _ l) = MG.basicClear l
+  {-# INLINE basicClear #-}
+  basicUnsafeCopy (MV_CB _ dst) (MV_CB _ src) = MG.basicUnsafeCopy dst src
+  {-# INLINE basicUnsafeCopy #-}
+  basicUnsafeMove (MV_CB _ dst) (MV_CB _ src) = MG.basicUnsafeMove dst src
+  {-# INLINE basicUnsafeMove #-}
+  basicUnsafeGrow = \(MV_CB l mv) growth ->
+    MV_CB (l + growth) <$> MG.basicUnsafeGrow mv (3 * growth)
+
+data Clauses where
+  Clauses ::
+    {-# UNPACK #-} !(LUM.Matrix Lit) %1 ->
+    {-# UNPACK #-} !(LUV.Vector ClauseBody) %1 ->
+    Clauses
+
+instance PL.Consumable Clauses where
+  consume (Clauses lits bs) = lits `lseq` bs `lseq` ()
+
+instance PL.Dupable Clauses where
+  dup2 (Clauses lits bs) =
+    PL.dup2 (lits, bs) & \((lits, bs), (lits', bs')) ->
+      (Clauses lits bs, Clauses lits' bs')
 
 data CDCLState where
   CDCLState ::
@@ -276,18 +364,45 @@ data CDCLState where
     CDCLState
   deriving anyclass (HasLinearWitness)
 
+clausesL :: LinLens.Lens' CDCLState Clauses
+{-# INLINE clausesL #-}
+clausesL = LinLens.lens \(CDCLState numOrig ss cs ws vs vids) ->
+  (cs, \cs -> CDCLState numOrig ss cs ws vs vids)
+
 pushClause :: Clause -> S.State CDCLState ()
 {-# INLINE pushClause #-}
 {- HLINT ignore pushClause "Redundant lambda" -}
-pushClause = \x -> clausesL S.%= LV.push x
+pushClause = \Clause {..} ->
+  clausesL S.%= \(Clauses litss bs) ->
+    LUV.push
+      ClauseBody
+        { satAt = satisfiedAt
+        , wat1 = watched1
+        , wat2 = watched2
+        }
+      bs
+      & \bs ->
+        LUM.pushRow lits litss & \litss -> Clauses litss bs
 
-getClause :: Int -> S.State CDCLState (Ur Clause)
+getClause :: ClauseId -> S.State CDCLState (Ur Clause)
 {-# INLINE getClause #-}
-getClause i = S.uses clausesL (LV.unsafeGet i)
+getClause i = S.uses clausesL \(Clauses litss bs) ->
+  LUV.unsafeGet (unClauseId i) bs & \(Ur ClauseBody {..}, bs) ->
+    LUM.unsafeGetRow (unClauseId i) litss & \(Ur lits, litss) ->
+      ( Ur (Clause {lits, satisfiedAt = satAt, watched1 = wat1, watched2 = wat2})
+      , Clauses litss bs
+      )
+
+getClauseLits :: ClauseId -> S.State CDCLState (Ur (U.Vector Lit))
+getClauseLits i = S.uses clausesL \(Clauses litss bs) ->
+  LUM.unsafeGetRow (unClauseId i) litss & \(lits, litss) ->
+    (lits, Clauses litss bs)
 
 getNumClauses :: S.State CDCLState (Ur Int)
 {-# INLINE getNumClauses #-}
-getNumClauses = S.uses clausesL LV.size
+getNumClauses =
+  S.uses clausesL \(Clauses litss bs) ->
+    LUV.size bs & \(sz, bs) -> (sz, Clauses litss bs)
 
 stepsL :: LinLens.Lens' CDCLState (LUV.Vector Step)
 {-# INLINE stepsL #-}
@@ -297,11 +412,6 @@ stepsL = LinLens.lens \(CDCLState numOrig ss cs ws vs vids) ->
 numInitialClausesL :: LinLens.Lens' CDCLState Int
 numInitialClausesL = LinLens.lens \(CDCLState numOrig ss cs ws vs vids) ->
   (numOrig, \numOrig -> CDCLState numOrig ss cs ws vs vids)
-
-clausesL :: LinLens.Lens' CDCLState (LV.Vector Clause)
-{-# INLINE clausesL #-}
-clausesL = LinLens.lens \(CDCLState numOrig ss cs ws vs vids) ->
-  (cs, \cs -> CDCLState numOrig ss cs ws vs vids)
 
 watchesL :: LinLens.Lens' CDCLState WatchMap
 {-# INLINE watchesL #-}
@@ -344,12 +454,27 @@ toCDCLState (CNF cls) lin =
           | contradicting -> lin `lseq` Left (Ur Unsat)
         _ ->
           besides lin (`LUV.fromListL` [0]) PL.& \(steps, lin) ->
-            besides lin (`LV.fromListL` cls'') PL.& \(clauses, lin) ->
+            besides lin (toClauses cls'') PL.& \(clauses, lin) ->
               besides lin (`LA.fromListL` watches0) & \(watcheds, lin) ->
                 besides lin (\lin -> LUA.allocL lin (maybe 0 ((+ 1) . fromEnum) maxVar) Indefinite) PL.& \(vals, lin) ->
                   Right
                     PL.$ CDCLState numOrigCls steps clauses watcheds vals
                     PL.$ LSet.fromListL lin [ClauseId 0 .. ClauseId (numOrigCls - 1)]
+
+toClauses :: [Clause] -> Linearly %1 -> Clauses
+toClauses cs l =
+  PL.dup2 l & \(l, l') ->
+    F.foldMap'
+      ( \Clause {..} ->
+          ( Ur (DL.singleton lits)
+          , Push.singleton ClauseBody {satAt = satisfiedAt, wat1 = watched1, wat2 = watched2}
+          )
+      )
+      cs
+      & \(Ur lits, bs) ->
+        Clauses
+          (LUM.fromRowsL l (DL.toList lits))
+          (LUV.fromVectorL l' (Push.alloc bs))
 
 buildClause ::
   Pair Int (Map.Map Int IntSet) ->
@@ -448,12 +573,6 @@ watchVarL :: WatchVar -> Lens' Clause Index
 watchVarL W1 = #watched1
 watchVarL W2 = #watched2
 
-numTotalClauses :: CDCLState %1 -> (Ur Int, CDCLState)
-{-# INLINE numTotalClauses #-}
-numTotalClauses (CDCLState numOrig steps clauses watches vals vids) =
-  LV.size clauses & \(sz, clauses) ->
-    (sz, CDCLState numOrig steps clauses watches vals vids)
-
 data AssertionResult = Asserted | ContradictingAssertion
   deriving (Show)
 
@@ -474,11 +593,17 @@ deriving via L.Generically AssertionResult instance L.Movable AssertionResult
 setWatchVar :: ClauseId -> WatchVar %1 -> Index %1 -> S.State CDCLState ()
 {-# INLINE setWatchVar #-}
 setWatchVar cid W1 = Unsafe.toLinear \vid ->
-  clausesL S.%= LV.modify_ (#watched1 .~ vid) (unClauseId cid)
+  clausesL S.%= \(Clauses litss bs) ->
+    LUV.modify_ (#wat1 .~ vid) (unClauseId cid) bs & \bs ->
+      Clauses litss bs
 setWatchVar cid W2 = Unsafe.toLinear \vid ->
-  clausesL S.%= LV.modify_ (#watched2 .~ vid) (unClauseId cid)
+  clausesL S.%= \(Clauses litss bs) ->
+    LUV.modify_ (#wat2 .~ vid) (unClauseId cid) bs & \bs ->
+      Clauses litss bs
 
 setSatisfiedLevel :: ClauseId -> DecideLevel -> S.State CDCLState ()
 {-# INLINE setSatisfiedLevel #-}
 setSatisfiedLevel cid lvl =
-  clausesL S.%= LV.modify_ (\c -> c {satisfiedAt = lvl}) (unClauseId cid)
+  clausesL S.%= \(Clauses litss bs) ->
+    LUV.modify_ (#satAt .~ lvl) (unClauseId cid) bs & \bs ->
+      Clauses litss bs
