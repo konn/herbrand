@@ -164,45 +164,49 @@ solverLoop = fix $ \go mlit -> S.do
   -- We only have to traverse the initial segment, as the lerant clauses are always
   -- deducible from the original clauses.
   -- Without this, CDCL solver seems at most x1000 slower than DPLL and even Naïve tableaux...
-  Ur numIniCls <- move C.<$> S.use numInitialClausesL
 
-  mstt <-
-    fix
-      ( \self !i ->
-          (i == numIniCls) & \case
-            True -> S.pure True
-            False -> S.do
-              val <- evalClause $ ClauseId i
-              val & \case
-                Just True -> S.do
-                  unsatisfiedsL S.%= LSet.delete (ClauseId i)
-                  self PL.$! i + 1
-                Just False -> S.pure False
-                Nothing -> S.pure False
-      )
-      0
-  mstt & \case
-    True -> S.do
-      S.pure Ok
-    -- Contracdiction! The last assigned variable must be
-    False -> S.do
-      resl <- propagateUnit mlit
-      case resl of
-        ConflictFound cid l ->
-          move (cid, l) & \(Ur (cid, l)) -> S.do
-            backjump cid l -- Conflict found. Let's Backjump!
-        NoMorePropagation -> S.do
-          -- Decide indefinite variable
-          -- FIXME: Use heuristics for variable selection.
-          Ur mid <- S.uses valuationL (LUA.findIndex (Lens.is #_Indefinite))
-          case mid of
-            Nothing -> S.do
-              S.pure Ok -- No vacant variable - model is full!
-            Just vid -> S.do
-              stepsL S.%= LUV.push 0
-              let decLit = PosL $ toVarId vid
-              C.void $ assertLit (-1) decLit
-              go (Just (decLit, -1))
+  Ur allSat <- Ur.lift (== 0) C.<$> S.uses unsatisfiedsL LSet.size
+  if allSat
+    then S.pure Ok
+    else S.do
+      Ur numIniCls <- move C.<$> S.use numInitialClausesL
+      mstt <-
+        fix
+          ( \self !i ->
+              (i == numIniCls) & \case
+                True -> S.pure True
+                False -> S.do
+                  val <- evalClause $ ClauseId i
+                  val & \case
+                    Just True -> S.do
+                      unsatisfiedsL S.%= LSet.delete (ClauseId i)
+                      self PL.$! i + 1
+                    Just False -> S.pure False
+                    Nothing -> S.pure False
+          )
+          0
+      mstt & \case
+        True -> S.do
+          S.pure Ok
+        -- Contracdiction! The last assigned variable must be
+        False -> S.do
+          resl <- propagateUnit mlit
+          case resl of
+            ConflictFound cid l ->
+              move (cid, l) & \(Ur (cid, l)) -> S.do
+                backjump cid l -- Conflict found. Let's Backjump!
+            NoMorePropagation -> S.do
+              -- Decide indefinite variable
+              -- FIXME: Use heuristics for variable selection.
+              Ur mid <- S.uses valuationL (LUA.findIndex (Lens.is #_Indefinite))
+              case mid of
+                Nothing -> S.do
+                  S.pure Ok -- No vacant variable - model is full!
+                Just vid -> S.do
+                  stepsL S.%= LUV.push 0
+                  let decLit = PosL $ toVarId vid
+                  C.void $ assertLit (-1) decLit
+                  go (Just (decLit, -1))
 
 backjump :: ClauseId -> Lit -> S.State CDCLState FinalState
 backjump confCls lit = S.do
