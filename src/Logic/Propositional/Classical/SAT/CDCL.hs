@@ -676,34 +676,46 @@ data NextSlot = NextSlot
   }
   deriving (Show, P.Eq, P.Ord, GHC.Generic)
 
+satAndUndetL :: WatchedLits -> L.FoldM (UrT (S.State Valuation)) (Int, Lit) (Maybe Int, Maybe Int)
+{-# INLINE satAndUndetL #-}
+satAndUndetL wlits =
+  L.premapM
+    ( \(i, l) ->
+        if l `elemWatchLit` wlits
+          then pure Nothing
+          else
+            UrT
+              $ evalLit l
+              C.<&> \case
+                Nothing -> Ur (Just (i, Unassigned))
+                (Just True) -> Ur $ Just (i, AssignedTrue)
+                (Just False) -> Ur Nothing
+    )
+    $ L.generalize
+    $ L.handles _Just
+    $ (,)
+    <$> (fmap fst <$> L.find ((== AssignedTrue) P.. P.snd))
+    <*> (fmap fst <$> L.find ((== Unassigned) P.. P.snd))
+
 findNextAvailable :: WatchVar -> ClauseId -> S.State CDCLState (Maybe NextSlot)
 findNextAvailable w cid = S.do
   Ur wlits <- S.zoom clausesL $ getWatchedLits cid
   let origVar = litVar $ watchLitOf w wlits
-  Ur lits <- getClauseLits cid
-  Ur cands <- runUrT $ P.flip U.imapMaybeM lits \i l -> liftUrT S.do
-    if l `elemWatchLit` wlits
-      then S.pure Nothing
-      else
-        S.zoom valuationL (evalLit l) C.<&> \case
-          Nothing -> (Just (i, Unassigned))
-          (Just True) -> Just (i, AssignedTrue)
-          (Just False) -> Nothing
 
-  let (mSat, mUndet) =
-        L.foldOver
-          (Lens.foldring U.foldr)
-          ( (,)
-              <$> (fmap fst <$> L.find ((== AssignedTrue) P.. P.snd))
-              <*> (fmap fst <$> L.find ((== Unassigned) P.. P.snd))
-          )
-          cands
+  Ur (mSat, mUndet) <- S.uses clausesAndValsL \(clauses, vals) ->
+    S.runState
+      (S.runStateT (ifoldClauseLitsM (satAndUndetL wlits) cid) clauses)
+      vals
+      & \((ans, clauses), val) -> (ans, (clauses, val))
+
   case mSat of
-    Just i ->
-      S.pure $ Just $ NextSlot True w origVar (litVar $ U.unsafeIndex lits i) i
+    Just i -> S.do
+      Ur l' <- S.zoom clausesL $ getClauseLitAt cid i
+      S.pure $ Just $ NextSlot True w origVar (litVar l') i
     Nothing -> case mUndet of
-      Just i ->
-        S.pure $ Just $ NextSlot False w origVar (litVar $ U.unsafeIndex lits i) i
+      Just i -> S.do
+        Ur l' <- S.zoom clausesL $ getClauseLitAt cid i
+        S.pure $ Just $ NextSlot False w origVar (litVar l') i
       Nothing -> S.pure Nothing
 
 evalLit :: Lit -> S.State Valuation (Maybe Bool)

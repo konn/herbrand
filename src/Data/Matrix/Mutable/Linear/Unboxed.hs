@@ -25,6 +25,8 @@ module Data.Matrix.Mutable.Linear.Unboxed (
   shrinkToFit,
   withRow,
   unsafeWithRow,
+  withRowM,
+  unsafeWithRowM,
   LUV.Slice,
   LUV.getS,
   LUV.unsafeGetS,
@@ -153,6 +155,18 @@ unsafeWithRow i f (Matrix offs ents) =
     LUV.unsafeGet (i + 1) offs & \(Ur end, offs) ->
       Matrix offs C.<$> LUV.withUnsafeSlice start (end - start) f ents
 
+unsafeWithRowM ::
+  (C.Monad m, U.Unbox a) =>
+  Int ->
+  (forall s. LUV.Slice s a %1 -> m (b, LUV.Slice s a)) %1 ->
+  Matrix a %1 ->
+  m (b, Matrix a)
+{-# INLINE unsafeWithRowM #-}
+unsafeWithRowM i f (Matrix offs ents) =
+  LUV.unsafeGet i offs & \(Ur start, offs) ->
+    LUV.unsafeGet (i + 1) offs & \(Ur end, offs) ->
+      C.fmap (Matrix offs) C.<$> LUV.withUnsafeSliceM start (end - start) f ents
+
 withRow ::
   (HasCallStack, U.Unbox a) =>
   Int ->
@@ -164,6 +178,19 @@ withRow i f mat =
   numRows mat & \(Ur n, mat) ->
     (0 <= i && i < n) & \case
       True -> unsafeWithRow i f mat
+      False -> error ("withRow: row index out of bound: " <> show (i, n)) f mat
+
+withRowM ::
+  (HasCallStack, C.Monad m, U.Unbox a) =>
+  Int ->
+  (forall s. LUV.Slice s a %1 -> m (b, LUV.Slice s a)) %1 ->
+  Matrix a %1 ->
+  m (b, Matrix a)
+{-# INLINE withRowM #-}
+withRowM i f mat =
+  numRows mat & \(Ur n, mat) ->
+    (0 <= i && i < n) & \case
+      True -> unsafeWithRowM i f mat
       False -> error ("withRow: row index out of bound: " <> show (i, n)) f mat
 
 unsafeGetEntry :: (U.Unbox a) => Int -> Int -> Matrix a %1 -> (Ur a, Matrix a)

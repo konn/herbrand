@@ -40,6 +40,8 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   valuationL,
   numInitialClausesL,
   unsatisfiedsL,
+  clausesAndValsL,
+  ifoldClauseLitsM,
   clausesValsAndUnsatsL,
   Index,
 
@@ -85,6 +87,7 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
 import Control.DeepSeq (NFData)
 import Control.Foldl qualified as Foldl
 import Control.Foldl qualified as L
+import Control.Functor.Linear qualified as C
 import Control.Functor.Linear.State.Extra qualified as S
 import Control.Lens (Lens', Prism', lens, prism', (.~))
 import Control.Monad (guard)
@@ -110,7 +113,7 @@ import Data.Maybe (fromMaybe)
 import Data.Monoid.Linear.Orphans ()
 import Data.Set.Mutable.Linear.Extra qualified as LSet
 import Data.Strict.Tuple (Pair (..))
-import Data.Unrestricted.Linear (Ur (..))
+import Data.Unrestricted.Linear (Ur (..), UrT)
 import Data.Unrestricted.Linear qualified as L
 import Data.Unrestricted.Linear.Orphans ()
 import Data.Vector qualified as V
@@ -412,11 +415,20 @@ foldClauseLits :: L.Fold Lit b -> ClauseId -> S.State Clauses (Ur b)
 {-# INLINE foldClauseLits #-}
 foldClauseLits f cid = withClauseLits cid (L.purely LUV.foldS' f)
 
+ifoldClauseLitsM :: (C.Monad m) => L.FoldM (UrT m) (Int, Lit) b -> ClauseId -> S.StateT Clauses m (Ur b)
+{-# INLINE ifoldClauseLitsM #-}
+ifoldClauseLitsM f cid = S.StateT \(Clauses litss bs) ->
+  C.fmap (`Clauses` bs)
+    C.<$> LUM.unsafeWithRowM
+      (unClauseId cid)
+      (L.impurely LUV.ifoldSML' f)
+      litss
+
 getNumClauses :: S.State CDCLState (Ur Int)
 {-# INLINE getNumClauses #-}
 getNumClauses =
   S.uses clausesL \(Clauses litss bs) ->
-    LUV.size bs & \(sz, bs) -> (sz, Clauses litss bs)
+    Clauses litss C.<$> LUV.size bs
 
 stepsL :: LinLens.Lens' CDCLState (LUV.Vector Step)
 {-# INLINE stepsL #-}
@@ -445,6 +457,10 @@ unsatisfiedsL = LinLens.lens \(CDCLState norig ss cs ws vs vids) ->
 clausesValsAndUnsatsL :: LinLens.Lens' CDCLState (Clauses, Valuation, LSet.Set ClauseId)
 clausesValsAndUnsatsL = LinLens.lens \(CDCLState norig ss cs ws vs vids) ->
   ((cs, vs, vids), \(cs, vs, vids) -> CDCLState norig ss cs ws vs vids)
+
+clausesAndValsL :: LinLens.Lens' CDCLState (Clauses, Valuation)
+clausesAndValsL = LinLens.lens \(CDCLState norig ss cs ws vs vids) ->
+  ((cs, vs), \(cs, vs) -> CDCLState norig ss cs ws vs vids)
 
 toCDCLState :: CNF VarId -> Linearly %1 -> Either (Ur (SatResult ())) CDCLState
 toCDCLState (CNF cls) lin =
