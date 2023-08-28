@@ -702,11 +702,7 @@ findNextAvailable w cid = S.do
   Ur wlits <- S.zoom clausesL $ getWatchedLits cid
   let origVar = litVar $ watchLitOf w wlits
 
-  Ur (mSat, mUndet) <- S.uses clausesAndValsL \(clauses, vals) ->
-    S.runState
-      (S.runStateT (ifoldClauseLitsM (satAndUndetL wlits) cid) clauses)
-      vals
-      & \((ans, clauses), val) -> (ans, (clauses, val))
+  Ur (mSat, mUndet) <- runClausesValsM $ ifoldClauseLitsM (satAndUndetL wlits) cid
 
   case mSat of
     Just i -> S.do

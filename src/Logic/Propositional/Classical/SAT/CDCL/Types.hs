@@ -39,6 +39,7 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   clausesL,
   valuationL,
   numInitialClausesL,
+  runClausesValsM,
   unsatisfiedsL,
   clausesAndValsL,
   ifoldClauseLitsM,
@@ -424,6 +425,15 @@ ifoldClauseLitsM f cid = S.StateT \(Clauses litss bs) ->
       (L.impurely LUV.ifoldSML' f)
       litss
 
+runClausesValsM :: S.StateT Clauses (S.State Valuation) a %1 -> S.State CDCLState a
+{-# INLINE runClausesValsM #-}
+{- HLINT ignore runClausesValsM "Redundant lambda" -}
+runClausesValsM = \act -> S.uses clausesAndValsL \(clauses, vals) ->
+  S.runState
+    (S.runStateT act clauses)
+    vals
+    & \((ans, clauses), val) -> (ans, (clauses, val))
+
 getNumClauses :: S.State CDCLState (Ur Int)
 {-# INLINE getNumClauses #-}
 getNumClauses =
@@ -455,10 +465,12 @@ unsatisfiedsL = LinLens.lens \(CDCLState norig ss cs ws vs vids) ->
   (vids, CDCLState norig ss cs ws vs)
 
 clausesValsAndUnsatsL :: LinLens.Lens' CDCLState (Clauses, Valuation, LSet.Set ClauseId)
+{-# INLINE clausesValsAndUnsatsL #-}
 clausesValsAndUnsatsL = LinLens.lens \(CDCLState norig ss cs ws vs vids) ->
   ((cs, vs, vids), \(cs, vs, vids) -> CDCLState norig ss cs ws vs vids)
 
 clausesAndValsL :: LinLens.Lens' CDCLState (Clauses, Valuation)
+{-# INLINE clausesAndValsL #-}
 clausesAndValsL = LinLens.lens \(CDCLState norig ss cs ws vs vids) ->
   ((cs, vs), \(cs, vs) -> CDCLState norig ss cs ws vs vids)
 
