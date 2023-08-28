@@ -206,8 +206,8 @@ solverLoop = fix $ \go mlit -> S.do
 
 backjump :: ClauseId -> Lit -> S.State CDCLState FinalState
 backjump confCls lit = S.do
-  Ur confLits <- getClauseLits confCls
-  mLearnt <- findUIP1 lit $ L.foldOver (Lens.foldring U.foldr) L.set confLits
+  Ur confLits <- S.zoom clausesL $ foldClauseLits L.set confCls
+  mLearnt <- findUIP1 lit confLits
   case mLearnt of
     Nothing ->
       -- No valid backjumping destination found. Unsat.
@@ -269,9 +269,7 @@ findUIP1 !lit !curCls
             Indefinite -> error $ "Literal " P.<> show lit P.<> " was chosen as resolver, but indefinite!"
             Definite {..} -> S.do
               Ur cls' <- case antecedent of
-                Just ante ->
-                  Ur.lift (L.foldOver (Lens.foldring U.foldr) L.set)
-                    D.<$> getClauseLits ante
+                Just ante -> S.zoom clausesL $ foldClauseLits L.set ante
                 Nothing -> S.pure $ Ur Set.empty
               let resolved = resolve lit curCls cls'
               if Set.null resolved

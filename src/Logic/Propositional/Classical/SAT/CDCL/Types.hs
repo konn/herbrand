@@ -33,6 +33,8 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   setWatchVar,
   setSatisfiedLevel,
   getSatisfiedLevel,
+  withClauseLits,
+  foldClauseLits,
   watchesL,
   clausesL,
   valuationL,
@@ -396,6 +398,19 @@ getClauseLits :: ClauseId -> S.State CDCLState (Ur (U.Vector Lit))
 getClauseLits i = S.uses clausesL \(Clauses litss bs) ->
   LUM.unsafeGetRow (unClauseId i) litss & \(lits, litss) ->
     (lits, Clauses litss bs)
+
+withClauseLits ::
+  ClauseId ->
+  (forall s. LUM.Slice s Lit %1 -> (b, LUM.Slice s Lit)) %1 ->
+  S.State Clauses b
+{-# INLINE withClauseLits #-}
+withClauseLits cid f = S.state \(Clauses litss bs) ->
+  LUM.unsafeWithRow (unClauseId cid) f litss & \(b, litss) ->
+    (b, Clauses litss bs)
+
+foldClauseLits :: L.Fold Lit b -> ClauseId -> S.State Clauses (Ur b)
+{-# INLINE foldClauseLits #-}
+foldClauseLits f cid = withClauseLits cid (L.purely LUV.foldS' f)
 
 getNumClauses :: S.State CDCLState (Ur Int)
 {-# INLINE getNumClauses #-}

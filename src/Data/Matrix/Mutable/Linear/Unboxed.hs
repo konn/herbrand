@@ -2,6 +2,7 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE LinearTypes #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
@@ -22,6 +23,18 @@ module Data.Matrix.Mutable.Linear.Unboxed (
   popRow,
   dropRowsEnd,
   shrinkToFit,
+  withRow,
+  unsafeWithRow,
+  LUV.Slice,
+  LUV.getS,
+  LUV.unsafeGetS,
+  LUV.cloneS,
+  LUV.sizeS,
+  LUV.foldlSL',
+  LUV.foldMapS',
+  LUV.foldMapSL',
+  LUV.foldS',
+  LUV.foldSML',
 ) where
 
 import qualified Control.Functor.Linear as C
@@ -127,6 +140,31 @@ getRow i mat =
     (0 <= i && i < n) & \case
       True -> unsafeGetRow i mat
       False -> error ("getRow: row index out of bound: " <> show (i, n)) mat
+
+unsafeWithRow ::
+  (U.Unbox a) =>
+  Int ->
+  (forall s. LUV.Slice s a %1 -> (b, LUV.Slice s a)) %1 ->
+  Matrix a %1 ->
+  (b, Matrix a)
+{-# INLINE unsafeWithRow #-}
+unsafeWithRow i f (Matrix offs ents) =
+  LUV.unsafeGet i offs & \(Ur start, offs) ->
+    LUV.unsafeGet (i + 1) offs & \(Ur end, offs) ->
+      Matrix offs C.<$> LUV.withUnsafeSlice start (end - start) f ents
+
+withRow ::
+  (HasCallStack, U.Unbox a) =>
+  Int ->
+  (forall s. LUV.Slice s a %1 -> (b, LUV.Slice s a)) %1 ->
+  Matrix a %1 ->
+  (b, Matrix a)
+{-# INLINE withRow #-}
+withRow i f mat =
+  numRows mat & \(Ur n, mat) ->
+    (0 <= i && i < n) & \case
+      True -> unsafeWithRow i f mat
+      False -> error ("withRow: row index out of bound: " <> show (i, n)) f mat
 
 unsafeGetEntry :: (U.Unbox a) => Int -> Int -> Matrix a %1 -> (Ur a, Matrix a)
 {-# INLINE unsafeGetEntry #-}
