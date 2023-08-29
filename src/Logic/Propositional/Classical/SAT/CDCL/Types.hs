@@ -28,13 +28,13 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   WatchMap,
   stepsL,
   pushClause,
-  getClauseLits,
   getNumClauses,
   setWatchVar,
   setSatisfiedLevel,
   getSatisfiedLevel,
   withClauseLits,
   foldClauseLits,
+  foldSliceMAside,
   watchesL,
   clausesL,
   valuationL,
@@ -103,6 +103,7 @@ import Data.Bits (xor, (.&.), (.|.))
 import Data.Coerce (coerce)
 import Data.DList qualified as DL
 import Data.Foldable qualified as F
+import Data.Function (fix)
 import Data.Generics.Labels ()
 import Data.Hashable (Hashable)
 import Data.IntSet (IntSet)
@@ -131,6 +132,8 @@ import Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
 import Prelude.Linear (lseq, (&))
 import Prelude.Linear qualified as PL
 import Unsafe.Linear qualified as Unsafe
+import Prelude
+import Prelude qualified as P
 
 newtype VarId = VarId {unVarId :: Word}
   deriving (Eq, Ord, Generic)
@@ -398,11 +401,6 @@ pushClause = \Clause {..} ->
       & \bs ->
         LUM.pushRow lits litss & \litss -> Clauses litss bs
 
-getClauseLits :: ClauseId -> S.State CDCLState (Ur (U.Vector Lit))
-getClauseLits i = S.uses clausesL \(Clauses litss bs) ->
-  LUM.unsafeGetRow (unClauseId i) litss & \(lits, litss) ->
-    (lits, Clauses litss bs)
-
 withClauseLits ::
   ClauseId ->
   (forall s. LUM.Slice s Lit %1 -> (b, LUM.Slice s Lit)) %1 ->
@@ -411,6 +409,30 @@ withClauseLits ::
 withClauseLits cid f = S.state \(Clauses litss bs) ->
   LUM.unsafeWithRow (unClauseId cid) f litss & \(b, litss) ->
     (b, Clauses litss bs)
+
+foldSliceMAside ::
+  (U.Unbox a, Monad m) =>
+  (x -> a -> m x) ->
+  m x ->
+  (x -> m b) ->
+  LUV.Slice s a %1 ->
+  (Ur (m b), LUV.Slice s a)
+foldSliceMAside step ini out = \slc ->
+  LUV.sizeS slc & \(Ur n, slc) ->
+    fix
+      ( \go !i !slc !ma ->
+          if i == n
+            then (Ur $ out P.=<< ma, slc)
+            else
+              LUV.unsafeGetS i slc & \(Ur a, slc) ->
+                go (i + 1) slc do
+                  !x <- ma
+                  !a <- step x a
+                  pure a
+      )
+      0
+      slc
+      ini
 
 foldClauseLits :: L.Fold Lit b -> ClauseId -> S.State Clauses (Ur b)
 {-# INLINE foldClauseLits #-}
