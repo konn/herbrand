@@ -33,9 +33,6 @@ import Control.Functor.Linear.State.Extra qualified as S
 import Control.Lens hiding (Index, lens, (%=), (&), (.=))
 import Control.Lens qualified as Lens
 import Control.Lens.Extras qualified as Lens
-import Control.Monad (guard)
-import Control.Monad.Trans.Class qualified as MT
-import Control.Monad.Trans.Maybe (MaybeT (..), runMaybeT)
 import Control.Optics.Linear qualified as LinOpt
 import Data.Alloc.Linearly.Token (besides, linearly)
 import Data.Array.Mutable.Linear qualified as LA
@@ -60,9 +57,8 @@ import Data.Strict (Pair (..))
 import Data.Strict.Classes qualified as St
 import Data.Strict.Maybe qualified as St
 import Data.Tuple qualified as P
-import Data.Unrestricted.Linear (UrT (..), evalUrT, liftUrT, runUrT)
+import Data.Unrestricted.Linear (UrT (..), liftUrT, runUrT)
 import Data.Unrestricted.Linear qualified as Ur
-import Data.Vector.Generic.Lens (vectorTraverse)
 import Data.Vector.Mutable.Linear.Unboxed qualified as LUV
 import Data.Vector.Unboxed qualified as U
 import GHC.Generics qualified as GHC
@@ -197,6 +193,7 @@ solverLoop = fix $ \go mlit -> S.do
                 backjump cid l -- Conflict found. Let's Backjump!
             NoMorePropagation -> S.do
               -- Decide indefinite variable
+              -- FIXME: Perhaps we can choose the variable from unsatisified clause?
               -- FIXME: Use heuristics for variable selection.
               Ur mid <- S.uses valuationL (LUA.findIndex (Lens.is #_Indefinite))
               case mid of
@@ -726,29 +723,35 @@ evalLit l = S.do
     Indefinite -> Nothing
 
 evalClause :: ClauseId -> S.State CDCLState (Maybe Bool)
+{- HLINT ignore evalClause "Avoid lambda" -}
 evalClause cid = S.do
   Ur lvl <- getSatisfiedLevel cid
   lvl >= 0 & \case
     True -> S.pure $ Just True
     False -> S.do
-      Ur lits <- getClauseLits cid
-      S.zoom valuationL
-        $ evalUrT
-        $ runMaybeT
-          ( L.foldOverM
-              vectorTraverse
-              ( L.premapM
-                  (\l -> MT.lift (liftUrT $ evalLit l))
-                  $ L.handlesM _Just orLE
-                  *> L.generalize (L.any P.isNothing)
-              )
-              lits
+      S.uses clausesAndValsL \(clauses, vals) ->
+        withClauseLits
+          cid
+          clauses
+          ( \lits ->
+              LUV.sizeS lits & \(Ur n, lits) ->
+                fix
+                  ( \go !i !anyNothing !lits !vals ->
+                      if i == n
+                        then
+                          anyNothing & \case
+                            True -> ((Nothing, vals), lits)
+                            False -> ((Just False, vals), lits)
+                        else
+                          LUV.unsafeGetS i lits & \(Ur l, lits) ->
+                            S.runState (evalLit l) vals & \case
+                              (Nothing, vals) -> go (i + 1) True lits vals
+                              (Just False, vals) -> go (i + 1) anyNothing lits vals
+                              (Just True, vals) -> ((Just True, vals), lits)
+                  )
+                  0
+                  False
+                  lits
+                  vals
           )
-        <&> \case
-          Nothing -> Just True
-          Just anyIndef
-            | anyIndef -> Nothing
-            | otherwise -> Just False
-
-orLE :: (Monad m) => L.FoldM (MaybeT m) Bool ()
-orLE = L.FoldM (P.const $ guard . not) (pure ()) pure
+          & \((ans, vals), clauses) -> (ans, (clauses, vals))

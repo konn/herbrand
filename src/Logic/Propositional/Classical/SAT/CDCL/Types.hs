@@ -33,6 +33,7 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   setWatchVar,
   setSatisfiedLevel,
   getSatisfiedLevel,
+  withClauseLitsM,
   withClauseLits,
   foldClauseLits,
   watchesL,
@@ -403,18 +404,28 @@ getClauseLits i = S.uses clausesL \(Clauses litss bs) ->
   LUM.unsafeGetRow (unClauseId i) litss & \(lits, litss) ->
     (lits, Clauses litss bs)
 
-withClauseLits ::
+withClauseLitsM ::
   ClauseId ->
   (forall s. LUM.Slice s Lit %1 -> (b, LUM.Slice s Lit)) %1 ->
   S.State Clauses b
+{-# INLINE withClauseLitsM #-}
+withClauseLitsM cid f = S.state \(Clauses litss bs) ->
+  LUM.unsafeWithRow (unClauseId cid) f litss & \(b, litss) ->
+    (b, Clauses litss bs)
+
+withClauseLits ::
+  ClauseId ->
+  Clauses %1 ->
+  (forall s. LUM.Slice s Lit %1 -> (b, LUM.Slice s Lit)) %1 ->
+  (b, Clauses)
 {-# INLINE withClauseLits #-}
-withClauseLits cid f = S.state \(Clauses litss bs) ->
+withClauseLits cid = \(Clauses litss bs) f ->
   LUM.unsafeWithRow (unClauseId cid) f litss & \(b, litss) ->
     (b, Clauses litss bs)
 
 foldClauseLits :: L.Fold Lit b -> ClauseId -> S.State Clauses (Ur b)
 {-# INLINE foldClauseLits #-}
-foldClauseLits f cid = withClauseLits cid (L.purely LUV.foldS' f)
+foldClauseLits f cid = withClauseLitsM cid (L.purely LUV.foldS' f)
 
 ifoldClauseLitsM :: (C.Monad m) => L.FoldM (UrT m) (Int, Lit) b -> ClauseId -> S.StateT Clauses m (Ur b)
 {-# INLINE ifoldClauseLitsM #-}
