@@ -13,9 +13,12 @@ module Herbrand.Bench (
   withSats,
   findSatsIn,
   withCnfs,
+  withFileTree,
+  globTree,
   findCnfsIn,
   module Test.Tasty.Bench,
   FileTrie (..),
+  timeout,
 ) where
 
 import Control.DeepSeq (NFData, force)
@@ -38,7 +41,7 @@ import System.Environment
 import System.Exit
 import System.FilePath
 import System.FilePath.Glob
-import Test.Tasty (withResource)
+import Test.Tasty (Timeout (..), localOption, withResource)
 import Test.Tasty.Bench hiding (defaultMain)
 import Test.Tasty.ExpectedFailure (wrapTest)
 import Test.Tasty.Ingredients
@@ -145,3 +148,6 @@ allowFailureBecause reason = wrapTest $ fmap change
             , resultDescription = resultDescription r <> " (allowed failure)"
             , resultShortDescription = resultShortDescription r <> " (allowed failure: " <> reason <> ")"
             }
+
+timeout :: Int -> TestTree -> TestTree
+timeout n = localOption (Timeout (30 * 10 ^ (6 :: Int)) $ show n <> "s")

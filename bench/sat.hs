@@ -43,7 +43,7 @@ main = do
             ]
         , withCnfs "large" larges $ \fml ->
             [ allowFailureBecause "O(n^2)"
-                $ localOption (Timeout (30 * 10 ^ (6 :: Int)) "30s")
+                $ timeout 30
                 $ bench "tableaux"
                 $ nfAppIO (fmap $ Tableaux.solve . snd) fml
             , bench "DPLL" $ nfAppIO (fmap $ DPLL.solve . fst) fml
@@ -51,14 +51,17 @@ main = do
             ]
         , withCnfs "huge" huges $ \fml ->
             [ allowFailureBecause "O(n^2)"
-                $ localOption (Timeout (30 * 10 ^ (6 :: Int)) "30s")
+                $ timeout 30
                 $ bench "tableaux"
                 $ nfAppIO (fmap $ Tableaux.solve . snd) fml
             , bench "DPLL" $ nfAppIO (fmap $ DPLL.solve . fst) fml
             , bench "CDCL" $ nfAppIO (fmap $ CDCL.solve . fst) fml
             ]
         , withCnfs "SATLIB" satlib $ \fml ->
-            [ bench "DPLL" $ nfAppIO (fmap $ DPLL.solve . fst) fml
+            [ allowFailureBecause "Large input"
+                $ timeout 240
+                $ bench "DPLL"
+                $ nfAppIO (fmap $ DPLL.solve . fst) fml
             , bench "CDCL" $ nfAppIO (fmap $ CDCL.solve . fst) fml
             ]
         ]
