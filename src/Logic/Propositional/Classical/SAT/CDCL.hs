@@ -677,61 +677,43 @@ data NextSlot = NextSlot
   }
   deriving (Show, P.Eq, P.Ord, GHC.Generic)
 
-(<|>:) :: St.Maybe a -> St.Maybe a -> St.Maybe a
-{-# INLINE (<|>:) #-}
-(<|>:) = St.maybe P.id (P.const . St.Just)
+satAndUndetL :: WatchedLits -> L.FoldM (UrT (S.State Valuation)) (Int, Lit) (Maybe Int, Maybe Int)
+{-# INLINE satAndUndetL #-}
+satAndUndetL wlits =
+  L.premapM
+    ( \(i, l) ->
+        if l `elemWatchLit` wlits
+          then pure Nothing
+          else
+            UrT
+              $ evalLit l
+              C.<&> \case
+                Nothing -> Ur (Just (i, Unassigned))
+                (Just True) -> Ur $ Just (i, AssignedTrue)
+                (Just False) -> Ur Nothing
+    )
+    $ L.generalize
+    $ L.handles _Just
+    $ (,)
+    <$> (fmap fst <$> L.find ((== AssignedTrue) P.. P.snd))
+    <*> (fmap fst <$> L.find ((== Unassigned) P.. P.snd))
 
 findNextAvailable :: WatchVar -> ClauseId -> S.State CDCLState (Maybe NextSlot)
 findNextAvailable w cid = S.do
-  Ur widx <- S.zoom clausesL $ getWatchedLitIndices cid
   Ur wlits <- S.zoom clausesL $ getWatchedLits cid
   let origVar = litVar $ watchLitOf w wlits
 
-  Ur (mSat, mUndet) <- S.uses clausesAndValsL \(clauses, vals) ->
-    withClauseLits
-      cid
-      clauses
-      ( \slc ->
-          LUV.sizeS slc & \(Ur n, slc) ->
-            fix
-              -- Invariant: At least one of mSat and mUndet
-              -- must be Nothing when passed to go.
-              ( \go !i !mSat !mUndet !slc !vals ->
-                  if i == n
-                    then ((Ur (mSat, mUndet), vals), slc)
-                    else
-                      if i `elemWatchLitIdx` widx
-                        then go (i + 1) mSat mUndet slc vals
-                        else
-                          LUV.unsafeGetS i slc & \(Ur l, slc) ->
-                            S.runState (evalLit l) vals & \(v, vals) ->
-                              move v & \(Ur v) ->
-                                let (mSat', mUndet') = case v of
-                                      Nothing -> (St.Nothing, St.Just i)
-                                      Just False -> (St.Nothing, St.Nothing)
-                                      Just True -> (St.Just i, St.Nothing)
-                                 in (mSat <|>: mSat', mUndet <|>: mUndet') & \(mSat, mUndet) ->
-                                      if St.isJust mSat && St.isJust mUndet
-                                        then ((Ur (mSat, mUndet), vals), slc)
-                                        else go (i + 1) mSat mUndet slc vals
-              )
-              0
-              St.Nothing
-              St.Nothing
-              slc
-              vals
-      )
-      & \((a, vals), clauses) -> (a, (clauses, vals))
+  Ur (mSat, mUndet) <- runClausesValsM $ ifoldClauseLitsM (satAndUndetL wlits) cid
 
   case mSat of
-    St.Just i -> S.do
+    Just i -> S.do
       Ur l' <- S.zoom clausesL $ getClauseLitAt cid i
       S.pure $ Just $ NextSlot True w origVar (litVar l') i
-    St.Nothing -> case mUndet of
-      St.Just i -> S.do
+    Nothing -> case mUndet of
+      Just i -> S.do
         Ur l' <- S.zoom clausesL $ getClauseLitAt cid i
         S.pure $ Just $ NextSlot False w origVar (litVar l') i
-      St.Nothing -> S.pure Nothing
+      Nothing -> S.pure Nothing
 
 evalLit :: Lit -> S.State Valuation (Maybe Bool)
 evalLit l = S.do

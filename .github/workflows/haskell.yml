@@ -175,7 +175,7 @@ jobs:
         name: ${{matrix.bench}}.svg
 
   profiling: 
-    # if: false
+    if: false
     env:
       ghc: 9.4.5
       cabal: 3.10.1.0

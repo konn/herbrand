@@ -18,6 +18,7 @@ main = do
   !mediums <- evaluate . force =<< findCnfsIn "data/sat/medium"
   !larges <- evaluate . force =<< findCnfsIn "data/sat/large"
   !huges <- evaluate . force =<< findCnfsIn "data/sat/huge"
+  !satlib <- evaluate . force =<< findCnfsIn "data/satlib"
   performGC
   defaultMain
     [ bgroup
@@ -56,19 +57,9 @@ main = do
             , bench "DPLL" $ nfAppIO (fmap $ DPLL.solve . fst) fml
             , bench "CDCL" $ nfAppIO (fmap $ CDCL.solve . fst) fml
             ]
-        , withCnfs
-            "Bejing"
-            [ "data/Bejing/2bitmax_6.cnf"
-            , "data/Bejing/2bitcomp_5.cnf"
-            , "data/Bejing/3blocks.cnf"
+        , withCnfs "SATLIB" satlib $ \fml ->
+            [ bench "DPLL" $ nfAppIO (fmap $ DPLL.solve . fst) fml
+            , bench "CDCL" $ nfAppIO (fmap $ CDCL.solve . fst) fml
             ]
-            $ \fml ->
-              [ allowFailureBecause "O(n^2)"
-                  $ localOption (Timeout (30 * 10 ^ (6 :: Int)) "30s")
-                  $ bench "tableaux"
-                  $ nfAppIO (fmap $ Tableaux.solve . snd) fml
-              , bench "DPLL" $ nfAppIO (fmap $ DPLL.solve . fst) fml
-              , bench "CDCL" $ nfAppIO (fmap $ CDCL.solve . fst) fml
-              ]
         ]
     ]
