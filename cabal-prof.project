@@ -4,6 +4,7 @@ profiling: True
 library-profiling: True
 executable-profiling: True
 profiling-detail: late
+optimization: 2
 
 program-options
   ghc-options: -fprof-auto -fprof-late -finfo-table-map -fdistinct-constructor-tables
