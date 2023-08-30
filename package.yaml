@@ -58,6 +58,7 @@ ghc-options:
 - -Wmissing-home-modules
 - -Wpartial-fields
 - -Wredundant-constraints
+- -flate-dmd-anal
 
 library:
   source-dirs: src

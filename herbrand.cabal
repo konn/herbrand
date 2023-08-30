@@ -47,7 +47,7 @@ library
       Logic.Propositional.Classical.SAT.CDCL.Types
   hs-source-dirs:
       src
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -flate-dmd-anal
   build-depends:
       adjunctions
     , aeson
@@ -92,7 +92,7 @@ library herbrand-bench
       Paths_herbrand
   hs-source-dirs:
       libs/bench
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -flate-dmd-anal
   build-depends:
       Glob
     , adjunctions
@@ -140,7 +140,7 @@ library herbrand-test-utils
       Paths_herbrand
   hs-source-dirs:
       libs/test
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -flate-dmd-anal
   build-depends:
       adjunctions
     , aeson
@@ -184,7 +184,7 @@ executable cdcl-dry
       Paths_herbrand
   hs-source-dirs:
       app/cdcl-dry
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints "-with-rtsopts=-A32m -T --nonmoving-gc" -fproc-alignment=64 -O2 -rtsopts
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -flate-dmd-anal "-with-rtsopts=-A32m -T --nonmoving-gc" -fproc-alignment=64 -O2 -rtsopts
   build-depends:
       adjunctions
     , aeson
@@ -225,7 +225,7 @@ executable gen-sat
       Paths_herbrand
   hs-source-dirs:
       app/gen-sat
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -O2
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -flate-dmd-anal -O2
   build-depends:
       adjunctions
     , aeson
@@ -277,7 +277,7 @@ test-suite herbrand-test
       Paths_herbrand
   hs-source-dirs:
       test
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N -O2
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -flate-dmd-anal -threaded -rtsopts -with-rtsopts=-N -O2
   build-tool-depends:
       tasty-discover:tasty-discover
   build-depends:
@@ -325,7 +325,7 @@ benchmark herbrand-cnf-bench
       Paths_herbrand
   hs-source-dirs:
       bench
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints "-with-rtsopts=-A32m -T --nonmoving-gc" -fproc-alignment=64 -O2
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -flate-dmd-anal "-with-rtsopts=-A32m -T --nonmoving-gc" -fproc-alignment=64 -O2
   build-tool-depends:
       tasty-discover:tasty-discover
   build-depends:
@@ -377,7 +377,7 @@ benchmark herbrand-sat-bench
       Paths_herbrand
   hs-source-dirs:
       bench
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints "-with-rtsopts=-A32m -T --nonmoving-gc" -fproc-alignment=64 -O2
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -flate-dmd-anal "-with-rtsopts=-A32m -T --nonmoving-gc" -fproc-alignment=64 -O2
   build-tool-depends:
       tasty-discover:tasty-discover
   build-depends:
