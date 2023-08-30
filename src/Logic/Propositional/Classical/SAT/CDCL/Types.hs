@@ -78,12 +78,15 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   WatchVar (..),
   watchVarL,
   WatchedLits (..),
+  WatchedLitIndices (..),
   getWatchedLits,
   getLit1,
   getLit2,
   getClauseLitAt,
   elemWatchLit,
   watchLitOf,
+  getWatchedLitIndices,
+  elemWatchLitIdx,
 ) where
 
 import Control.DeepSeq (NFData)
@@ -711,3 +714,29 @@ getClauseLitAt cid j = S.state \(Clauses ls bs) ->
 elemWatchLit :: Lit -> WatchedLits -> Bool
 elemWatchLit l (WatchOne l1) = l == l1
 elemWatchLit l (WatchThese l1 l2) = l == l1 || l == l2
+
+-- NOTE: We use different ADT to make use of UNPACK pragma, instead of making it a functor.
+data WatchedLitIndices
+  = WatchOneI {-# UNPACK #-} !Index
+  | WatchTheseI {-# UNPACK #-} !Index {-# UNPACK #-} !Index
+  deriving (Show, Eq, Ord, Generic)
+
+deriveGeneric ''WatchedLitIndices
+
+deriving via L.AsMovable WatchedLitIndices instance PL.Consumable WatchedLitIndices
+
+deriving via L.AsMovable WatchedLitIndices instance PL.Dupable WatchedLitIndices
+
+deriving via L.Generically WatchedLitIndices instance PL.Movable WatchedLitIndices
+
+getWatchedLitIndices :: ClauseId -> S.State Clauses (Ur WatchedLitIndices)
+getWatchedLitIndices cid = S.state \(Clauses ls bs) ->
+  LUV.unsafeGet (unClauseId cid) bs & \(Ur ClauseBody {..}, bs) ->
+    wat2 >= 0 & \case
+      True -> (Ur (WatchTheseI wat1 wat2), Clauses ls bs)
+      False ->
+        (Ur (WatchOneI wat1), Clauses ls bs)
+
+elemWatchLitIdx :: Index -> WatchedLitIndices -> Bool
+elemWatchLitIdx l (WatchOneI l1) = l == l1
+elemWatchLitIdx l (WatchTheseI l1 l2) = l == l1 || l == l2
