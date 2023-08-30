@@ -160,7 +160,7 @@ jobs:
       run: tar xaf artifacts/artifacts.tar.zst
     - name: Run Benchmark (${{matrix.bench}})
       run: |
-        "./artifacts/benchs/${{matrix.bench}}"
+        "./artifacts/benchs/${{matrix.bench}}" -j1
     - name: Upload CSV
       if: always()
       uses: actions/upload-artifact@v3
