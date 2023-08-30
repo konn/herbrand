@@ -56,5 +56,13 @@ main = do
             , bench "DPLL" $ nfAppIO (fmap $ DPLL.solve . fst) fml
             , bench "CDCL" $ nfAppIO (fmap $ CDCL.solve . fst) fml
             ]
+        , withCnfs "Bejing" ["data/Bejing/2bitmax_6.cnf"] $ \fml ->
+            [ allowFailureBecause "O(n^2)"
+                $ localOption (Timeout (30 * 10 ^ (6 :: Int)) "30s")
+                $ bench "tableaux"
+                $ nfAppIO (fmap $ Tableaux.solve . snd) fml
+            , bench "DPLL" $ nfAppIO (fmap $ DPLL.solve . fst) fml
+            , bench "CDCL" $ nfAppIO (fmap $ CDCL.solve . fst) fml
+            ]
         ]
     ]
