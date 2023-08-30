@@ -149,5 +149,5 @@ allowFailureBecause reason = wrapTest $ fmap change
             , resultShortDescription = resultShortDescription r <> " (allowed failure: " <> reason <> ")"
             }
 
-timeout :: Int -> TestTree -> TestTree
-timeout n = localOption (Timeout (30 * 10 ^ (6 :: Int)) $ show n <> "s")
+timeout :: Integer -> TestTree -> TestTree
+timeout n = localOption (Timeout (n * 10 ^ (6 :: Int)) $ show n <> "s")
