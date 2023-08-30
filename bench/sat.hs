@@ -18,6 +18,7 @@ main = do
   !mediums <- evaluate . force =<< findCnfsIn "data/sat/medium"
   !larges <- evaluate . force =<< findCnfsIn "data/sat/large"
   !huges <- evaluate . force =<< findCnfsIn "data/sat/huge"
+  !sudoku <- evaluate . force =<< findCnfsIn "data/sudoku"
   !satlib <- evaluate . force =<< findCnfsIn "data/satlib"
   performGC
   defaultMain
@@ -55,6 +56,13 @@ main = do
                 $ bench "tableaux"
                 $ nfAppIO (fmap $ Tableaux.solve . snd) fml
             , bench "DPLL" $ nfAppIO (fmap $ DPLL.solve . fst) fml
+            , bench "CDCL" $ nfAppIO (fmap $ CDCL.solve . fst) fml
+            ]
+        , withCnfs "Sudoku" sudoku $ \fml ->
+            [ allowFailureBecause "Large input"
+                $ timeout 240
+                $ bench "DPLL"
+                $ nfAppIO (fmap $ DPLL.solve . fst) fml
             , bench "CDCL" $ nfAppIO (fmap $ CDCL.solve . fst) fml
             ]
         , withCnfs "SATLIB" satlib $ \fml ->

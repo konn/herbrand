@@ -94,6 +94,19 @@ internal-libraries:
     - falsify
 
 executables:
+  sudoku:
+    main:                Main.hs
+    source-dirs:         app/sudoku
+    ghc-options:
+    - -O2
+    dependencies:
+    - herbrand
+    - directory
+    - dlist
+    - filepath
+    - optparse-applicative
+    - parser-combinators
+
   gen-sat:
     main:                Main.hs
     source-dirs:         app/gen-sat
@@ -101,7 +114,6 @@ executables:
     - -O2
     dependencies:
     - herbrand
-    - herbrand-test-utils
     - bytestring
     - directory
     - falsify

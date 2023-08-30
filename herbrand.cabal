@@ -42,6 +42,7 @@ library
       Logic.Propositional.Classical.SAT.Types
       Logic.Propositional.Syntax.General
       Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
+      Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive.Sudoku
       Logic.Propositional.Syntax.Transformation.Claassical
   other-modules:
       Logic.Propositional.Classical.SAT.CDCL.Types
@@ -248,7 +249,50 @@ executable gen-sat
     , generic-lens
     , hashable
     , herbrand
-    , herbrand-test-utils
+    , lens
+    , optparse-applicative
+    , parallel
+    , parser-combinators
+    , rec-def
+    , recursion-schemes
+    , semigroupoids
+    , strict
+    , text
+    , transformers
+    , unordered-containers
+    , vector
+  default-language: Haskell2010
+
+executable sudoku
+  main-is: Main.hs
+  other-modules:
+      Paths_herbrand
+  autogen-modules:
+      Paths_herbrand
+  hs-source-dirs:
+      app/sudoku
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -flate-dmd-anal -O2
+  build-depends:
+      adjunctions
+    , aeson
+    , attoparsec
+    , base >=4.7 && <5
+    , bifunctors
+    , bytestring
+    , containers
+    , data-fix
+    , deepseq
+    , directory
+    , distributive
+    , dlist
+    , filepath
+    , filtrable
+    , fmlist
+    , foldable1-classes-compat
+    , foldl
+    , generic-lens
+    , hashable
+    , herbrand
     , lens
     , optparse-applicative
     , parallel
