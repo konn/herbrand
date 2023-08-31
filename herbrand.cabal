@@ -73,7 +73,6 @@ library
     , linear-generics
     , parallel
     , psqueues
-    , random
     , recursion-schemes
     , reflection
     , semigroupoids
@@ -451,7 +450,6 @@ benchmark herbrand-sat-bench
     , lens
     , parallel
     , psqueues
-    , random
     , recursion-schemes
     , reflection
     , semigroupoids

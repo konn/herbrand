@@ -1,5 +1,4 @@
 {-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE BlockArguments #-}
 
 module Main (main) where
 
@@ -12,7 +11,6 @@ import qualified Logic.Propositional.Classical.SAT.DPLL as DPLL
 import qualified Logic.Propositional.Classical.SAT.Tableaux as Tableaux
 import Logic.Propositional.Syntax.General
 import System.Mem (performGC)
-import System.Random.Stateful (Uniform (uniformM), globalStdGen)
 import Test.Tasty (Timeout (..), localOption)
 
 main :: IO ()
@@ -85,20 +83,8 @@ cdclBenches :: IO (DPLL.CNF Word, Formula Full Word) -> [Benchmark]
 cdclBenches fml =
   [ bench "CDCL (α = 0.75)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.75}) . fst) fml
   , bench "CDCL (α = 0.75, mVISDS)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.75, activateResolved = True}) . fst) fml
-  , bench "CDCL (α = 0.75, mVISDS)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.75, activateResolved = True}) . fst) fml
   , bench "CDCL (α = 0.95)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.95}) . fst) fml
   , bench "CDCL (α = 0.95, mVISDS)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.95, activateResolved = True}) . fst) fml
   , bench "CDCL (α = 0.99)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.99}) . fst) fml
   , bench "CDCL (α = 0.99, mVISDS)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.99, activateResolved = True}) . fst) fml
   ]
-    ++ [ bench ("CDCL (α = 0.99, mVISDS, random " <> show n <> "%)")
-        $ flip nfAppIO fml
-        $ \alloc -> do
-          (phi, _) <- alloc
-          seed <- uniformM globalStdGen
-          pure
-            $! CDCL.solveWith
-              CDCL.defaultOptions {decayFactor = 0.99, activateResolved = True, randomSeed = seed, randomVSIDSFreq = Just $ fromIntegral n / 100}
-              phi
-       | n <- [10, 25, 50 :: Int]
-       ]
