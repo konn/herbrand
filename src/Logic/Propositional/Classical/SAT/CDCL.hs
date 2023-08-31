@@ -210,7 +210,8 @@ solverLoop = fix $ \go mlit -> S.do
               -- Decide indefinite variable
               -- FIXME: Perhaps we can choose the variable from unsatisified clause?
               -- FIXME: Use heuristics for variable selection.
-              Ur mid <- S.zoom varQueuesL findUnsatVar
+
+              Ur mid <- findUnsatVar
               case mid of
                 Nothing -> S.do
                   S.pure Ok -- No vacant variable - model is full!
@@ -410,27 +411,21 @@ currentDecideLevel =
 
 toSatResult :: (FinalState, CDCLState s) %1 -> Ur (SatResult (Model VarId))
 toSatResult (Failed, state) = state `lseq` Ur Unsat
-toSatResult (Ok, CDCLState numOrig steps clauses watches vals vids varQs) =
-  numOrig
-    `lseq` steps
-    `lseq` clauses
-    `lseq` watches
-    `lseq` vids
-    `lseq` varQs
-    `lseq` ( LUA.freeze vals & Ur.lift do
-              Satisfiable
-                . Lens.foldMapOf
-                  (Lens.foldring U.foldr)
-                  ( \(k, var) ->
-                      case var of
-                        Definite {..} ->
-                          if value
-                            then P.mempty {positive = HS.singleton $ fromIntegral k}
-                            else P.mempty {negative = HS.singleton $ fromIntegral k}
-                        Indefinite -> P.mempty
-                  )
-                . U.indexed
-           )
+toSatResult (Ok, state) =
+  extractValuation state & \vals ->
+    LUA.freeze vals & Ur.lift do
+      Satisfiable
+        . Lens.foldMapOf
+          (Lens.foldring U.foldr)
+          ( \(k, var) ->
+              case var of
+                Definite {..} ->
+                  if value
+                    then P.mempty {positive = HS.singleton $ fromIntegral k}
+                    else P.mempty {negative = HS.singleton $ fromIntegral k}
+                Indefinite -> P.mempty
+          )
+        . U.indexed
 
 toClauseId :: Int -> ClauseId
 toClauseId = fromIntegral

@@ -69,6 +69,7 @@ library:
   - linear-array-extra
   - linear-base
   - linear-generics
+  - random
   - vector-th-unbox
 
 internal-libraries:
@@ -190,6 +191,7 @@ benchmarks:
     - herbrand-bench
     - directory
     - filepath
+    - random
     - tasty
     - falsify
     - tasty-bench
