@@ -67,7 +67,7 @@ jobs:
     - name: Run profiling
       run: >
         cabal --project-file=cabal-prof.project run --
-        cdcl-dry -i data/Bejing/2bitadd_10.cnf
+        cdcl-dry -i data/profiling/Bejing/2bitadd_10.cnf
         +RTS --copying-gc -hi -l -p -i1
     - name: Collect profiling results
       continue-on-error: true
