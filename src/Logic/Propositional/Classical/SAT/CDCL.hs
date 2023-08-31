@@ -18,6 +18,8 @@ module Logic.Propositional.Classical.SAT.CDCL (
   solveVarId,
   CDCLOptions (..),
   defaultOptions,
+  DecayFactor (..),
+  defaultAdaptiveFactor,
   solveWith,
   solveVarIdWith,
   solveState,

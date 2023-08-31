@@ -177,6 +177,19 @@ data DecayFactor
   deriving (Show, Eq, Ord, Generic)
   deriving anyclass (NFData, Hashable)
 
+instance Num DecayFactor where
+  fromInteger = ConstantFactor . fromInteger
+  (+) = error "DecayFactor: (+) not implemented"
+  (-) = error "DecayFactor: (-) not implemented"
+  (*) = error "DecayFactor: (*) not implemented"
+  signum = error "DecayFactor: signum not implemented"
+  abs = error "DecayFactor: abs not implemented"
+
+instance Fractional DecayFactor where
+  fromRational = ConstantFactor . fromRational
+  (/) = error "DecayFactor: (/) not implemented"
+  recip = error "DecayFactor: recip not implemented"
+
 data CDCLOptions = CDCLOptions
   { decayFactor :: !DecayFactor
   , activateResolved :: !Bool
