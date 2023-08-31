@@ -5,6 +5,7 @@ module Main (main) where
 import Control.DeepSeq (force)
 import Control.Exception (evaluate)
 import Herbrand.Bench
+import Logic.Propositional.Classical.SAT.CDCL (CDCLOptions (..))
 import qualified Logic.Propositional.Classical.SAT.CDCL as CDCL
 import qualified Logic.Propositional.Classical.SAT.DPLL as DPLL
 import qualified Logic.Propositional.Classical.SAT.Tableaux as Tableaux
@@ -27,12 +28,18 @@ main = do
         [ withCnfs "tiny" tinys $ \fml ->
             [ bench "tableaux" $ nfAppIO (fmap $ Tableaux.solve . snd) fml
             , bench "DPLL" $ nfAppIO (fmap $ DPLL.solve . fst) fml
-            , bench "CDCL" $ nfAppIO (fmap $ CDCL.solve . fst) fml
+            , bench "CDCL (α = 0.5)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.5}) . fst) fml
+            , bench "CDCL (α = 0.75)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.75}) . fst) fml
+            , bench "CDCL (α = 0.95)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.95}) . fst) fml
+            , bench "CDCL (α = 0.99)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.99}) . fst) fml
             ]
         , withCnfs "small" smalls $ \fml ->
             [ bench "tableaux" $ nfAppIO (fmap $ Tableaux.solve . snd) fml
             , bench "DPLL" $ nfAppIO (fmap $ DPLL.solve . fst) fml
-            , bench "CDCL" $ nfAppIO (fmap $ CDCL.solve . fst) fml
+            , bench "CDCL (α = 0.5)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.5}) . fst) fml
+            , bench "CDCL (α = 0.75)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.75}) . fst) fml
+            , bench "CDCL (α = 0.95)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.95}) . fst) fml
+            , bench "CDCL (α = 0.99)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.99}) . fst) fml
             ]
         , withCnfs "medium" mediums $ \fml ->
             [ allowFailureBecause "O(n^2)"
@@ -40,7 +47,10 @@ main = do
                 $ bench "tableaux"
                 $ nfAppIO (fmap $ Tableaux.solve . snd) fml
             , bench "DPLL" $ nfAppIO (fmap $ DPLL.solve . fst) fml
-            , bench "CDCL" $ nfAppIO (fmap $ CDCL.solve . fst) fml
+            , bench "CDCL (α = 0.5)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.5}) . fst) fml
+            , bench "CDCL (α = 0.75)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.75}) . fst) fml
+            , bench "CDCL (α = 0.95)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.95}) . fst) fml
+            , bench "CDCL (α = 0.99)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.99}) . fst) fml
             ]
         , withCnfs "large" larges $ \fml ->
             [ allowFailureBecause "O(n^2)"
@@ -48,7 +58,10 @@ main = do
                 $ bench "tableaux"
                 $ nfAppIO (fmap $ Tableaux.solve . snd) fml
             , bench "DPLL" $ nfAppIO (fmap $ DPLL.solve . fst) fml
-            , bench "CDCL" $ nfAppIO (fmap $ CDCL.solve . fst) fml
+            , bench "CDCL (α = 0.5)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.5}) . fst) fml
+            , bench "CDCL (α = 0.75)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.75}) . fst) fml
+            , bench "CDCL (α = 0.95)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.95}) . fst) fml
+            , bench "CDCL (α = 0.99)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.99}) . fst) fml
             ]
         , withCnfs "huge" huges $ \fml ->
             [ allowFailureBecause "O(n^2)"
@@ -56,7 +69,10 @@ main = do
                 $ bench "tableaux"
                 $ nfAppIO (fmap $ Tableaux.solve . snd) fml
             , bench "DPLL" $ nfAppIO (fmap $ DPLL.solve . fst) fml
-            , bench "CDCL" $ nfAppIO (fmap $ CDCL.solve . fst) fml
+            , bench "CDCL (α = 0.5)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.5}) . fst) fml
+            , bench "CDCL (α = 0.75)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.75}) . fst) fml
+            , bench "CDCL (α = 0.95)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.95}) . fst) fml
+            , bench "CDCL (α = 0.99)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.99}) . fst) fml
             ]
         , withCnfs "Sudoku" sudoku $ \fml ->
             [ allowFailureBecause "Large input"
@@ -64,6 +80,10 @@ main = do
                 $ bench "DPLL"
                 $ nfAppIO (fmap $ DPLL.solve . fst) fml
             , bench "CDCL" $ nfAppIO (fmap $ CDCL.solve . fst) fml
+            , bench "CDCL (α = 0.5)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.5}) . fst) fml
+            , bench "CDCL (α = 0.75)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.75}) . fst) fml
+            , bench "CDCL (α = 0.95)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.95}) . fst) fml
+            , bench "CDCL (α = 0.99)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.99}) . fst) fml
             ]
         , withCnfs "SATLIB" satlib $ \fml ->
             [ allowFailureBecause "Large input"
@@ -71,6 +91,10 @@ main = do
                 $ bench "DPLL"
                 $ nfAppIO (fmap $ DPLL.solve . fst) fml
             , bench "CDCL" $ nfAppIO (fmap $ CDCL.solve . fst) fml
+            , bench "CDCL (α = 0.5)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.5}) . fst) fml
+            , bench "CDCL (α = 0.75)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.75}) . fst) fml
+            , bench "CDCL (α = 0.95)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.95}) . fst) fml
+            , bench "CDCL (α = 0.99)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.99}) . fst) fml
             ]
         ]
     ]
