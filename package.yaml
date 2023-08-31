@@ -114,6 +114,7 @@ executables:
     - -O2
     dependencies:
     - herbrand
+    - herbrand-test-utils
     - bytestring
     - directory
     - falsify

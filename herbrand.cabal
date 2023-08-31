@@ -249,6 +249,7 @@ executable gen-sat
     , generic-lens
     , hashable
     , herbrand
+    , herbrand-test-utils
     , lens
     , optparse-applicative
     , parallel
