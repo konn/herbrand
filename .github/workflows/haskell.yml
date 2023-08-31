@@ -3,7 +3,6 @@ on:
   push: {branches: ["main"]}
   pull_request:
 
-
 jobs:
   build:
     env:
@@ -173,88 +172,3 @@ jobs:
       with:
         path: bench-results/${{matrix.bench}}.svg
         name: ${{matrix.bench}}.svg
-
-  profiling: 
-    if: false
-    env:
-      ghc: 9.4.5
-      cabal: 3.10.1.0
-    name: Profiling
-    runs-on: ubuntu-latest
-    outputs:
-      benchmarks: ${{steps.list-bins.outputs.benchs}}
-      tests: ${{steps.list-bins.outputs.tests}}
-    steps:
-    - uses: actions/checkout@v3
-      with:
-        ref: ${{github.event.pull_request.head.sha || github.sha}}
-    - name: Calculate hash keys
-      uses: actions/github-script@v6
-      id: cache-keys
-      with:
-        script: |
-          const script = require('./ci/generate-cache-key.js')
-          await script({
-            core, glob, os: "${{runner.os}}", ghc: "${{env.ghc}}",
-            prefix: "prof",
-            projects: [
-              "cabal-prof.project", "cabal-prof.project.local",
-              "cabal.project", "cabal.project.freeze"
-            ]
-          })
-
-    - name: Setup Haskell
-      uses: haskell/actions/setup@v2
-      with:
-        enable-stack: false
-        cabal-version: ${{env.cabal}}
-        ghc-version: ${{env.ghc}}
-    - name: Restore ~/.cabal/store
-      uses: actions/cache/restore@v3
-      with:
-        path: ~/.cabal/store
-        key: ${{steps.cache-keys.outputs.store}}
-        restore-keys: ${{steps.cache-keys.outputs.store-restore}}
-    - name: Restore dist-newstyle
-      uses: actions/cache/restore@v3
-      with:
-        path: dist-newstyle
-        key: ${{steps.cache-keys.outputs.dist}}
-        restore-keys: ${{steps.cache-keys.outputs.dist-restore}}
-    - name: cabal --project-file=cabal-prof.project configure
-      run: |
-        cabal --project-file=cabal-prof.project v2-configure --enable-optimisation=2
-        cabal update
-    - name: Build Dependencies
-      run: | 
-        cabal --project-file=cabal-prof.project build --only-dependencies
-    - name: Save ~/.cabal/store Cache
-      uses: actions/cache/save@v3
-      with:
-        path: ~/.cabal/store
-        key: ${{steps.cache-keys.outputs.store}}
-    - name: Build All
-      run: | 
-        cabal --project-file=cabal-prof.project build
-    - name: Save dist-newstyle Cache
-      uses: actions/cache/save@v3
-      with:
-        path: dist-newstyle
-        key: ${{steps.cache-keys.outputs.dist}}
-    - name: Run profiling
-      run: >
-        cabal --project-file=cabal-prof.project run --
-        cdcl-dry -i data/Bejing/2bitadd_10.cnf
-        +RTS --copying-gc -hi -l -p -i1
-    - name: Collect profiling results
-      continue-on-error: true
-      run: |
-        mkdir -p cdcl-profs
-        mv *.hp *.prof *.eventlog cdcl-profs
-        tar czvf cdcl-profs.tar.gz cdcl-profs
-
-    - name: Upload Aritracts
-      uses: actions/upload-artifact@v3
-      with:
-        path: cdcl-profs.tar.gz
-        name: cdcl-prof
