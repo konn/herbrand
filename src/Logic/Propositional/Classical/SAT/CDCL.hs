@@ -151,10 +151,10 @@ solveVarId cnf =
       Left (Ur resl) -> Ur (P.mempty P.<$ resl)
       Right stt -> solveState stt
 
-solveState :: CDCLState %1 -> Ur (SatResult (Model VarId))
+solveState :: CDCLState s %1 -> Ur (SatResult (Model VarId))
 solveState = toSatResult PL.. S.runState (solverLoop Nothing)
 
-solverLoop :: (HasCallStack) => Maybe (Lit, ClauseId) -> S.State CDCLState FinalState
+solverLoop :: (HasCallStack) => Maybe (Lit, ClauseId) -> S.State (CDCLState s) FinalState
 solverLoop = fix $ \go mlit -> S.do
   -- First, check if the original clauses are all satisfied (at the current stage)
   -- We only have to traverse the initial segment, as the lerant clauses are always
@@ -205,7 +205,7 @@ solverLoop = fix $ \go mlit -> S.do
                   C.void $ assertLit (-1) decLit
                   go (Just (decLit, -1))
 
-backjump :: ClauseId -> Lit -> S.State CDCLState FinalState
+backjump :: ClauseId -> Lit -> S.State (CDCLState s) FinalState
 backjump confCls lit = S.do
   S.zoom varQueuesL decayVarPriosM
   Ur confLits <- S.zoom clausesL $ foldClauseLits L.set confCls
@@ -273,7 +273,7 @@ backjump confCls lit = S.do
 findUIP1 ::
   Lit ->
   Set Lit ->
-  S.State CDCLState (Maybe (Ur (DecideLevel, Maybe Clause, Lit)))
+  S.State (CDCLState s) (Maybe (Ur (DecideLevel, Maybe Clause, Lit)))
 findUIP1 !lit !curCls
   | Set.null curCls = S.do
       S.pure Nothing
@@ -319,7 +319,7 @@ mkLearntClause decLvl l' curCls =
       , l'
       )
 
-findConflictingLit :: (Foldable t) => t Lit -> S.State CDCLState (Ur (Maybe Lit))
+findConflictingLit :: (Foldable t) => t Lit -> S.State (CDCLState s) (Ur (Maybe Lit))
 findConflictingLit lits = S.uses valuationL \vals ->
   foldlLin'
     vals
@@ -347,7 +347,7 @@ data ULS = ULS
   }
   deriving (Show)
 
-checkUnitClauseLit :: Set Lit -> S.State CDCLState (Ur (Maybe (Lit, DecideLevel)))
+checkUnitClauseLit :: Set Lit -> S.State (CDCLState s) (Ur (Maybe (Lit, DecideLevel)))
 checkUnitClauseLit ls = S.do
   Ur lvl <- currentDecideLevel
   Ur lcnd <- S.uses valuationL \vals ->
@@ -382,13 +382,13 @@ foldlLin' b f x =
     b
     (Ur x)
 
-currentDecideLevel :: S.State CDCLState (Ur DecideLevel)
+currentDecideLevel :: S.State (CDCLState s) (Ur DecideLevel)
 {-# INLINE currentDecideLevel #-}
 currentDecideLevel =
   Ur.lift (fromIntegral P.. P.subtract 1)
     D.<$> S.uses stepsL LUV.size
 
-toSatResult :: (FinalState, CDCLState) %1 -> Ur (SatResult (Model VarId))
+toSatResult :: (FinalState, CDCLState s) %1 -> Ur (SatResult (Model VarId))
 toSatResult (Failed, state) = state `lseq` Ur Unsat
 toSatResult (Ok, CDCLState numOrig steps clauses watches vals vids varQs) =
   numOrig
@@ -415,10 +415,10 @@ toSatResult (Ok, CDCLState numOrig steps clauses watches vals vids varQs) =
 toClauseId :: Int -> ClauseId
 toClauseId = fromIntegral
 
-newtype Early a = Early {runEarly :: UrT (S.State CDCLState) (St.Maybe (Either (ClauseId, Lit) (Lit, ClauseId)))}
+newtype Early s a = Early {runEarly :: UrT (S.State (CDCLState s)) (St.Maybe (Either (ClauseId, Lit) (Lit, ClauseId)))}
   deriving (Functor)
 
-instance Applicative Early where
+instance Applicative (Early s) where
   pure = P.const $ Early $ pure St.Nothing
   liftA2 _ (Early mf) (Early mx) = Early do
     f <- mf
@@ -444,11 +444,11 @@ instance Applicative Early where
       St.Nothing -> mx
       St.Just x -> pure $ St.Just x
 
-propagateUnit :: (HasCallStack) => Maybe (Lit, ClauseId) -> S.State CDCLState PropResult
+propagateUnit :: (HasCallStack) => Maybe (Lit, ClauseId) -> S.State (CDCLState s) PropResult
 propagateUnit ml = S.do
   go (P.maybe Seq.empty Seq.singleton ml)
   where
-    go :: Seq.Seq (Lit, ClauseId) -> S.State CDCLState PropResult
+    go :: Seq.Seq (Lit, ClauseId) -> S.State (CDCLState s) PropResult
     go ((l, reason) :<| rest) = S.do
       assResl <- assertLit reason l
       case assResl of
@@ -462,7 +462,7 @@ propagateUnit ml = S.do
               $ LA.unsafeGet (fromEnum $ litVar l)
           loop dest rest
       where
-        loop :: [Int] -> Seq.Seq (Lit, ClauseId) -> S.State CDCLState PropResult
+        loop :: [Int] -> Seq.Seq (Lit, ClauseId) -> S.State (CDCLState s) PropResult
         loop [] !rest = S.do
           go rest
         loop (!i : !is) !rest = S.do
@@ -514,7 +514,7 @@ propagateUnit ml = S.do
           -- NOTE: this Unsafe.toLinear is safe because (l, i) ~= (Int, Int).
           Unsafe.toLinear (go P.. Seq.singleton) (l, i)
 
-setSatisfied :: Maybe (Pair (Pair WatchVar VarId) (Pair VarId Index)) %1 -> ClauseId -> S.StateT CDCLState Identity ()
+setSatisfied :: Maybe (Pair (Pair WatchVar VarId) (Pair VarId Index)) %1 -> ClauseId -> S.State (CDCLState s) ()
 {-# INLINE setSatisfied #-}
 setSatisfied m i = S.do
   Ur lvl <- currentDecideLevel
@@ -525,14 +525,14 @@ setSatisfied m i = S.do
       updateWatchLit i w old new newIdx
     Nothing -> S.pure ()
 
-updateWatchLit :: ClauseId -> WatchVar %1 -> VarId %1 -> VarId %1 -> Index %1 -> S.State CDCLState ()
+updateWatchLit :: ClauseId -> WatchVar %1 -> VarId %1 -> VarId %1 -> Index %1 -> S.State (CDCLState s) ()
 {-# INLINE updateWatchLit #-}
 updateWatchLit cid w old new idx = S.do
   setWatchVar cid w idx
   unwatch cid old
   watch cid new
 
-watch :: ClauseId -> VarId %1 -> S.State CDCLState ()
+watch :: ClauseId -> VarId %1 -> S.State (CDCLState s) ()
 watch cid =
   -- NOTE: This toLinear is safe b/c VarId ~ Int.
   Unsafe.toLinear \v ->
@@ -541,7 +541,7 @@ watch cid =
         LA.unsafeGet (fromEnum v) ws & \(Ur xs, ws) ->
           LA.set (fromEnum v) (IS.insert (unClauseId cid) xs) ws
 
-unwatch :: ClauseId -> VarId %1 -> S.State CDCLState ()
+unwatch :: ClauseId -> VarId %1 -> S.State (CDCLState s) ()
 unwatch cid =
   -- NOTE: This toLinear is safe b/c VarId ~ Int.
   Unsafe.toLinear \v ->
@@ -550,7 +550,7 @@ unwatch cid =
         LA.unsafeGet (fromEnum v) ws & \(Ur xs, ws) ->
           LA.set (fromEnum v) (IS.delete (unClauseId cid) xs) ws
 
-assertLit :: (HasCallStack) => ClauseId -> Lit -> S.State CDCLState AssertionResult
+assertLit :: (HasCallStack) => ClauseId -> Lit -> S.State (CDCLState s) AssertionResult
 assertLit ante lit = S.do
   let vid = fromVarId $ litVar lit :: Int
   mres <- S.uses valuationL (LUA.unsafeGet vid)
@@ -573,7 +573,7 @@ assertLit ante lit = S.do
       | otherwise -> S.pure ContradictingAssertion
 
 -- | Propagate Literal.
-propLit :: Lit -> ClauseId -> S.State CDCLState (Maybe UnitResult)
+propLit :: Lit -> ClauseId -> S.State (CDCLState s) (Maybe UnitResult)
 propLit trueLit cid = S.do
   Ur satLvl <- getSatisfiedLevel cid
   if satLvl >= 0
@@ -626,7 +626,7 @@ propLit trueLit cid = S.do
 findUnit ::
   ClauseId ->
   WatchedLits ->
-  S.State CDCLState (Maybe UnitResult)
+  S.State (CDCLState s) (Maybe UnitResult)
 findUnit _ (WatchOne l) = S.do
   -- Only the first literal is active.
   mres <- S.zoom valuationL $ evalLit l
@@ -703,7 +703,7 @@ data NextSlot = NextSlot
 {-# INLINE (<|>:) #-}
 (<|>:) = St.maybe P.id (P.const . St.Just)
 
-findNextAvailable :: WatchVar -> ClauseId -> S.State CDCLState (Maybe NextSlot)
+findNextAvailable :: WatchVar -> ClauseId -> S.State (CDCLState s) (Maybe NextSlot)
 findNextAvailable w cid = S.do
   Ur widx <- S.zoom clausesL $ getWatchedLitIndices cid
   Ur wlits <- S.zoom clausesL $ getWatchedLits cid
@@ -762,7 +762,7 @@ evalLit l = S.do
     Definite {..} -> Just $ isPositive l == value
     Indefinite -> Nothing
 
-evalClause :: ClauseId -> S.State CDCLState (Maybe Bool)
+evalClause :: ClauseId -> S.State (CDCLState s) (Maybe Bool)
 {- HLINT ignore evalClause "Avoid lambda" -}
 evalClause cid = S.do
   Ur lvl <- getSatisfiedLevel cid

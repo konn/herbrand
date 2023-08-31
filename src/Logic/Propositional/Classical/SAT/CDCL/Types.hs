@@ -149,6 +149,9 @@ import Prelude.Linear (lseq, (&))
 import Prelude.Linear qualified as PL
 import Unsafe.Linear qualified as Unsafe
 
+newtype CDCLOptions = CDCLOptions {decayFactor :: Double}
+  deriving (Show, Eq, Ord, Generic)
+
 newtype VarId = VarId {unVarId :: Word}
   deriving (Eq, Ord, Generic)
   deriving newtype (Show, NFData, Hashable, Num, Enum, PL.Consumable, PL.Dupable, PL.Movable)
@@ -400,7 +403,7 @@ deriving via L.AsMovable VarQueues instance PL.Dupable VarQueues
 instance PL.Movable VarQueues where
   move (VarQueues ql qr) = Ur (VarQueues ql qr)
 
-data CDCLState where
+data CDCLState s where
   CDCLState ::
     -- | Number of original clauses
     {-# UNPACK #-} !Int %1 ->
@@ -416,15 +419,15 @@ data CDCLState where
     {-# UNPACK #-} !(LSet.Set ClauseId) %1 ->
     -- | Variable queue
     {-# UNPACK #-} !VarQueues %1 ->
-    CDCLState
+    CDCLState s
   deriving anyclass (HasLinearWitness)
 
-clausesL :: LinLens.Lens' CDCLState Clauses
+clausesL :: LinLens.Lens' (CDCLState s) Clauses
 {-# INLINE clausesL #-}
 clausesL = LinLens.lens \(CDCLState numOrig ss cs ws vs vids varQ) ->
   (cs, \cs -> CDCLState numOrig ss cs ws vs vids varQ)
 
-pushClause :: Clause -> S.State CDCLState ()
+pushClause :: Clause -> S.State (CDCLState s) ()
 {-# INLINE pushClause #-}
 {- HLINT ignore pushClause "Redundant lambda" -}
 pushClause = \Clause {..} -> S.do
@@ -486,7 +489,7 @@ moveToUnsatQueue vid = \(VarQueues unsats sats) ->
   where
     !vidInt = fromIntegral $ unVarId vid
 
-getClauseLits :: ClauseId -> S.State CDCLState (Ur (U.Vector Lit))
+getClauseLits :: ClauseId -> S.State (CDCLState s) (Ur (U.Vector Lit))
 getClauseLits i = S.uses clausesL \(Clauses litss bs) ->
   LUM.unsafeGetRow (unClauseId i) litss & \(lits, litss) ->
     (lits, Clauses litss bs)
@@ -523,7 +526,7 @@ ifoldClauseLitsM f cid = S.StateT \(Clauses litss bs) ->
       (L.impurely LUV.ifoldSML' f)
       litss
 
-runClausesValsM :: S.StateT Clauses (S.State Valuation) a %1 -> S.State CDCLState a
+runClausesValsM :: S.StateT Clauses (S.State Valuation) a %1 -> S.State (CDCLState s) a
 {-# INLINE runClausesValsM #-}
 {- HLINT ignore runClausesValsM "Redundant lambda" -}
 runClausesValsM = \act -> S.uses clausesAndValsL \(clauses, vals) ->
@@ -532,61 +535,61 @@ runClausesValsM = \act -> S.uses clausesAndValsL \(clauses, vals) ->
     vals
     & \((ans, clauses), val) -> (ans, (clauses, val))
 
-getNumClauses :: S.State CDCLState (Ur Int)
+getNumClauses :: S.State (CDCLState s) (Ur Int)
 {-# INLINE getNumClauses #-}
 getNumClauses =
   S.uses clausesL \(Clauses litss bs) ->
     Clauses litss C.<$> LUV.size bs
 
-stepsL :: LinLens.Lens' CDCLState (LUV.Vector Step)
+stepsL :: LinLens.Lens' (CDCLState s) (LUV.Vector Step)
 {-# INLINE stepsL #-}
 stepsL = LinLens.lens \(CDCLState numOrig ss cs ws vs vids varQ) ->
   (ss, \ss -> CDCLState numOrig ss cs ws vs vids varQ)
 
-numInitialClausesL :: LinLens.Lens' CDCLState Int
+numInitialClausesL :: LinLens.Lens' (CDCLState s) Int
 numInitialClausesL = LinLens.lens \(CDCLState numOrig ss cs ws vs vids varQ) ->
   (numOrig, \numOrig -> CDCLState numOrig ss cs ws vs vids varQ)
 
-watchesL :: LinLens.Lens' CDCLState WatchMap
+watchesL :: LinLens.Lens' (CDCLState s) WatchMap
 {-# INLINE watchesL #-}
 watchesL = LinLens.lens \(CDCLState numOrig ss cs ws vs vids varQ) ->
   (ws, \ws -> CDCLState numOrig ss cs ws vs vids varQ)
 
-valuationL :: LinLens.Lens CDCLState CDCLState Valuation Valuation
+valuationL :: LinLens.Lens' (CDCLState s) Valuation
 {-# INLINE valuationL #-}
 valuationL = LinLens.lens \(CDCLState norig ss cs ws vs vids varQ) ->
   (vs, \vs -> CDCLState norig ss cs ws vs vids varQ)
 
-varQueuesL :: LinLens.Lens' CDCLState VarQueues
+varQueuesL :: LinLens.Lens' (CDCLState s) VarQueues
 varQueuesL = LinLens.lens \(CDCLState norig ss cs ws vs vids varQ) ->
   (varQ, \varQ -> CDCLState norig ss cs ws vs vids varQ)
 
-unsatVarQL :: LinLens.Lens' CDCLState (Ur VarQueue)
+unsatVarQL :: LinLens.Lens' (CDCLState s) (Ur VarQueue)
 unsatVarQL =
   varQueuesL LinLens..> LinLens.lens \(VarQueues qs rs) ->
     (Ur qs, \(Ur qs) -> VarQueues qs rs)
 
-satVarQL :: LinLens.Lens' CDCLState (Ur VarQueue)
+satVarQL :: LinLens.Lens' (CDCLState s) (Ur VarQueue)
 satVarQL =
   varQueuesL LinLens..> LinLens.lens \(VarQueues qs rs) ->
     (Ur rs, \(Ur rs) -> VarQueues qs rs)
 
-unsatisfiedsL :: LinLens.Lens' CDCLState (LSet.Set ClauseId)
+unsatisfiedsL :: LinLens.Lens' (CDCLState s) (LSet.Set ClauseId)
 {-# INLINE unsatisfiedsL #-}
 unsatisfiedsL = LinLens.lens \(CDCLState norig ss cs ws vs vids varQ) ->
   (vids, \vids -> CDCLState norig ss cs ws vs vids varQ)
 
-clausesValsAndUnsatsL :: LinLens.Lens' CDCLState (Clauses, Valuation, LSet.Set ClauseId)
+clausesValsAndUnsatsL :: LinLens.Lens' (CDCLState s) (Clauses, Valuation, LSet.Set ClauseId)
 {-# INLINE clausesValsAndUnsatsL #-}
 clausesValsAndUnsatsL = LinLens.lens \(CDCLState norig ss cs ws vs vids varQ) ->
   ((cs, vs, vids), \(cs, vs, vids) -> CDCLState norig ss cs ws vs vids varQ)
 
-clausesAndValsL :: LinLens.Lens' CDCLState (Clauses, Valuation)
+clausesAndValsL :: LinLens.Lens' (CDCLState s) (Clauses, Valuation)
 {-# INLINE clausesAndValsL #-}
 clausesAndValsL = LinLens.lens \(CDCLState norig ss cs ws vs vids varQ) ->
   ((cs, vs), \(cs, vs) -> CDCLState norig ss cs ws vs vids varQ)
 
-toCDCLState :: CNF VarId -> Linearly %1 -> Either (Ur (SatResult ())) CDCLState
+toCDCLState :: CNF VarId -> Linearly %1 -> Either (Ur (SatResult ())) (CDCLState s)
 toCDCLState (CNF cls) lin =
   let (cls', truth, contradicting, maxVar) =
         L.fold
@@ -668,7 +671,7 @@ buildClause (i :!: watches) xs =
 
 deriveGeneric ''CDCLState
 
-deriving via L.Generically CDCLState instance PL.Consumable CDCLState
+deriving via L.Generically (CDCLState s) instance PL.Consumable (CDCLState s)
 
 data WatchVar = W1 | W2 deriving (Show, Eq, Ord, Generic)
 
@@ -752,7 +755,7 @@ deriving via L.Generically AssertionResult instance L.Movable AssertionResult
       the first argument non-linearly!
   2.  Use of Unsafe.toLienar is safe here because vid = Int is freely dupable.
 -}
-setWatchVar :: ClauseId -> WatchVar %1 -> Index %1 -> S.State CDCLState ()
+setWatchVar :: ClauseId -> WatchVar %1 -> Index %1 -> S.State (CDCLState s) ()
 {-# INLINE setWatchVar #-}
 setWatchVar cid W1 = Unsafe.toLinear \vid ->
   clausesL S.%= \(Clauses litss bs) ->
@@ -763,14 +766,14 @@ setWatchVar cid W2 = Unsafe.toLinear \vid ->
     LUV.modify_ (#wat2 .~ vid) (unClauseId cid) bs & \bs ->
       Clauses litss bs
 
-setSatisfiedLevel :: ClauseId -> DecideLevel -> S.State CDCLState ()
+setSatisfiedLevel :: ClauseId -> DecideLevel -> S.State (CDCLState s) ()
 {-# INLINE setSatisfiedLevel #-}
 setSatisfiedLevel cid lvl =
   clausesL S.%= \(Clauses litss bs) ->
     LUV.modify_ (#satAt .~ lvl) (unClauseId cid) bs & \bs ->
       Clauses litss bs
 
-getSatisfiedLevel :: ClauseId -> S.State CDCLState (Ur DecideLevel)
+getSatisfiedLevel :: ClauseId -> S.State (CDCLState s) (Ur DecideLevel)
 getSatisfiedLevel cid =
   S.uses clausesL \(Clauses ls bs) ->
     LUV.unsafeGet (unClauseId cid) bs & \(Ur ClauseBody {..}, bs) ->

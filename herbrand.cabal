@@ -74,6 +74,7 @@ library
     , parallel
     , psqueues
     , recursion-schemes
+    , reflection
     , semigroupoids
     , strict
     , text
@@ -118,6 +119,7 @@ library herbrand-bench
     , parallel
     , psqueues
     , recursion-schemes
+    , reflection
     , safe-exceptions
     , semigroupoids
     , strict
@@ -165,6 +167,7 @@ library herbrand-test-utils
     , parallel
     , psqueues
     , recursion-schemes
+    , reflection
     , semigroupoids
     , strict
     , tasty
@@ -206,6 +209,7 @@ executable cdcl-dry
     , parallel
     , psqueues
     , recursion-schemes
+    , reflection
     , semigroupoids
     , strict
     , text
@@ -251,6 +255,7 @@ executable gen-sat
     , parser-combinators
     , psqueues
     , recursion-schemes
+    , reflection
     , semigroupoids
     , strict
     , text
@@ -294,6 +299,7 @@ executable sudoku
     , parser-combinators
     , psqueues
     , recursion-schemes
+    , reflection
     , semigroupoids
     , strict
     , text
@@ -343,6 +349,7 @@ test-suite herbrand-test
     , parallel
     , psqueues
     , recursion-schemes
+    , reflection
     , semigroupoids
     , strict
     , tasty
@@ -392,6 +399,7 @@ benchmark herbrand-cnf-bench
     , parallel
     , psqueues
     , recursion-schemes
+    , reflection
     , semigroupoids
     , strict
     , tasty
@@ -443,6 +451,7 @@ benchmark herbrand-sat-bench
     , parallel
     , psqueues
     , recursion-schemes
+    , reflection
     , semigroupoids
     , strict
     , tasty
