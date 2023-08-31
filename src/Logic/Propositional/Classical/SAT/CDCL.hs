@@ -32,7 +32,7 @@ import Control.Functor.Linear qualified as C
 import Control.Functor.Linear.State.Extra qualified as S
 import Control.Lens hiding (Index, lens, (%=), (&), (.=))
 import Control.Lens qualified as Lens
-import Control.Lens.Extras qualified as Lens
+import Control.Monad qualified as P
 import Control.Optics.Linear qualified as LinOpt
 import Data.Alloc.Linearly.Token (besides, linearly)
 import Data.Array.Mutable.Linear qualified as LA
@@ -195,18 +195,19 @@ solverLoop = fix $ \go mlit -> S.do
               -- Decide indefinite variable
               -- FIXME: Perhaps we can choose the variable from unsatisified clause?
               -- FIXME: Use heuristics for variable selection.
-              Ur mid <- S.uses valuationL (LUA.findIndex (Lens.is #_Indefinite))
+              Ur mid <- S.zoom varQueuesL findUnsatVar
               case mid of
                 Nothing -> S.do
                   S.pure Ok -- No vacant variable - model is full!
                 Just vid -> S.do
                   stepsL S.%= LUV.push 0
-                  let decLit = PosL $ toVarId vid
+                  let decLit = NegL vid
                   C.void $ assertLit (-1) decLit
                   go (Just (decLit, -1))
 
 backjump :: ClauseId -> Lit -> S.State CDCLState FinalState
 backjump confCls lit = S.do
+  S.zoom varQueuesL decayVarPriosM
   Ur confLits <- S.zoom clausesL $ foldClauseLits L.set confCls
   mLearnt <- findUIP1 lit confLits
   case mLearnt of
@@ -242,10 +243,29 @@ backjump confCls lit = S.do
           S.pure $ Ur reason
         Nothing -> S.pure $ Ur confCls
 
-      valuationL S.%= LUA.mapSame \v ->
-        if isAssignedAfter decLvl v
-          then Indefinite
-          else v
+      Ur unsats' <- S.uses valuationL \vals ->
+        LUA.size vals & \(Ur n, vals) ->
+          fix
+            ( \go !i !upds vals ->
+                if i == n
+                  then (Ur upds, vals)
+                  else
+                    LUA.unsafeGet i vals & \(Ur v, vals) ->
+                      isAssignedAfter decLvl v & \case
+                        True ->
+                          LUA.unsafeSet i Indefinite vals & \vals ->
+                            go (i + 1) (fromIntegral i : upds) vals
+                        False -> go (i + 1) upds vals
+            )
+            0
+            []
+            vals
+
+      S.zoom varQueuesL $ Ur.evalUrT $ P.forM_ unsats' \v ->
+        liftUrT
+          $ S.state
+          $ ((),)
+          PL.. moveToUnsatQueue v
 
       C.void $ assertLit reason truth
       solverLoop $ Just (truth, reason)
@@ -370,12 +390,13 @@ currentDecideLevel =
 
 toSatResult :: (FinalState, CDCLState) %1 -> Ur (SatResult (Model VarId))
 toSatResult (Failed, state) = state `lseq` Ur Unsat
-toSatResult (Ok, CDCLState numOrig steps clauses watches vals vids) =
+toSatResult (Ok, CDCLState numOrig steps clauses watches vals vids varQs) =
   numOrig
     `lseq` steps
     `lseq` clauses
     `lseq` watches
     `lseq` vids
+    `lseq` varQs
     `lseq` ( LUA.freeze vals & Ur.lift do
               Satisfiable
                 . Lens.foldMapOf
@@ -536,6 +557,7 @@ assertLit ante lit = S.do
   case mres of
     -- Unassigned. We can safely assign
     Ur Indefinite {} -> S.do
+      varQueuesL S.%= moveToSatQueue (litVar lit)
       let antecedent
             | ante < 0 = Nothing
             | otherwise = Just ante

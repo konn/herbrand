@@ -50,8 +50,7 @@ library
       src
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -flate-dmd-anal
   build-depends:
-      adjunctions
-    , aeson
+      aeson
     , attoparsec
     , base >=4.7 && <5
     , bifunctors
@@ -73,7 +72,7 @@ library
     , linear-base
     , linear-generics
     , parallel
-    , rec-def
+    , psqueues
     , recursion-schemes
     , semigroupoids
     , strict
@@ -96,7 +95,6 @@ library herbrand-bench
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -flate-dmd-anal
   build-depends:
       Glob
-    , adjunctions
     , aeson
     , attoparsec
     , base >=4.7 && <5
@@ -118,7 +116,7 @@ library herbrand-bench
     , herbrand
     , lens
     , parallel
-    , rec-def
+    , psqueues
     , recursion-schemes
     , safe-exceptions
     , semigroupoids
@@ -143,8 +141,7 @@ library herbrand-test-utils
       libs/test
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -flate-dmd-anal
   build-depends:
-      adjunctions
-    , aeson
+      aeson
     , attoparsec
     , base >=4.7 && <5
     , bifunctors
@@ -166,7 +163,7 @@ library herbrand-test-utils
     , herbrand
     , lens
     , parallel
-    , rec-def
+    , psqueues
     , recursion-schemes
     , semigroupoids
     , strict
@@ -187,8 +184,7 @@ executable cdcl-dry
       app/cdcl-dry
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -flate-dmd-anal "-with-rtsopts=-A32m -T --nonmoving-gc" -fproc-alignment=64 -O2 -rtsopts
   build-depends:
-      adjunctions
-    , aeson
+      aeson
     , attoparsec
     , base >=4.7 && <5
     , bifunctors
@@ -208,7 +204,7 @@ executable cdcl-dry
     , lens
     , optparse-applicative
     , parallel
-    , rec-def
+    , psqueues
     , recursion-schemes
     , semigroupoids
     , strict
@@ -228,8 +224,7 @@ executable gen-sat
       app/gen-sat
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -flate-dmd-anal -O2
   build-depends:
-      adjunctions
-    , aeson
+      aeson
     , attoparsec
     , base >=4.7 && <5
     , bifunctors
@@ -254,7 +249,7 @@ executable gen-sat
     , optparse-applicative
     , parallel
     , parser-combinators
-    , rec-def
+    , psqueues
     , recursion-schemes
     , semigroupoids
     , strict
@@ -274,8 +269,7 @@ executable sudoku
       app/sudoku
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -flate-dmd-anal -O2
   build-depends:
-      adjunctions
-    , aeson
+      aeson
     , attoparsec
     , base >=4.7 && <5
     , bifunctors
@@ -298,7 +292,7 @@ executable sudoku
     , optparse-applicative
     , parallel
     , parser-combinators
-    , rec-def
+    , psqueues
     , recursion-schemes
     , semigroupoids
     , strict
@@ -326,8 +320,7 @@ test-suite herbrand-test
   build-tool-depends:
       tasty-discover:tasty-discover
   build-depends:
-      adjunctions
-    , aeson
+      aeson
     , attoparsec
     , base >=4.7 && <5
     , bifunctors
@@ -348,7 +341,7 @@ test-suite herbrand-test
     , herbrand-test-utils
     , lens
     , parallel
-    , rec-def
+    , psqueues
     , recursion-schemes
     , semigroupoids
     , strict
@@ -374,8 +367,7 @@ benchmark herbrand-cnf-bench
   build-tool-depends:
       tasty-discover:tasty-discover
   build-depends:
-      adjunctions
-    , aeson
+      aeson
     , attoparsec
     , base >=4.7 && <5
     , bifunctors
@@ -398,7 +390,7 @@ benchmark herbrand-cnf-bench
     , herbrand-bench
     , lens
     , parallel
-    , rec-def
+    , psqueues
     , recursion-schemes
     , semigroupoids
     , strict
@@ -426,8 +418,7 @@ benchmark herbrand-sat-bench
   build-tool-depends:
       tasty-discover:tasty-discover
   build-depends:
-      adjunctions
-    , aeson
+      aeson
     , attoparsec
     , base >=4.7 && <5
     , bifunctors
@@ -450,7 +441,7 @@ benchmark herbrand-sat-bench
     , herbrand-bench
     , lens
     , parallel
-    , rec-def
+    , psqueues
     , recursion-schemes
     , semigroupoids
     , strict

@@ -21,7 +21,6 @@ description:         Please see the README on GitHub at <https://github.com/konn
 
 dependencies:
 - base >= 4.7 && < 5
-- adjunctions
 - aeson
 - attoparsec
 - bifunctors
@@ -38,9 +37,9 @@ dependencies:
 - foldl
 - generic-lens
 - hashable
+- psqueues
 - parallel
 - recursion-schemes
-- rec-def
 - semigroupoids
 - strict
 - transformers
