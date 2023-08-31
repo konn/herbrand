@@ -51,8 +51,8 @@ import Data.HashSet qualified as HS
 import Data.Hashable
 import Data.IntSet qualified as IS
 import Data.Maybe qualified as P
-import Data.Proxy (Proxy)
-import Data.Reflection (Reifies, reify)
+import Data.Proxy (Proxy (..))
+import Data.Reflection (Reifies, reflect, reify)
 import Data.Semigroup (Arg (..), Max (..))
 import Data.Sequence (Seq (..))
 import Data.Sequence qualified as Seq
@@ -80,9 +80,6 @@ import Prelude qualified as P
 
 data FinalState = Ok | Failed
   deriving (Show, P.Eq, P.Ord, GHC.Generic)
-
-defaultOptions :: CDCLOptions
-defaultOptions = CDCLOptions {decayFactor = 0.95}
 
 solve :: (LHM.Keyed a) => CNF a -> SatResult (Model a)
 {-# INLINE solve #-}
@@ -289,6 +286,8 @@ backjump confCls lit = S.do
       solverLoop $ Just (truth, reason)
 
 findUIP1 ::
+  forall s.
+  (Reifies s CDCLOptions) =>
   Lit ->
   Set Lit ->
   S.State (CDCLState s) (Maybe (Ur (DecideLevel, Maybe Clause, Lit)))
@@ -310,6 +309,9 @@ findUIP1 !lit !curCls
               Ur cls' <- case antecedent of
                 Just ante -> S.zoom clausesL $ foldClauseLits L.set ante
                 Nothing -> S.pure $ Ur Set.empty
+              activateResolved (reflect $ Proxy @s) & \case
+                True -> S.zoom varQueuesL $ incrementVarM lit
+                False -> S.pure ()
               let resolved = resolve lit curCls cls'
               if Set.null resolved
                 then S.do

@@ -24,6 +24,7 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   toCDCLState,
   CDCLState (..),
   CDCLOptions (..),
+  defaultOptions,
   AssertionResult (..),
   Valuation,
   Clauses,
@@ -46,6 +47,7 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   unsatVarQL,
   moveToSatQueue,
   moveToUnsatQueue,
+  incrementVarM,
   findUnsatVar,
   decayVarPriosM,
   VarQueue,
@@ -152,8 +154,14 @@ import Prelude.Linear (lseq, (&))
 import Prelude.Linear qualified as PL
 import Unsafe.Linear qualified as Unsafe
 
-newtype CDCLOptions = CDCLOptions {decayFactor :: Double}
+data CDCLOptions = CDCLOptions
+  { decayFactor :: !Double
+  , activateResolved :: !Bool
+  }
   deriving (Show, Eq, Ord, Generic)
+
+defaultOptions :: CDCLOptions
+defaultOptions = CDCLOptions {decayFactor = 0.95, activateResolved = False}
 
 newtype VarId = VarId {unVarId :: Word}
   deriving (Eq, Ord, Generic)
@@ -451,9 +459,10 @@ pushClause = \Clause {..} -> S.do
   S.pure ()
 
 decayVarPriosM :: (Reifies s CDCLOptions) => S.State (VarQueues s) ()
-decayVarPriosM = S.state \(VarQueues ls qs :: VarQueues s) ->
+{-# INLINE decayVarPriosM #-}
+decayVarPriosM = S.modify \(VarQueues ls qs :: VarQueues s) ->
   let alpha = decayFactor (reflect $ Proxy @s)
-   in ((), VarQueues (decayVars alpha ls) (decayVars alpha qs))
+   in VarQueues (decayVars alpha ls) (decayVars alpha qs)
 
 decayVars :: Double -> VarQueue -> VarQueue
 {-# INLINE decayVars #-}
@@ -467,6 +476,12 @@ findUnsatVar = S.state \(VarQueues unsat sat) ->
       , VarQueues unsat $ PSQ.unsafeInsertNew k p () sat
       )
     Nothing -> (Ur Nothing, VarQueues unsat sat)
+
+incrementVarM :: Lit -> S.State (VarQueues s) ()
+incrementVarM l = S.modify \(VarQueues unsats sats) ->
+  VarQueues
+    (incrementVar l unsats)
+    (incrementVar l sats)
 
 incrementVar :: Lit -> VarQueue -> VarQueue
 incrementVar =
