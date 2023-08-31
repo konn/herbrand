@@ -12,3 +12,4 @@
 - K. Iwanuma and H. Nabeshima: [__SMT: 個別理論を取り扱うSAT技術__ (_SMT: Satisfiability Modulo Theories_)](https://www.jstage.jst.go.jp/article/jjsai/25/1/25_86/_article/-char/ja/).
 - H. H. Hoos and T. Stützle: "[_SATLib_](https://www.cs.ubc.ca/~hoos/SATLIB/benchm.html)".
 - E. Torlak: "[_A Modern SAT Solver_](https://courses.cs.washington.edu/courses/cse507/17wi/lectures/L02.pdf)". In the course material of "[_CSE 507: Computer-Aided Reasoning for Software_](https://courses.cs.washington.edu/courses/cse507/14au/index.html)".
+- J. H. Liang, V. Ganesh, E. Zulkoski, A. Zaman, and K. Czarnecki: "[_Understanding VSIDS Branching Heuristics in Conflict-Driven Clause-Learning SAT Solvers_](https://mk.cs.msu.ru/images/1/1f/SAT_SMT_Vijay_Ganesh_HVC2015.pdf)".
