@@ -210,7 +210,7 @@ solverLoop = fix $ \go mlit -> S.do
               -- Decide indefinite variable
               -- FIXME: Perhaps we can choose the variable from unsatisified clause?
               -- FIXME: Use heuristics for variable selection.
-              Ur mid <- S.zoom varQueuesL findUnsatVar
+              Ur mid <- S.zoom vsidsStateL findUnsatVar
               case mid of
                 Nothing -> S.do
                   S.pure Ok -- No vacant variable - model is full!
@@ -222,7 +222,7 @@ solverLoop = fix $ \go mlit -> S.do
 
 backjump :: (Reifies s CDCLOptions) => ClauseId -> Lit -> S.State (CDCLState s) FinalState
 backjump confCls lit = S.do
-  S.zoom varQueuesL decayVarPriosM
+  S.zoom vsidsStateL decayVarPriosM
   Ur confLits <- S.zoom clausesL $ foldClauseLits L.set confCls
   mLearnt <- findUIP1 lit confLits
   case mLearnt of
@@ -276,7 +276,7 @@ backjump confCls lit = S.do
             []
             vals
 
-      S.zoom varQueuesL $ Ur.evalUrT $ P.forM_ unsats' \v ->
+      S.zoom vsidsStateL $ Ur.evalUrT $ P.forM_ unsats' \v ->
         liftUrT
           $ S.state
           $ ((),)
@@ -310,7 +310,7 @@ findUIP1 !lit !curCls
                 Just ante -> S.zoom clausesL $ foldClauseLits L.set ante
                 Nothing -> S.pure $ Ur Set.empty
               activateResolved (reflect $ Proxy @s) & \case
-                True -> S.zoom varQueuesL $ incrementVarM lit
+                True -> S.zoom vsidsStateL $ incrementVarM lit
                 False -> S.pure ()
               let resolved = resolve lit curCls cls'
               if Set.null resolved
@@ -577,7 +577,7 @@ assertLit ante lit = S.do
   case mres of
     -- Unassigned. We can safely assign
     Ur Indefinite {} -> S.do
-      varQueuesL S.%= moveToSatQueue (litVar lit)
+      vsidsStateL S.%= moveToSatQueue (litVar lit)
       let antecedent
             | ante < 0 = Nothing
             | otherwise = Just ante
