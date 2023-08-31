@@ -197,7 +197,11 @@ data CDCLOptions = CDCLOptions
   deriving (Show, Eq, Ord, Generic)
 
 defaultOptions :: CDCLOptions
-defaultOptions = CDCLOptions {decayFactor = ConstantFactor 0.95, activateResolved = False}
+defaultOptions =
+  CDCLOptions
+    { decayFactor = defaultAdaptiveFactor
+    , activateResolved = True
+    }
 
 newtype VarId = VarId {unVarId :: Word}
   deriving (Eq, Ord, Generic)

@@ -81,11 +81,11 @@ main = do
 
 cdclBenches :: IO (DPLL.CNF Word, Formula Full Word) -> [Benchmark]
 cdclBenches fml =
-  [ bench "CDCL (α = 0.75)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.75}) . fst) fml
+  [ bench "CDCL (α = 0.75)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.75, activateResolved = False}) . fst) fml
   , bench "CDCL (α = 0.75, mVISDS)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.75, activateResolved = True}) . fst) fml
-  , bench "CDCL (α = 0.95)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.95}) . fst) fml
+  , bench "CDCL (α = 0.95)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.95, activateResolved = False}) . fst) fml
   , bench "CDCL (α = 0.95, mVISDS)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.95, activateResolved = True}) . fst) fml
-  , bench "CDCL (α = 0.99)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.99}) . fst) fml
+  , bench "CDCL (α = 0.99)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.99, activateResolved = False}) . fst) fml
   , bench "CDCL (α = 0.99, mVISDS)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.99, activateResolved = True}) . fst) fml
   , bench "CDCL (adaptive)"
       $ nfAppIO
@@ -93,6 +93,7 @@ cdclBenches fml =
             $ CDCL.solveWith
               ( CDCL.defaultOptions
                   { decayFactor = defaultAdaptiveFactor
+                  , activateResolved = False
                   }
               )
             . fst
