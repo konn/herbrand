@@ -4,5 +4,6 @@
       { "cmd": "hpack", "isAsync": true, "match": "(package\\.yaml|\\.l?hs)$" }
     ]
   },
-  "haskell.formattingProvider": "fourmolu"
+  "haskell.formattingProvider": "fourmolu",
+  "git.branchProtection": ["main"]
 }
