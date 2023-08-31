@@ -2,7 +2,7 @@ name: Build and Test
 on: 
   push: {branches: ["main"]}
   pull_request:
-
+  workflow_dispatch:
 
 jobs:
   build:
@@ -175,7 +175,7 @@ jobs:
         name: ${{matrix.bench}}.svg
 
   profiling: 
-    if: false
+    if: github.event_name == 'workflow_dispatch'
     env:
       ghc: 9.4.5
       cabal: 3.10.1.0
