@@ -449,7 +449,7 @@ decayVarPriosM = S.state \(VarQueues ls qs) ->
   ((), VarQueues (decayVars ls) (decayVars qs))
 
 decayVars :: VarQueue -> VarQueue
-decayVars = PSQ.unsafeMapMonotonic \_ (Down p) v -> (Down $ p * 0.5, v)
+decayVars = PSQ.unsafeMapMonotonic \_ (Down p) v -> (Down $ p * 0.95, v)
 
 findUnsatVar :: S.State VarQueues (Ur (Maybe VarId))
 findUnsatVar = S.state \(VarQueues unsat sat) ->
