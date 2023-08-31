@@ -16,6 +16,10 @@
 module Logic.Propositional.Classical.SAT.CDCL (
   solve,
   solveVarId,
+  CDCLOptions (..),
+  defaultOptions,
+  solveWith,
+  solveVarIdWith,
   solveState,
   propagateUnit,
 
@@ -47,6 +51,8 @@ import Data.HashSet qualified as HS
 import Data.Hashable
 import Data.IntSet qualified as IS
 import Data.Maybe qualified as P
+import Data.Proxy (Proxy)
+import Data.Reflection (Reifies, reify)
 import Data.Semigroup (Arg (..), Max (..))
 import Data.Sequence (Seq (..))
 import Data.Sequence qualified as Seq
@@ -75,17 +81,24 @@ import Prelude qualified as P
 data FinalState = Ok | Failed
   deriving (Show, P.Eq, P.Ord, GHC.Generic)
 
+defaultOptions :: CDCLOptions
+defaultOptions = CDCLOptions {decayFactor = 0.95}
+
 solve :: (LHM.Keyed a) => CNF a -> SatResult (Model a)
-{-# INLINE [1] solve #-}
-{-# ANN solve "HLint: ignore Avoid lambda" #-}
-solve cnf = unur $ LHM.empty 128 \dic ->
+{-# INLINE solve #-}
+solve = solveWith defaultOptions
+
+solveWith :: (LHM.Keyed a) => CDCLOptions -> CNF a -> SatResult (Model a)
+{-# INLINE [1] solveWith #-}
+{-# ANN solveWith "HLint: ignore Avoid lambda" #-}
+solveWith opts cnf = reify opts \(_ :: Proxy s) -> unur $ LHM.empty 128 \dic ->
   besides dic (`LHM.emptyL` 128) & \(rev, dic) ->
     S.runState
       (runUrT (traverse (\v -> liftUrT (renameCNF v)) cnf))
       ((rev, Ur 0), dic)
       & \(Ur cnf, ((dic, Ur _), rev)) ->
         dic
-          `lseq` besides rev (toCDCLState cnf)
+          `lseq` besides rev (toCDCLState @s cnf)
           & \case
             (Left (Ur resl), rev) ->
               rev `lseq` Ur (P.mempty P.<$ resl)
@@ -142,19 +155,24 @@ renameCNF a = S.do
       LinOpt._2 S.%= LHM.insert i a
       S.pure i
 
-{-# RULES "solve/VarId" solve = solveVarId #-}
+{-# RULES "solveWith/VarId" solveWith = solveVarIdWith #-}
 
 solveVarId :: CNF VarId -> SatResult (Model VarId)
-solveVarId cnf =
+{-# INLINE solveVarId #-}
+solveVarId = solveVarIdWith defaultOptions
+
+solveVarIdWith :: CDCLOptions -> CNF VarId -> SatResult (Model VarId)
+{-# INLINE solveVarIdWith #-}
+solveVarIdWith opts cnf = reify opts \(_ :: Proxy s) ->
   unur PL.$ linearly \l ->
-    toCDCLState cnf l PL.& \case
+    toCDCLState @s cnf l PL.& \case
       Left (Ur resl) -> Ur (P.mempty P.<$ resl)
       Right stt -> solveState stt
 
-solveState :: CDCLState s %1 -> Ur (SatResult (Model VarId))
+solveState :: (Reifies s CDCLOptions) => CDCLState s %1 -> Ur (SatResult (Model VarId))
 solveState = toSatResult PL.. S.runState (solverLoop Nothing)
 
-solverLoop :: (HasCallStack) => Maybe (Lit, ClauseId) -> S.State (CDCLState s) FinalState
+solverLoop :: (Reifies s CDCLOptions, HasCallStack) => Maybe (Lit, ClauseId) -> S.State (CDCLState s) FinalState
 solverLoop = fix $ \go mlit -> S.do
   -- First, check if the original clauses are all satisfied (at the current stage)
   -- We only have to traverse the initial segment, as the lerant clauses are always
@@ -205,7 +223,7 @@ solverLoop = fix $ \go mlit -> S.do
                   C.void $ assertLit (-1) decLit
                   go (Just (decLit, -1))
 
-backjump :: ClauseId -> Lit -> S.State (CDCLState s) FinalState
+backjump :: (Reifies s CDCLOptions) => ClauseId -> Lit -> S.State (CDCLState s) FinalState
 backjump confCls lit = S.do
   S.zoom varQueuesL decayVarPriosM
   Ur confLits <- S.zoom clausesL $ foldClauseLits L.set confCls

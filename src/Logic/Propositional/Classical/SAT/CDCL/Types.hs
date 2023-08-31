@@ -23,6 +23,7 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   isAssignedAfter,
   toCDCLState,
   CDCLState (..),
+  CDCLOptions (..),
   AssertionResult (..),
   Valuation,
   Clauses,
@@ -129,6 +130,8 @@ import Data.Matrix.Mutable.Linear.Unboxed qualified as LUM
 import Data.Maybe (fromMaybe)
 import Data.Monoid.Linear.Orphans ()
 import Data.Ord (Down (..))
+import Data.Proxy (Proxy (..))
+import Data.Reflection (Reifies, reflect)
 import Data.Set.Mutable.Linear.Extra qualified as LSet
 import Data.Strict.Tuple (Pair (..))
 import Data.Unrestricted.Linear (Ur (..), UrT)
@@ -383,24 +386,24 @@ instance PL.Dupable Clauses where
 
 type VarQueue = PSQ.IntPSQ (Down Double) ()
 
-data VarQueues where
+data VarQueues s where
   VarQueues ::
     -- | Unsatisfieds
     !VarQueue ->
     -- | Satisfieds
     !VarQueue ->
-    VarQueues
+    VarQueues s
 
-pattern MkVarQueues :: VarQueue -> VarQueue -> VarQueues
+pattern MkVarQueues :: VarQueue -> VarQueue -> VarQueues s
 pattern MkVarQueues {unsatVarQ, satVarQ} = VarQueues unsatVarQ satVarQ
 
 {-# COMPLETE MkVarQueues #-}
 
-deriving via L.AsMovable VarQueues instance PL.Consumable VarQueues
+deriving via L.AsMovable (VarQueues s) instance PL.Consumable (VarQueues s)
 
-deriving via L.AsMovable VarQueues instance PL.Dupable VarQueues
+deriving via L.AsMovable (VarQueues s) instance PL.Dupable (VarQueues s)
 
-instance PL.Movable VarQueues where
+instance PL.Movable (VarQueues s) where
   move (VarQueues ql qr) = Ur (VarQueues ql qr)
 
 data CDCLState s where
@@ -418,7 +421,7 @@ data CDCLState s where
     -- | Unsatisfied Clauses
     {-# UNPACK #-} !(LSet.Set ClauseId) %1 ->
     -- | Variable queue
-    {-# UNPACK #-} !VarQueues %1 ->
+    {-# UNPACK #-} !(VarQueues s) %1 ->
     CDCLState s
   deriving anyclass (HasLinearWitness)
 
@@ -447,14 +450,16 @@ pushClause = \Clause {..} -> S.do
       (U.foldr incrementVar sats lits)
   S.pure ()
 
-decayVarPriosM :: S.State VarQueues ()
-decayVarPriosM = S.state \(VarQueues ls qs) ->
-  ((), VarQueues (decayVars ls) (decayVars qs))
+decayVarPriosM :: (Reifies s CDCLOptions) => S.State (VarQueues s) ()
+decayVarPriosM = S.state \(VarQueues ls qs :: VarQueues s) ->
+  let alpha = decayFactor (reflect $ Proxy @s)
+   in ((), VarQueues (decayVars alpha ls) (decayVars alpha qs))
 
-decayVars :: VarQueue -> VarQueue
-decayVars = PSQ.unsafeMapMonotonic \_ (Down p) v -> (Down $ p * 0.95, v)
+decayVars :: Double -> VarQueue -> VarQueue
+{-# INLINE decayVars #-}
+decayVars = \alpha -> PSQ.unsafeMapMonotonic \_ (Down p) v -> (Down $ p * alpha, v)
 
-findUnsatVar :: S.State VarQueues (Ur (Maybe VarId))
+findUnsatVar :: S.State (VarQueues s) (Ur (Maybe VarId))
 findUnsatVar = S.state \(VarQueues unsat sat) ->
   PSQ.minView unsat & \case
     Just (k, p, (), unsat) ->
@@ -471,7 +476,7 @@ incrementVar =
     . unVarId
     . litVar
 
-moveToSatQueue :: VarId -> VarQueues %1 -> VarQueues
+moveToSatQueue :: VarId -> VarQueues s %1 -> VarQueues s
 moveToSatQueue vid = \(VarQueues unsats sats) ->
   case PSQ.deleteView vidInt unsats of
     Nothing -> VarQueues unsats sats
@@ -480,7 +485,7 @@ moveToSatQueue vid = \(VarQueues unsats sats) ->
   where
     !vidInt = fromIntegral $ unVarId vid
 
-moveToUnsatQueue :: VarId -> VarQueues %1 -> VarQueues
+moveToUnsatQueue :: VarId -> VarQueues s %1 -> VarQueues s
 moveToUnsatQueue vid = \(VarQueues unsats sats) ->
   case PSQ.deleteView vidInt sats of
     Nothing -> VarQueues unsats sats
@@ -560,7 +565,7 @@ valuationL :: LinLens.Lens' (CDCLState s) Valuation
 valuationL = LinLens.lens \(CDCLState norig ss cs ws vs vids varQ) ->
   (vs, \vs -> CDCLState norig ss cs ws vs vids varQ)
 
-varQueuesL :: LinLens.Lens' (CDCLState s) VarQueues
+varQueuesL :: LinLens.Lens' (CDCLState s) (VarQueues s)
 varQueuesL = LinLens.lens \(CDCLState norig ss cs ws vs vids varQ) ->
   (varQ, \varQ -> CDCLState norig ss cs ws vs vids varQ)
 
