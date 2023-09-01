@@ -2,14 +2,20 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE DeriveFoldable #-}
+{-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE InstanceSigs #-}
+{-# LANGUAGE MonoLocalBinds #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ParallelListComp #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE ViewPatterns #-}
@@ -17,10 +23,13 @@
 
 module Main (main) where
 
-import Control.Applicative (optional, (<**>))
+import Control.Applicative (liftA2, optional, (<**>))
 import Control.DeepSeq
 import Control.Exception
+import qualified Control.Foldl as L
 import Control.Lens hiding ((<.>))
+import Control.Monad (forM_)
+import qualified Data.Bifoldable as Bi
 import qualified Data.Bifunctor as Bi
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
@@ -35,12 +44,13 @@ import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Ord (Down (..), comparing)
 import Data.Proxy (Proxy (..))
 import Data.Reflection
-import Data.Semigroup (First (..), Max (..))
+import Data.Semigroup (Arg (..), ArgMax, First (..), Max (..))
 import qualified Data.Text as T
 import qualified Data.Trie.Map as Trie
 import qualified Data.Trie.Map.Internal as Trie
 import qualified Data.Vector as V
 import GHC.Generics (Generic)
+import GHC.Generics.Generically
 import GitHash
 import Graphics.Rendering.Chart
 import Graphics.Rendering.Chart.Backend.Diagrams
@@ -53,6 +63,14 @@ import System.FilePath
 import System.IO
 import UnliftIO (pooledForConcurrently)
 
+newtype MaybeA m a = MaybeA {runMaybeA :: m (Maybe a)}
+  deriving (Functor)
+
+instance (Applicative m) => Applicative (MaybeA m) where
+  pure = MaybeA . pure . Just
+  (<*>) :: forall a b. MaybeA m (a -> b) -> MaybeA m a -> MaybeA m b
+  (<*>) = coerce $ liftA2 @m $ (<*>) @Maybe @a @b
+
 data Opts = Opts
   { input :: !FilePath
   , output :: !FilePath
@@ -61,6 +79,24 @@ data Opts = Opts
   , gitInspect :: !Bool
   }
   deriving (Show, Eq, Ord, Generic)
+
+data Winner a = Winner
+  { timeWinner :: {-# UNPACK #-} !(ArgMax a T.Text)
+  , allocWinner :: {-# UNPACK #-} !(ArgMax a T.Text)
+  , peakWinner :: {-# UNPACK #-} !(ArgMax a T.Text)
+  }
+  deriving (Show, Eq, Ord, Generic)
+  deriving anyclass (NFData)
+  deriving (Semigroup) via Generically (Winner a)
+
+instance Functor Winner where
+  fmap f (Winner x y z) = Winner (fmap (Bi.first f) x) (fmap (Bi.first f) y) (fmap (Bi.first f) z)
+
+instance Foldable Winner where
+  foldMap f (Winner x y z) =
+    foldMap (Bi.bifoldMap f mempty) x
+      <> foldMap (Bi.bifoldMap f mempty) y
+      <> foldMap (Bi.bifoldMap f mempty) z
 
 main :: IO ()
 main = do
@@ -77,16 +113,29 @@ main = do
         )
       $ flatKeys
       $ stripCommonPrefices
-      $ foldMap' (Trie.singleton <$> T.splitOn "." . name <*> First) rows
+      $ foldMap' (Trie.singleton <$> T.splitOn "." . fullName <*> First) rows
   createDirectoryIfMissing True output
   svgs <- pooledForConcurrently (Map.mapWithKey (,) trie) \(k, bg) -> do
     let baseName = T.unpack (T.intercalate "-" k) <.> "svg"
         outPath = output </> baseName
     createDirectoryIfMissing True $ takeDirectory outPath
     !plots <- evaluate $ mkPlot k bg
+    !mWinner <-
+      evaluate
+        $ force
+        <$> ifoldMap
+          ( \i (First BenchCase {..}) ->
+              Just
+                Winner
+                  { timeWinner = Max $ Arg mean i
+                  , allocWinner = Max $ Arg (fromMaybe 0 alloc) i
+                  , peakWinner = Max $ Arg (fromMaybe 0 peakMem) i
+                  }
+          )
+          bg
     renderableToFile def outPath $ toRenderable plots
     hPutStrLn stderr $ "Written: " <> outPath
-    pure baseName
+    pure (baseName, mWinner)
 
   mGit <-
     if gitInspect
@@ -100,12 +149,23 @@ main = do
   Lucid.renderToFile reportHtml $ buildReport reportName mGit svgs
   hPutStrLn stderr $ "Report Written to: " <> reportHtml
 
-buildReport :: Maybe T.Text -> Maybe GitInfo -> Map.Map [T.Text] FilePath -> Lucid.Html ()
+buildReport :: Maybe T.Text -> Maybe GitInfo -> Map.Map [T.Text] (FilePath, Maybe (Winner Integer)) -> Lucid.Html ()
 buildReport mReportName mGit benchs = Lucid.doctypehtml_ do
   let resultName =
         case mReportName of
           Nothing -> "Benchmark Result"
           Just txt -> "Benchmark Result for " <> txt
+      totalWinner =
+        L.fold
+          ( L.premap snd
+              $ L.handles _Just
+              $ runMaybeA do
+                timeWinner <- MaybeA $ L.premap timeWinner winnerL
+                allocWinner <- MaybeA $ L.premap allocWinner winnerL
+                peakWinner <- MaybeA $ L.premap peakWinner winnerL
+                pure Winner {..}
+          )
+          benchs
   H5.head_ do
     H5.title_ $ Lucid.toHtml resultName
     H5.meta_ [H5.charset_ "UTF-8"]
@@ -133,13 +193,55 @@ buildReport mReportName mGit benchs = Lucid.doctypehtml_ do
           H5.tr_ do
             H5.th_ "Commit Message"
             H5.td_ $ H5.code_ $ Lucid.toHtml $ giCommitMessage ginfo
+    H5.h2_ "Summary: Total Winner"
+    case totalWinner of
+      Nothing -> H5.p_ "N/A"
+      Just winners -> do
+        let renderWinner crit acc = H5.tr_ do
+              H5.th_ crit
+              H5.td_ $ H5.code_ $ Lucid.toHtml $ getMaxArg $ acc winners
+              H5.td_ $ Lucid.toHtml (show $ getMaxObj $ timeWinner winners) <> " wins"
+        H5.table_ do
+          H5.thead_ do
+            H5.th_ "Criterion"
+            H5.th_ "Winner"
+            H5.th_ "Score"
+          H5.tbody_ do
+            renderWinner "Time" timeWinner
+            renderWinner "Alloc" allocWinner
+            renderWinner "Alloc" peakWinner
+
     H5.h2_ "Results"
-    iforM_ benchs \k v -> H5.section_ do
+    iforM_ benchs \k (v, mwin) -> H5.section_ do
       H5.h3_ $ H5.code_ $ Lucid.toHtml $ T.intercalate "-" k
+      forM_ mwin $ \win -> H5.table_ do
+        let renderWinner lab crit = H5.tr_ do
+              H5.th_ lab
+              H5.td_ $ H5.code_ $ Lucid.toHtml $ getMaxArg $ crit win
+              H5.td_ $ H5.code_ $ Lucid.toHtml $ show $ getMaxObj $ crit win
+        H5.thead_ $ H5.tr_ $ H5.th_ "Criterion" <> H5.th_ "Winner" <> H5.th_ "Score"
+        H5.tbody_ do
+          renderWinner "Time" timeWinner
+          renderWinner "Alloc" allocWinner
+          renderWinner "Peak" peakWinner
       H5.p_
         $ H5.figure_
         $ H5.a_ [H5.href_ (T.pack v)]
         $ H5.img_ [H5.src_ (T.pack v), H5.alt_ "Bar chart"]
+
+winnerL :: L.Fold (ArgMax x T.Text) (Maybe (Max (Arg Int T.Text)))
+winnerL =
+  L.premap ((,1 :: Int) . getMaxArg)
+    $ L.foldByKeyMap L.sum
+    <&> L.foldOver
+      (ifolded . withIndex)
+      (L.foldMap (uncurry $ fmap (Just . Max) . flip Arg) id)
+
+getMaxArg :: ArgMax w a -> a
+getMaxArg (Max (Arg _ a)) = a
+
+getMaxObj :: ArgMax w a -> w
+getMaxObj (Max (Arg w _)) = w
 
 mkPlot :: [T.Text] -> Map.Map T.Text (First BenchCase) -> LayoutLR PlotIndex Double Double
 mkPlot k bg =
@@ -255,7 +357,7 @@ optsP = Opt.info (p <**> Opt.helper) $ Opt.progDesc "Converts tasty-bench output
       pure Opts {..}
 
 data BenchCase = BenchCase
-  { name :: !T.Text
+  { fullName :: !T.Text
   , mean :: !Integer
   , stddev2 :: !Integer
   , alloc, copied, peakMem :: !(Maybe Integer)
@@ -286,7 +388,7 @@ peakF = "Peak Memory"
 instance Csv.ToNamedRecord BenchCase where
   toNamedRecord BenchCase {..} =
     Csv.namedRecord
-      $ [ (nameF, Csv.toField name)
+      $ [ (nameF, Csv.toField fullName)
         , (meanF, Csv.toField mean)
         , (stddev2F, Csv.toField stddev2)
         ]
@@ -299,7 +401,7 @@ instance Csv.ToNamedRecord BenchCase where
 
 instance Csv.FromNamedRecord BenchCase where
   parseNamedRecord recd = do
-    name <- recd Csv..: nameF
+    fullName <- recd Csv..: nameF
     mean <- recd Csv..: meanF
     stddev2 <- recd Csv..: stddev2F
     alloc <- recd Csv..: allocF

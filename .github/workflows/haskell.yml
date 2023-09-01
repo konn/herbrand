@@ -176,6 +176,7 @@ jobs:
       with:
         path: ${{env.svg-path}}
         name: ${{matrix.bench}}.svg
+    
     - name: Generate Report
       run: >
         ./artifacts/exes/bench-chart

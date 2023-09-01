@@ -35,6 +35,7 @@ dependencies:
 - fmlist
 - foldable1-classes-compat
 - foldl
+- generically
 - generic-lens
 - hashable
 - psqueues

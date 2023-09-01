@@ -66,6 +66,7 @@ library
     , foldable1-classes-compat
     , foldl
     , generic-lens
+    , generically
     , hashable
     , lens
     , linear-array-extra
@@ -114,6 +115,7 @@ library herbrand-bench
     , foldable1-classes-compat
     , foldl
     , generic-lens
+    , generically
     , hashable
     , herbrand
     , lens
@@ -163,6 +165,7 @@ library herbrand-test-utils
     , foldable1-classes-compat
     , foldl
     , generic-lens
+    , generically
     , hashable
     , herbrand
     , lens
@@ -217,6 +220,7 @@ executable bench-chart
     , foldable1-classes-compat
     , foldl
     , generic-lens
+    , generically
     , githash
     , hashable
     , herbrand
@@ -263,6 +267,7 @@ executable cdcl-dry
     , foldable1-classes-compat
     , foldl
     , generic-lens
+    , generically
     , hashable
     , herbrand
     , lens
@@ -308,6 +313,7 @@ executable gen-sat
     , foldable1-classes-compat
     , foldl
     , generic-lens
+    , generically
     , hashable
     , herbrand
     , herbrand-test-utils
@@ -354,6 +360,7 @@ executable sudoku
     , foldable1-classes-compat
     , foldl
     , generic-lens
+    , generically
     , hashable
     , herbrand
     , lens
@@ -406,6 +413,7 @@ test-suite herbrand-test
     , foldable1-classes-compat
     , foldl
     , generic-lens
+    , generically
     , hashable
     , herbrand
     , herbrand-test-utils
@@ -457,6 +465,7 @@ benchmark herbrand-cnf-bench
     , foldable1-classes-compat
     , foldl
     , generic-lens
+    , generically
     , hashable
     , herbrand
     , herbrand-bench
@@ -510,6 +519,7 @@ benchmark herbrand-sat-bench
     , foldable1-classes-compat
     , foldl
     , generic-lens
+    , generically
     , hashable
     , herbrand
     , herbrand-bench
