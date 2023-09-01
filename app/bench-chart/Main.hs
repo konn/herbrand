@@ -200,7 +200,7 @@ buildReport mReportName mGit benchs = Lucid.doctypehtml_ do
               H5.th_ "Rank"
               H5.th_ "Name"
               H5.th_ "Score"
-            H5.tbody_ $ iforM_ (take 3 $ sortOn snd $ Map.toList rank) \i (algo, score) ->
+            H5.tbody_ $ iforM_ (take 3 $ sortOn (Down . snd) $ Map.toList rank) \i (algo, score) ->
               H5.tr_ do
                 H5.td_ $ "#" <> Lucid.toHtml (show $ i + 1)
                 H5.td_ $ Lucid.toHtml algo
