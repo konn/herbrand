@@ -54,6 +54,7 @@ import GHC.Generics.Generically
 import GitHash
 import Graphics.Rendering.Chart
 import Graphics.Rendering.Chart.Backend.Diagrams
+import qualified Graphics.SVGFonts.ReadFont as F
 import qualified Lucid
 import qualified Lucid.Html5 as H5
 import Math.NumberTheory.Logarithms (integerLog10')
@@ -133,7 +134,10 @@ main = do
                   }
           )
           bg
-    renderableToFile def outPath $ toRenderable plots
+    renderableToFile
+      (def & fo_fonts .~ loadCommonFontsLocal)
+      outPath
+      $ toRenderable plots
     hPutStrLn stderr $ "Written: " <> outPath
     pure (baseName, mWinner)
 
@@ -200,7 +204,11 @@ buildReport mReportName mGit benchs = Lucid.doctypehtml_ do
         let renderWinner crit acc = H5.tr_ do
               H5.th_ crit
               H5.td_ $ H5.code_ $ Lucid.toHtml $ getMinArg $ acc winners
-              H5.td_ $ Lucid.toHtml (show $ getDown $ getMinObj $ timeWinner winners) <> " wins"
+              H5.td_
+                $ Lucid.toHtml (show $ getDown $ getMinObj $ timeWinner winners)
+                <> " / "
+                <> Lucid.toHtml (show $ Map.size benchs)
+                <> " wins"
         H5.table_ do
           H5.thead_ do
             H5.th_ "Criterion"
@@ -436,3 +444,56 @@ detectSISuffix orig i =
    in if lvl > ub
         then Just Giga
         else Just $ toEnum lvl
+
+-- Stolen from Chart-svg, but load font from local
+loadCommonFontsLocal :: IO (FontSelector Double)
+loadCommonFontsLocal = do
+  serifR <- F.loadFont "fonts/LinLibertine_R.svg"
+  serifRB <- F.loadFont "fonts/LinLibertine_RB.svg"
+  serifRBI <- F.loadFont "fonts/LinLibertine_RBI.svg"
+  serifRI <- F.loadFont "fonts/LinLibertine_RI.svg"
+  sansR <- F.loadFont "fonts/SourceSansPro_R.svg"
+  sansRB <- F.loadFont "fonts/SourceSansPro_RB.svg"
+  sansRBI <- F.loadFont "fonts/SourceSansPro_RBI.svg"
+  sansRI <- F.loadFont "fonts/SourceSansPro_RI.svg"
+  monoR <- F.loadFont "fonts/SourceCodePro_R.svg"
+  monoRB <- F.loadFont "fonts/SourceCodePro_RB.svg"
+
+  let selectFont :: FontStyle -> F.PreparedFont Double
+      selectFont fs = case (_font_name fs, _font_slant fs, _font_weight fs) of
+        ("serif", FontSlantNormal, FontWeightNormal) -> alterFontFamily "serif" serifR
+        ("serif", FontSlantNormal, FontWeightBold) -> alterFontFamily "serif" serifRB
+        ("serif", FontSlantItalic, FontWeightNormal) -> alterFontFamily "serif" serifRI
+        ("serif", FontSlantOblique, FontWeightNormal) -> alterFontFamily "serif" serifRI
+        ("serif", FontSlantItalic, FontWeightBold) -> alterFontFamily "serif" serifRBI
+        ("serif", FontSlantOblique, FontWeightBold) -> alterFontFamily "serif" serifRBI
+        ("sans-serif", FontSlantNormal, FontWeightNormal) -> alterFontFamily "sans-serif" sansR
+        ("sans-serif", FontSlantNormal, FontWeightBold) -> alterFontFamily "sans-serif" sansRB
+        ("sans-serif", FontSlantItalic, FontWeightNormal) -> alterFontFamily "sans-serif" sansRI
+        ("sans-serif", FontSlantOblique, FontWeightNormal) -> alterFontFamily "sans-serif" sansRI
+        ("sans-serif", FontSlantItalic, FontWeightBold) -> alterFontFamily "sans-serif" sansRBI
+        ("sans-serif", FontSlantOblique, FontWeightBold) -> alterFontFamily "sans-serif" sansRBI
+        ("monospace", _, FontWeightNormal) -> alterFontFamily "monospace" monoR
+        ("monospace", _, FontWeightBold) -> alterFontFamily "monospace" monoRB
+        (fam, FontSlantNormal, FontWeightNormal) | fam `isFontFamily` serifR -> serifR
+        (fam, FontSlantNormal, FontWeightBold) | fam `isFontFamily` serifRB -> serifRB
+        (fam, FontSlantItalic, FontWeightNormal) | fam `isFontFamily` serifRI -> serifRI
+        (fam, FontSlantOblique, FontWeightNormal) | fam `isFontFamily` serifRI -> serifRI
+        (fam, FontSlantItalic, FontWeightBold) | fam `isFontFamily` serifRBI -> serifRBI
+        (fam, FontSlantOblique, FontWeightBold) | fam `isFontFamily` serifRBI -> serifRBI
+        (fam, FontSlantNormal, FontWeightNormal) | fam `isFontFamily` sansR -> sansR
+        (fam, FontSlantNormal, FontWeightBold) | fam `isFontFamily` sansRB -> sansRB
+        (fam, FontSlantItalic, FontWeightNormal) | fam `isFontFamily` sansRI -> sansRI
+        (fam, FontSlantOblique, FontWeightNormal) | fam `isFontFamily` sansRI -> sansRI
+        (fam, FontSlantItalic, FontWeightBold) | fam `isFontFamily` sansRBI -> sansRBI
+        (fam, FontSlantOblique, FontWeightBold) | fam `isFontFamily` sansRBI -> sansRBI
+        (fam, _, FontWeightNormal) | fam `isFontFamily` monoR -> monoR
+        (fam, _, FontWeightBold) | fam `isFontFamily` monoRB -> monoRB
+        (_, _, _) -> selectFont (fs {_font_name = "sans-serif"})
+
+  return selectFont
+  where
+    alterFontFamily :: String -> F.PreparedFont Double -> F.PreparedFont Double
+    alterFontFamily n (fd, om) = (fd {F.fontDataFamily = n}, om)
+    isFontFamily :: String -> F.PreparedFont Double -> Bool
+    isFontFamily n (fd, _) = n == F.fontDataFamily fd

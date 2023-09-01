@@ -195,6 +195,7 @@ executable bench-chart
   build-depends:
       Chart
     , Chart-diagrams
+    , SVGFonts
     , aeson
     , attoparsec
     , base >=4.7 && <5

@@ -164,6 +164,7 @@ executables:
     - githash
     - integer-logarithms
     - lucid2
+    - SVGFonts
     - unliftio
     - optparse-applicative
 
