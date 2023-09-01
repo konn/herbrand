@@ -141,7 +141,6 @@ executables:
     source-dirs: app/bench-chart
     ghc-options:
     - '"-with-rtsopts=--nonmoving-gc -N8"'
-    - -fproc-alignment=64
     - -O2
     - -rtsopts
     - -threaded
