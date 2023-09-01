@@ -44,7 +44,7 @@ import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Ord (Down (..), comparing)
 import Data.Proxy (Proxy (..))
 import Data.Reflection
-import Data.Semigroup (Arg (..), ArgMax, First (..), Max (..))
+import Data.Semigroup (Arg (..), ArgMin, First (..), Max (..), Min (..))
 import qualified Data.Text as T
 import qualified Data.Trie.Map as Trie
 import qualified Data.Trie.Map.Internal as Trie
@@ -81,9 +81,9 @@ data Opts = Opts
   deriving (Show, Eq, Ord, Generic)
 
 data Winner a = Winner
-  { timeWinner :: {-# UNPACK #-} !(ArgMax a T.Text)
-  , allocWinner :: {-# UNPACK #-} !(ArgMax a T.Text)
-  , peakWinner :: {-# UNPACK #-} !(ArgMax a T.Text)
+  { timeWinner :: {-# UNPACK #-} !(ArgMin a T.Text)
+  , allocWinner :: {-# UNPACK #-} !(ArgMin a T.Text)
+  , peakWinner :: {-# UNPACK #-} !(ArgMin a T.Text)
   }
   deriving (Show, Eq, Ord, Generic)
   deriving anyclass (NFData)
@@ -127,9 +127,9 @@ main = do
           ( \i (First BenchCase {..}) ->
               Just
                 Winner
-                  { timeWinner = Max $ Arg mean i
-                  , allocWinner = Max $ Arg (fromMaybe 0 alloc) i
-                  , peakWinner = Max $ Arg (fromMaybe 0 peakMem) i
+                  { timeWinner = Min $ Arg mean i
+                  , allocWinner = Min $ Arg (fromMaybe 0 alloc) i
+                  , peakWinner = Min $ Arg (fromMaybe 0 peakMem) i
                   }
           )
           bg
@@ -199,8 +199,8 @@ buildReport mReportName mGit benchs = Lucid.doctypehtml_ do
       Just winners -> do
         let renderWinner crit acc = H5.tr_ do
               H5.th_ crit
-              H5.td_ $ H5.code_ $ Lucid.toHtml $ getMaxArg $ acc winners
-              H5.td_ $ Lucid.toHtml (show $ getMaxObj $ timeWinner winners) <> " wins"
+              H5.td_ $ H5.code_ $ Lucid.toHtml $ getMinArg $ acc winners
+              H5.td_ $ Lucid.toHtml (show $ getMinObj $ timeWinner winners) <> " wins"
         H5.table_ do
           H5.thead_ do
             H5.th_ "Criterion"
@@ -217,8 +217,8 @@ buildReport mReportName mGit benchs = Lucid.doctypehtml_ do
       forM_ mwin $ \win -> H5.table_ do
         let renderWinner lab crit = H5.tr_ do
               H5.th_ lab
-              H5.td_ $ H5.code_ $ Lucid.toHtml $ getMaxArg $ crit win
-              H5.td_ $ H5.code_ $ Lucid.toHtml $ show $ getMaxObj $ crit win
+              H5.td_ $ H5.code_ $ Lucid.toHtml $ getMinArg $ crit win
+              H5.td_ $ H5.code_ $ Lucid.toHtml $ show $ getMinObj $ crit win
         H5.thead_ $ H5.tr_ $ H5.th_ "Criterion" <> H5.th_ "Winner" <> H5.th_ "Score"
         H5.tbody_ do
           renderWinner "Time" timeWinner
@@ -229,19 +229,19 @@ buildReport mReportName mGit benchs = Lucid.doctypehtml_ do
         $ H5.a_ [H5.href_ (T.pack v)]
         $ H5.img_ [H5.src_ (T.pack v), H5.alt_ "Bar chart"]
 
-winnerL :: L.Fold (ArgMax x T.Text) (Maybe (Max (Arg Int T.Text)))
+winnerL :: L.Fold (ArgMin x T.Text) (Maybe (ArgMin Int T.Text))
 winnerL =
-  L.premap ((,1 :: Int) . getMaxArg)
+  L.premap ((,1 :: Int) . getMinArg)
     $ L.foldByKeyMap L.sum
     <&> L.foldOver
       (ifolded . withIndex)
-      (L.foldMap (uncurry $ fmap (Just . Max) . flip Arg) id)
+      (L.foldMap (uncurry $ fmap (Just . Min) . flip Arg) id)
 
-getMaxArg :: ArgMax w a -> a
-getMaxArg (Max (Arg _ a)) = a
+getMinArg :: ArgMin w a -> a
+getMinArg (Min (Arg _ a)) = a
 
-getMaxObj :: ArgMax w a -> w
-getMaxObj (Max (Arg w _)) = w
+getMinObj :: ArgMin w a -> w
+getMinObj (Min (Arg w _)) = w
 
 mkPlot :: [T.Text] -> Map.Map T.Text (First BenchCase) -> LayoutLR PlotIndex Double Double
 mkPlot k bg =
