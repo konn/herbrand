@@ -260,6 +260,7 @@ backjump confCls lit = S.do
           S.pure $ Ur reason
         Nothing -> S.pure $ Ur confCls
 
+      -- FIXME: Perhaps we can iterate through unsats instead of entire vals?
       Ur unsats' <- S.uses valuationL \vals ->
         LUA.size vals & \(Ur n, vals) ->
           fix
