@@ -44,6 +44,7 @@ dependencies:
 - semigroupoids
 - strict
 - transformers
+- trie-simple
 - text
 - unordered-containers
 - vector
@@ -126,13 +127,43 @@ executables:
     main:                Main.hs
     source-dirs:         app/cdcl-dry
     ghc-options:
-    - '"-with-rtsopts=-A32m -T --nonmoving-gc"'
+    - '"--nonmoving-gc"'
     - -fproc-alignment=64
     - -O2
     - -rtsopts
     dependencies:
     - herbrand
     - bytestring
+    - optparse-applicative
+
+  bench-chart:
+    main: Main.hs
+    source-dirs: app/bench-chart
+    ghc-options:
+    - '"-with-rtsopts=--nonmoving-gc -N8"'
+    - -fproc-alignment=64
+    - -O2
+    - -rtsopts
+    - -threaded
+    dependencies:
+    - herbrand
+    - blaze-markup
+    - bytestring
+    - cassava
+    - Chart
+    - Chart-diagrams
+    - colour
+    - data-default
+    - diagrams
+    - diagrams-lib
+    - diagrams-core
+    - diagrams-svg
+    - directory
+    - filepath
+    - githash
+    - integer-logarithms
+    - lucid2
+    - unliftio
     - optparse-applicative
 
 tests:
