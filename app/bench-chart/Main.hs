@@ -2,14 +2,9 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DeriveAnyClass #-}
-{-# LANGUAGE DeriveFoldable #-}
-{-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE InstanceSigs #-}
 {-# LANGUAGE MonoLocalBinds #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ParallelListComp #-}
@@ -23,13 +18,11 @@
 
 module Main (main) where
 
-import Control.Applicative (liftA2, optional, (<**>))
+import Control.Applicative (optional, (<**>))
 import Control.DeepSeq
 import Control.Exception
 import qualified Control.Foldl as L
 import Control.Lens hiding ((<.>))
-import Control.Monad (forM_)
-import qualified Data.Bifoldable as Bi
 import qualified Data.Bifunctor as Bi
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
@@ -39,8 +32,9 @@ import Data.Csv (ToNamedRecord (toNamedRecord))
 import qualified Data.Csv as Csv
 import Data.Default (def)
 import Data.Foldable (foldMap')
+import Data.List (sortOn)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Maybe (fromJust, fromMaybe, mapMaybe)
 import Data.Ord (Down (..), comparing)
 import Data.Proxy (Proxy (..))
 import Data.Reflection
@@ -64,14 +58,6 @@ import System.FilePath
 import System.IO
 import UnliftIO (pooledForConcurrently)
 
-newtype MaybeA m a = MaybeA {runMaybeA :: m (Maybe a)}
-  deriving (Functor)
-
-instance (Applicative m) => Applicative (MaybeA m) where
-  pure = MaybeA . pure . Just
-  (<*>) :: forall a b. MaybeA m (a -> b) -> MaybeA m a -> MaybeA m b
-  (<*>) = coerce $ liftA2 @m $ (<*>) @Maybe @a @b
-
 data Opts = Opts
   { input :: !FilePath
   , output :: !FilePath
@@ -94,10 +80,8 @@ instance Functor Winner where
   fmap f (Winner x y z) = Winner (fmap (Bi.first f) x) (fmap (Bi.first f) y) (fmap (Bi.first f) z)
 
 instance Foldable Winner where
-  foldMap f (Winner x y z) =
-    foldMap (Bi.bifoldMap f mempty) x
-      <> foldMap (Bi.bifoldMap f mempty) y
-      <> foldMap (Bi.bifoldMap f mempty) z
+  foldMap f (Winner (Min (Arg x _)) (Min (Arg y _)) (Min (Arg z _))) =
+    f x <> f y <> f z
 
 main :: IO ()
 main = do
@@ -108,6 +92,8 @@ main = do
   !trie <-
     evaluate
       $ force
+      $ coerce
+      $ Map.filter (not . Map.null)
       $ Map.mapKeysMonotonic
         ( \(V.fromList -> xs) ->
             V.toList $ V.take (max 0 (V.length xs - fromMaybe 0 stripSuffices)) xs
@@ -124,8 +110,9 @@ main = do
     !mWinner <-
       evaluate
         $ force
-        <$> ifoldMap
-          ( \i (First BenchCase {..}) ->
+        $ fromJust
+        $ ifoldMap
+          ( \i BenchCase {..} ->
               Just
                 Winner
                   { timeWinner = Min $ Arg mean i
@@ -150,24 +137,31 @@ main = do
           =<< getCurrentDirectory
       else pure Nothing
   let reportHtml = output </> "report.html"
+  print
+    $ L.fold
+      ( L.premap snd
+          $ (,,)
+          <$> L.premap timeWinner winnerCountL
+          <*> L.premap allocWinner winnerCountL
+          <*> L.premap peakWinner winnerCountL
+      )
+      svgs
   Lucid.renderToFile reportHtml $ buildReport reportName mGit svgs
   hPutStrLn stderr $ "Report Written to: " <> reportHtml
 
-buildReport :: Maybe T.Text -> Maybe GitInfo -> Map.Map [T.Text] (FilePath, Maybe (Winner Integer)) -> Lucid.Html ()
+buildReport :: Maybe T.Text -> Maybe GitInfo -> Map.Map [T.Text] (FilePath, Winner Integer) -> Lucid.Html ()
 buildReport mReportName mGit benchs = Lucid.doctypehtml_ do
   let resultName =
         case mReportName of
           Nothing -> "Benchmark Result"
           Just txt -> "Benchmark Result for " <> txt
-      totalWinner =
+      (timeRank, allocRank, peakRank) =
         L.fold
           ( L.premap snd
-              $ L.handles _Just
-              $ runMaybeA do
-                timeWinner <- MaybeA $ L.premap timeWinner winnerCountL
-                allocWinner <- MaybeA $ L.premap allocWinner winnerCountL
-                peakWinner <- MaybeA $ L.premap peakWinner winnerCountL
-                pure Winner {..}
+              $ (,,)
+              <$> L.premap timeWinner winnerCountL
+              <*> L.premap allocWinner winnerCountL
+              <*> L.premap peakWinner winnerCountL
           )
           benchs
   H5.head_ do
@@ -197,32 +191,28 @@ buildReport mReportName mGit benchs = Lucid.doctypehtml_ do
           H5.tr_ do
             H5.th_ "Commit Message"
             H5.td_ $ H5.code_ $ Lucid.toHtml $ giCommitMessage ginfo
-    H5.h2_ "Summary: Total Winner"
-    case totalWinner of
-      Nothing -> H5.p_ "N/A"
-      Just winners -> do
-        let renderWinner crit acc = H5.tr_ do
-              H5.th_ crit
-              H5.td_ $ H5.code_ $ Lucid.toHtml $ getMinArg $ acc winners
-              H5.td_
-                $ Lucid.toHtml (show $ getDown $ getMinObj $ timeWinner winners)
-                <> " / "
-                <> Lucid.toHtml (show $ Map.size benchs)
-                <> " wins"
-        H5.table_ do
-          H5.thead_ do
-            H5.th_ "Criterion"
-            H5.th_ "Winner"
-            H5.th_ "Score"
-          H5.tbody_ do
-            renderWinner "Time" timeWinner
-            renderWinner "Alloc" allocWinner
-            renderWinner "Peak" peakWinner
+    H5.h2_ "Summary: Overall Winning Ranking"
+    let renderRanking :: Lucid.Html () -> Map.Map T.Text Int -> Lucid.Html ()
+        renderRanking name rank = do
+          H5.h3_ name
+          H5.table_ do
+            H5.thead_ $ H5.tr_ $ do
+              H5.th_ "Rank"
+              H5.th_ "Name"
+              H5.th_ "Score"
+            H5.tbody_ $ iforM_ (take 3 $ sortOn snd $ Map.toList rank) \i (algo, score) ->
+              H5.tr_ do
+                H5.td_ $ "#" <> Lucid.toHtml (show $ i + 1)
+                H5.td_ $ Lucid.toHtml algo
+                H5.td_ $ Lucid.toHtml $ show score <> " / " <> show (Map.size benchs)
+    renderRanking "Time" timeRank
+    renderRanking "Alloc" allocRank
+    renderRanking "Peak" peakRank
 
     H5.h2_ "Results"
-    iforM_ benchs \k (v, mwin) -> H5.section_ do
+    iforM_ benchs \k (v, win) -> H5.section_ do
       H5.h3_ $ H5.code_ $ Lucid.toHtml $ T.intercalate "-" k
-      forM_ mwin $ \win -> H5.table_ do
+      H5.table_ do
         let renderWinner lab crit = H5.tr_ do
               H5.th_ lab
               H5.td_ $ H5.code_ $ Lucid.toHtml $ getMinArg $ crit win
@@ -237,13 +227,8 @@ buildReport mReportName mGit benchs = Lucid.doctypehtml_ do
         $ H5.a_ [H5.href_ (T.pack v)]
         $ H5.img_ [H5.src_ (T.pack v), H5.alt_ "Bar chart"]
 
-winnerCountL :: L.Fold (ArgMin x T.Text) (Maybe (ArgMin (Down Int) T.Text))
-winnerCountL =
-  L.premap ((,1 :: Int) . getMinArg)
-    $ L.foldByKeyMap (Down <$> L.sum)
-    <&> L.foldOver
-      (ifolded . withIndex)
-      (L.foldMap (uncurry $ fmap (Just . Min) . flip Arg) id)
+winnerCountL :: L.Fold (ArgMin x T.Text) (Map.Map T.Text Int)
+winnerCountL = L.premap ((,1 :: Int) . getMinArg) $ L.foldByKeyMap L.sum
 
 getMinArg :: ArgMin w a -> a
 getMinArg (Min (Arg _ a)) = a
@@ -251,10 +236,10 @@ getMinArg (Min (Arg _ a)) = a
 getMinObj :: ArgMin w a -> w
 getMinObj (Min (Arg w _)) = w
 
-mkPlot :: [T.Text] -> Map.Map T.Text (First BenchCase) -> LayoutLR PlotIndex Double Double
+mkPlot :: [T.Text] -> Map.Map T.Text BenchCase -> LayoutLR PlotIndex Double Double
 mkPlot k bg =
   let (timeSI, allocSI) =
-        foldMap (((,) <$> detectSISuffix Pico . mean <*> detectSISuffix Unit . fromMaybe 0 . alloc) . getFirst) bg
+        foldMap (((,) <$> detectSISuffix Pico . mean <*> detectSISuffix Unit . fromMaybe 0 . alloc)) bg
           & both %~ fromMaybe Unit
       mkBars i col n BenchCase {..} =
         let mean' = adjustSITo Pico mean timeSI
