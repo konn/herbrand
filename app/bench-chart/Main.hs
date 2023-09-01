@@ -160,9 +160,9 @@ buildReport mReportName mGit benchs = Lucid.doctypehtml_ do
           ( L.premap snd
               $ L.handles _Just
               $ runMaybeA do
-                timeWinner <- MaybeA $ L.premap timeWinner winnerL
-                allocWinner <- MaybeA $ L.premap allocWinner winnerL
-                peakWinner <- MaybeA $ L.premap peakWinner winnerL
+                timeWinner <- MaybeA $ L.premap timeWinner winnerCountL
+                allocWinner <- MaybeA $ L.premap allocWinner winnerCountL
+                peakWinner <- MaybeA $ L.premap peakWinner winnerCountL
                 pure Winner {..}
           )
           benchs
@@ -200,7 +200,7 @@ buildReport mReportName mGit benchs = Lucid.doctypehtml_ do
         let renderWinner crit acc = H5.tr_ do
               H5.th_ crit
               H5.td_ $ H5.code_ $ Lucid.toHtml $ getMinArg $ acc winners
-              H5.td_ $ Lucid.toHtml (show $ getMinObj $ timeWinner winners) <> " wins"
+              H5.td_ $ Lucid.toHtml (show $ getDown $ getMinObj $ timeWinner winners) <> " wins"
         H5.table_ do
           H5.thead_ do
             H5.th_ "Criterion"
@@ -209,7 +209,7 @@ buildReport mReportName mGit benchs = Lucid.doctypehtml_ do
           H5.tbody_ do
             renderWinner "Time" timeWinner
             renderWinner "Alloc" allocWinner
-            renderWinner "Alloc" peakWinner
+            renderWinner "Peak" peakWinner
 
     H5.h2_ "Results"
     iforM_ benchs \k (v, mwin) -> H5.section_ do
@@ -229,10 +229,10 @@ buildReport mReportName mGit benchs = Lucid.doctypehtml_ do
         $ H5.a_ [H5.href_ (T.pack v)]
         $ H5.img_ [H5.src_ (T.pack v), H5.alt_ "Bar chart"]
 
-winnerL :: L.Fold (ArgMin x T.Text) (Maybe (ArgMin Int T.Text))
-winnerL =
+winnerCountL :: L.Fold (ArgMin x T.Text) (Maybe (ArgMin (Down Int) T.Text))
+winnerCountL =
   L.premap ((,1 :: Int) . getMinArg)
-    $ L.foldByKeyMap L.sum
+    $ L.foldByKeyMap (Down <$> L.sum)
     <&> L.foldOver
       (ifolded . withIndex)
       (L.foldMap (uncurry $ fmap (Just . Min) . flip Arg) id)
