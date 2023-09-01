@@ -15,9 +15,6 @@ import Test.Tasty (Timeout (..), localOption)
 
 main :: IO ()
 main = do
-  !tinys <- evaluate . force =<< findCnfsIn "data/sat/tiny"
-  !smalls <- evaluate . force =<< findCnfsIn "data/sat/small"
-  !mediums <- evaluate . force =<< findCnfsIn "data/sat/medium"
   !larges <- evaluate . force =<< findCnfsIn "data/sat/large"
   !huges <- evaluate . force =<< findCnfsIn "data/sat/huge"
   !sudoku <- evaluate . force =<< findCnfsIn "data/sudoku"
@@ -26,25 +23,7 @@ main = do
   defaultMain
     [ bgroup
         "solve"
-        [ withCnfs "tiny" tinys $ \fml ->
-            [ bench "tableaux" $ nfAppIO (fmap $ Tableaux.solve . snd) fml
-            , bench "DPLL" $ nfAppIO (fmap $ DPLL.solve . fst) fml
-            ]
-              ++ cdclBenches fml
-        , withCnfs "small" smalls $ \fml ->
-            [ bench "tableaux" $ nfAppIO (fmap $ Tableaux.solve . snd) fml
-            , bench "DPLL" $ nfAppIO (fmap $ DPLL.solve . fst) fml
-            ]
-              ++ cdclBenches fml
-        , withCnfs "medium" mediums $ \fml ->
-            [ allowFailureBecause "O(n^2)"
-                $ localOption (Timeout (30 * 10 ^ (6 :: Int)) "30s")
-                $ bench "tableaux"
-                $ nfAppIO (fmap $ Tableaux.solve . snd) fml
-            , bench "DPLL" $ nfAppIO (fmap $ DPLL.solve . fst) fml
-            ]
-              ++ cdclBenches fml
-        , withCnfs "large" larges $ \fml ->
+        [ withCnfs "large" larges $ \fml ->
             [ allowFailureBecause "O(n^2)"
                 $ localOption (Timeout (30 * 10 ^ (6 :: Int)) "30s")
                 $ bench "tableaux"
