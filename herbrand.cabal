@@ -188,7 +188,7 @@ executable bench-chart
       Paths_herbrand
   hs-source-dirs:
       app/bench-chart
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -flate-dmd-anal "-with-rtsopts=--nonmoving-gc -N8" -O2 -rtsopts -threaded
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -flate-dmd-anal "-with-rtsopts=--nonmoving-gc -N8" -fproc-alignment=64 -O2 -rtsopts -threaded
   build-depends:
       Chart
     , Chart-diagrams
@@ -246,7 +246,7 @@ executable cdcl-dry
       Paths_herbrand
   hs-source-dirs:
       app/cdcl-dry
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -flate-dmd-anal "--nonmoving-gc" -fproc-alignment=64 -O2 -rtsopts
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -flate-dmd-anal "-with-rtsopts=--nonmoving-gc" -fproc-alignment=64 -O2 -rtsopts
   build-depends:
       aeson
     , attoparsec
