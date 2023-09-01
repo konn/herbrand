@@ -91,6 +91,6 @@ Temporary Items
 *.pdf
 *.eventlog.*
 *.svg
-*.svg
 *.hp.*
 workspace
+!/fonts/*
