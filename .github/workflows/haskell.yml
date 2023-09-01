@@ -184,6 +184,7 @@ jobs:
         -o "${{env.report-dir}}"
         --git
         -R "${{matrix.bench}}"
+        +RTS -N8
     
     - name: Compress Report
       run: >
