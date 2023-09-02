@@ -101,12 +101,13 @@ main = do
       $ flatKeys
       $ stripCommonPrefices
       $ foldMap' (Trie.singleton <$> T.splitOn "." . fullName <*> First) rows
+  let colorMap = buildColorMap trie
   createDirectoryIfMissing True output
   svgs <- pooledForConcurrently (Map.mapWithKey (,) trie) \(k, bg) -> do
     let baseName = T.unpack (T.intercalate "-" k) <.> "svg"
         outPath = output </> baseName
     createDirectoryIfMissing True $ takeDirectory outPath
-    !plots <- evaluate $ mkPlot k bg
+    !plots <- evaluate $ mkPlot colorMap k bg
     !mWinner <-
       evaluate
         $ force
@@ -148,6 +149,15 @@ main = do
       svgs
   Lucid.renderToFile reportHtml $ buildReport reportName mGit svgs
   hPutStrLn stderr $ "Report Written to: " <> reportHtml
+
+buildColorMap :: (Foldable t) => t (Map.Map T.Text a) -> Map.Map T.Text (AlphaColour Double)
+buildColorMap =
+  Map.fromList
+    . flip zip (cycle defaultColorSeq)
+    . L.fold
+      ( L.premap Map.keysSet
+          $ L.handles folded L.list
+      )
 
 buildReport :: Maybe T.Text -> Maybe GitInfo -> Map.Map [T.Text] (FilePath, Winner Integer) -> Lucid.Html ()
 buildReport mReportName mGit benchs = Lucid.doctypehtml_ do
@@ -236,15 +246,20 @@ getMinArg (Min (Arg _ a)) = a
 getMinObj :: ArgMin w a -> w
 getMinObj (Min (Arg w _)) = w
 
-mkPlot :: [T.Text] -> Map.Map T.Text BenchCase -> LayoutLR PlotIndex Double Double
-mkPlot k bg =
+mkPlot ::
+  Map.Map T.Text (AlphaColour Double) ->
+  [T.Text] ->
+  Map.Map T.Text BenchCase ->
+  LayoutLR PlotIndex Double Double
+mkPlot colMap k bg =
   let (timeSI, allocSI) =
-        foldMap (((,) <$> detectSISuffix Pico . mean <*> detectSISuffix Unit . fromMaybe 0 . alloc)) bg
+        foldMap ((,) <$> detectSISuffix Pico . mean <*> detectSISuffix Unit . fromMaybe 0 . alloc) bg
           & both %~ fromMaybe Unit
-      mkBars i col n BenchCase {..} =
+      mkBars i n BenchCase {..} =
         let mean' = adjustSITo Pico mean timeSI
             alloc' = adjustSITo Unit (fromMaybe 0 alloc) allocSI
             dev' = adjustSITo Pico (stddev2 `quot` 2) timeSI
+            col = fromMaybe (opaque black) $ Map.lookup n colMap
          in [ Left
                 $ plotBars
                 $ def
@@ -277,7 +292,7 @@ mkPlot k bg =
         & layoutlr_right_axis . laxis_title .~ ("Alloc [" <> showPrefix allocSI <> "B]")
         & layoutlr_bottom_axis_visibility . axis_show_labels .~ True
         & layoutlr_plots
-          .~ concat (zipWith3 (fmap uncurry . mkBars) [0 ..] (cycle defaultColorSeq) (coerce $ Map.toList bg))
+          .~ concat (zipWith (uncurry . mkBars) [0 ..] (coerce $ Map.toList bg))
 
 stroke :: AlphaColour Double -> Maybe LineStyle
 stroke = Just . solidLine 1.0
