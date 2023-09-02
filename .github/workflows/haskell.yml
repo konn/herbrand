@@ -142,6 +142,10 @@ jobs:
     env:
       ghc: 9.4.5
       cabal: 3.10.1.0
+      csv-path: bench-results/${{matrix.bench}}.csv
+      svg-path: bench-results/${{matrix.bench}}.svg
+      report-dir: bench-results/${{matrix.bench}}-report
+      report-tarball: bench-results/${{matrix.bench}}-report.tar.gz
     continue-on-error: true
     strategy:
       fail-fast: false
@@ -164,11 +168,32 @@ jobs:
       if: always()
       uses: actions/upload-artifact@v3
       with:
-        path: bench-results/${{matrix.bench}}.csv
+        path: ${{env.csv-path}}
         name: ${{matrix.bench}}.csv
     - name: Upload SVG
       if: always()
       uses: actions/upload-artifact@v3
       with:
-        path: bench-results/${{matrix.bench}}.svg
+        path: ${{env.svg-path}}
         name: ${{matrix.bench}}.svg
+    
+    - name: Generate Report
+      run: >
+        ./artifacts/exes/bench-chart
+        -i "${{env.csv-path}}"
+        -o "${{env.report-dir}}"
+        --git
+        -R "${{matrix.bench}}"
+        +RTS -N3
+    
+    - name: Compress Report
+      run: >
+        tar
+        czvf "${{env.report-tarball}}"
+        --directory=bench-results
+        "${{matrix.bench}}-report"
+    - name: Upload Report
+      uses: actions/upload-artifact@v3
+      with:
+        path: ${{env.report-tarball}}
+        name: ${{matrix.bench}}-report

@@ -66,6 +66,7 @@ library
     , foldable1-classes-compat
     , foldl
     , generic-lens
+    , generically
     , hashable
     , lens
     , linear-array-extra
@@ -79,6 +80,7 @@ library
     , strict
     , text
     , transformers
+    , trie-simple
     , unordered-containers
     , vector
     , vector-th-unbox
@@ -113,6 +115,7 @@ library herbrand-bench
     , foldable1-classes-compat
     , foldl
     , generic-lens
+    , generically
     , hashable
     , herbrand
     , lens
@@ -128,6 +131,7 @@ library herbrand-bench
     , tasty-expected-failure
     , text
     , transformers
+    , trie-simple
     , unordered-containers
     , vector
   default-language: Haskell2010
@@ -161,6 +165,7 @@ library herbrand-test-utils
     , foldable1-classes-compat
     , foldl
     , generic-lens
+    , generically
     , hashable
     , herbrand
     , lens
@@ -173,6 +178,67 @@ library herbrand-test-utils
     , tasty
     , text
     , transformers
+    , trie-simple
+    , unordered-containers
+    , vector
+  default-language: Haskell2010
+
+executable bench-chart
+  main-is: Main.hs
+  other-modules:
+      Paths_herbrand
+  autogen-modules:
+      Paths_herbrand
+  hs-source-dirs:
+      app/bench-chart
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -flate-dmd-anal "-with-rtsopts=--nonmoving-gc -N8" -fproc-alignment=64 -O2 -rtsopts -threaded
+  build-depends:
+      Chart
+    , Chart-diagrams
+    , SVGFonts
+    , aeson
+    , attoparsec
+    , base >=4.7 && <5
+    , bifunctors
+    , blaze-markup
+    , bytestring
+    , cassava
+    , colour
+    , containers
+    , data-default
+    , data-fix
+    , deepseq
+    , diagrams
+    , diagrams-core
+    , diagrams-lib
+    , diagrams-svg
+    , directory
+    , distributive
+    , dlist
+    , filepath
+    , filtrable
+    , fmlist
+    , foldable1-classes-compat
+    , foldl
+    , generic-lens
+    , generically
+    , githash
+    , hashable
+    , herbrand
+    , integer-logarithms
+    , lens
+    , lucid2
+    , optparse-applicative
+    , parallel
+    , psqueues
+    , recursion-schemes
+    , reflection
+    , semigroupoids
+    , strict
+    , text
+    , transformers
+    , trie-simple
+    , unliftio
     , unordered-containers
     , vector
   default-language: Haskell2010
@@ -185,7 +251,7 @@ executable cdcl-dry
       Paths_herbrand
   hs-source-dirs:
       app/cdcl-dry
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -flate-dmd-anal "-with-rtsopts=-A32m -T --nonmoving-gc" -fproc-alignment=64 -O2 -rtsopts
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -flate-dmd-anal "-with-rtsopts=--nonmoving-gc" -fproc-alignment=64 -O2 -rtsopts
   build-depends:
       aeson
     , attoparsec
@@ -202,6 +268,7 @@ executable cdcl-dry
     , foldable1-classes-compat
     , foldl
     , generic-lens
+    , generically
     , hashable
     , herbrand
     , lens
@@ -214,6 +281,7 @@ executable cdcl-dry
     , strict
     , text
     , transformers
+    , trie-simple
     , unordered-containers
     , vector
   default-language: Haskell2010
@@ -246,6 +314,7 @@ executable gen-sat
     , foldable1-classes-compat
     , foldl
     , generic-lens
+    , generically
     , hashable
     , herbrand
     , herbrand-test-utils
@@ -260,6 +329,7 @@ executable gen-sat
     , strict
     , text
     , transformers
+    , trie-simple
     , unordered-containers
     , vector
   default-language: Haskell2010
@@ -291,6 +361,7 @@ executable sudoku
     , foldable1-classes-compat
     , foldl
     , generic-lens
+    , generically
     , hashable
     , herbrand
     , lens
@@ -304,6 +375,7 @@ executable sudoku
     , strict
     , text
     , transformers
+    , trie-simple
     , unordered-containers
     , vector
   default-language: Haskell2010
@@ -342,6 +414,7 @@ test-suite herbrand-test
     , foldable1-classes-compat
     , foldl
     , generic-lens
+    , generically
     , hashable
     , herbrand
     , herbrand-test-utils
@@ -357,6 +430,7 @@ test-suite herbrand-test
     , tasty-quickcheck
     , text
     , transformers
+    , trie-simple
     , unordered-containers
     , vector
   default-language: Haskell2010
@@ -392,6 +466,7 @@ benchmark herbrand-cnf-bench
     , foldable1-classes-compat
     , foldl
     , generic-lens
+    , generically
     , hashable
     , herbrand
     , herbrand-bench
@@ -408,6 +483,7 @@ benchmark herbrand-cnf-bench
     , tasty-expected-failure
     , text
     , transformers
+    , trie-simple
     , unordered-containers
     , vector
   buildable: False
@@ -444,6 +520,7 @@ benchmark herbrand-sat-bench
     , foldable1-classes-compat
     , foldl
     , generic-lens
+    , generically
     , hashable
     , herbrand
     , herbrand-bench
@@ -460,6 +537,7 @@ benchmark herbrand-sat-bench
     , tasty-expected-failure
     , text
     , transformers
+    , trie-simple
     , unordered-containers
     , vector
   default-language: Haskell2010
