@@ -164,9 +164,16 @@ jobs:
       uses: actions/download-artifact@v3
     - name: Decompress
       run: tar xaf artifacts/artifacts.tar.zst
-    - name: Run Benchmark (${{matrix.bench}})
-      run: |
-        "./artifacts/benchs/${{matrix.bench}}" -j1
+    - name: Run Benchmark
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const script = require('./ci/compare-with-main.js')
+          await script({
+            core, glob, io, exec, context, github, fetch,
+            bench_name: "${{matrix.bench}}",
+            threshold: 20
+          })
     - name: Upload CSV
       if: always()
       uses: actions/upload-artifact@v3
@@ -181,6 +188,7 @@ jobs:
         name: ${{matrix.bench}}.svg
     
     - name: Generate Report
+      if: always()
       run: >
         ./artifacts/exes/bench-chart
         -i "${{env.csv-path}}"
@@ -188,12 +196,14 @@ jobs:
         --git
         -R "${{matrix.bench}}"    
     - name: Compress Report
+      if: always()
       run: >
         tar
         czvf "${{env.report-tarball}}"
         --directory=bench-results
         "${{matrix.bench}}-report"
     - name: Upload Report
+      if: always()
       uses: actions/upload-artifact@v3
       with:
         path: ${{env.report-tarball}}
