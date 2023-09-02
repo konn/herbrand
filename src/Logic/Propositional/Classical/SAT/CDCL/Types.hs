@@ -199,7 +199,7 @@ data CDCLOptions = CDCLOptions
 defaultOptions :: CDCLOptions
 defaultOptions =
   CDCLOptions
-    { decayFactor = defaultAdaptiveFactor
+    { decayFactor = 0.95
     , activateResolved = True
     }
 
