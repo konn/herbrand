@@ -51,8 +51,11 @@ jobs:
         key: ${{steps.cache-keys.outputs.dist}}
         restore-keys: ${{steps.cache-keys.outputs.dist-restore}}
     - name: cabal configure
-      run: |
-        cabal v2-configure --enable-tests --enable-benchmarks --enable-optimisation=2
+      run: >
+        cabal v2-configure
+        --enable-tests --enable-benchmarks --enable-optimisation=2
+        --constraint="herbrand +bench-chart"
+        
         cabal update
     - name: Build Dependencies
       run: | 
@@ -183,9 +186,7 @@ jobs:
         -i "${{env.csv-path}}"
         -o "${{env.report-dir}}"
         --git
-        -R "${{matrix.bench}}"
-        +RTS -N3
-    
+        -R "${{matrix.bench}}"    
     - name: Compress Report
       run: >
         tar

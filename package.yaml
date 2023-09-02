@@ -19,6 +19,12 @@ extra-source-files:
 # common to point users to the README.md file.
 description:         Please see the README on GitHub at <https://github.com/konn/herbrand#readme>
 
+flags:
+  bench-chart:
+    default: false
+    manual: true
+    description: Whether to build bench-chart or not
+
 dependencies:
 - base >= 4.7 && < 5
 - aeson
@@ -139,6 +145,11 @@ executables:
 
   bench-chart:
     main: Main.hs
+    when:
+    - condition: flag(bench-chart)
+      then: {buildable: true}
+      else: {buildable: false}
+
     source-dirs: app/bench-chart
     ghc-options:
     - '"-with-rtsopts=--nonmoving-gc -N8"'
@@ -151,22 +162,14 @@ executables:
     - blaze-markup
     - bytestring
     - cassava
-    - Chart
-    - Chart-diagrams
-    - colour
-    - data-default
-    - diagrams
-    - diagrams-lib
-    - diagrams-core
-    - diagrams-svg
+    - chart-svg
     - directory
     - filepath
     - githash
     - integer-logarithms
     - lucid2
-    - SVGFonts
-    - unliftio
     - optparse-applicative
+    - unliftio
 
 tests:
   herbrand-test:

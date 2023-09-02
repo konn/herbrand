@@ -6,6 +6,7 @@
 {-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MonoLocalBinds #-}
+{-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ParallelListComp #-}
 {-# LANGUAGE RecordWildCards #-}
@@ -18,6 +19,7 @@
 
 module Main (main) where
 
+import Chart hiding (abs, (<.>))
 import Control.Applicative (optional, (<**>))
 import Control.DeepSeq
 import Control.Exception
@@ -27,11 +29,11 @@ import qualified Data.Bifunctor as Bi
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
 import Data.Coerce (coerce)
-import Data.Colour
 import Data.Csv (ToNamedRecord (toNamedRecord))
 import qualified Data.Csv as Csv
-import Data.Default (def)
+import qualified Data.DList as DL
 import Data.Foldable (foldMap')
+import Data.Generics.Labels ()
 import Data.List (sortOn)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromJust, fromMaybe, mapMaybe)
@@ -46,9 +48,6 @@ import qualified Data.Vector as V
 import GHC.Generics (Generic)
 import GHC.Generics.Generically
 import GitHash
-import Graphics.Rendering.Chart
-import Graphics.Rendering.Chart.Backend.Diagrams
-import qualified Graphics.SVGFonts.ReadFont as F
 import qualified Lucid
 import qualified Lucid.Html5 as H5
 import Math.NumberTheory.Logarithms (integerLog10')
@@ -122,10 +121,7 @@ main = do
                   }
           )
           bg
-    renderableToFile
-      (def & fo_fonts .~ loadSansSerifFontsLocal)
-      outPath
-      $ toRenderable plots
+    writeChartOptions outPath plots
     hPutStrLn stderr $ "Written: " <> outPath
     pure (baseName, mWinner)
 
@@ -150,10 +146,10 @@ main = do
   Lucid.renderToFile reportHtml $ buildReport reportName mGit svgs
   hPutStrLn stderr $ "Report Written to: " <> reportHtml
 
-buildColorMap :: (Foldable t) => t (Map.Map T.Text a) -> Map.Map T.Text (AlphaColour Double)
+buildColorMap :: (Foldable t) => t (Map.Map T.Text a) -> Map.Map T.Text Colour
 buildColorMap =
   Map.fromList
-    . flip zip (cycle defaultColorSeq)
+    . flip zip (cycle paletteR)
     . L.fold
       ( L.premap Map.keysSet
           $ L.handles folded L.list
@@ -247,55 +243,83 @@ getMinObj :: ArgMin w a -> w
 getMinObj (Min (Arg w _)) = w
 
 mkPlot ::
-  Map.Map T.Text (AlphaColour Double) ->
+  Map.Map T.Text Colour ->
   [T.Text] ->
   Map.Map T.Text BenchCase ->
-  LayoutLR PlotIndex Double Double
+  ChartOptions
 mkPlot colMap k bg =
-  let (timeSI, allocSI) =
+  let title = "Time (fill): " <> T.intercalate "/" k
+      (timeSI, allocSI) =
         foldMap ((,) <$> detectSISuffix Pico . mean <*> detectSISuffix Unit . fromMaybe 0 . alloc) bg
           & both %~ fromMaybe Unit
-      mkBars i n BenchCase {..} =
+      mkBarRow BenchCase {..} =
         let mean' = adjustSITo Pico mean timeSI
             alloc' = adjustSITo Unit (fromMaybe 0 alloc) allocSI
             dev' = adjustSITo Pico (stddev2 `quot` 2) timeSI
-            col = fromMaybe (opaque black) $ Map.lookup n colMap
-         in [ Left
-                $ plotBars
-                $ def
-                & plot_bars_titles .~ [T.unpack n]
-                & plot_bars_item_styles .~ [(solidFillStyle col, stroke $ opaque black)]
-                & plot_bars_values
-                  .~ [
-                       ( fromInteger (2 * i)
-                       , [mean']
-                       )
-                     ]
-            , Left
-                $ toPlot
-                $ def
-                & plot_errbars_values .~ [symErrPoint (fromInteger $ 2 * i) mean' 0 dev']
-            , Right
-                $ plotBars
-                $ def
-                & plot_bars_item_styles .~ [(solidFillStyle transparent, stroke col)]
-                & plot_bars_values .~ [(fromInteger (2 * i + 1), [alloc'])]
-            ]
-   in def
-        & layoutlr_title .~ T.unpack ("Time (fill) and Alloc (stroke): " <> T.intercalate "/" k)
-        & layoutlr_title_style . font_size .~ 20
-        & layoutlr_x_axis . laxis_title .~ "Algorithm"
-        & layoutlr_x_axis . laxis_override
-          .~ axisLabelsOverride
-            (mconcat [[(2 * i, T.unpack nam), (2 * i + 1, T.unpack nam)] | i <- [0 ..] | nam <- Map.keys bg])
-        & layoutlr_left_axis . laxis_title .~ ("Time [" <> showPrefix timeSI <> "s]")
-        & layoutlr_right_axis . laxis_title .~ ("Alloc [" <> showPrefix allocSI <> "B]")
-        & layoutlr_bottom_axis_visibility . axis_show_labels .~ True
-        & layoutlr_plots
-          .~ concat (zipWith (uncurry . mkBars) [0 ..] (coerce $ Map.toList bg))
-
-stroke :: AlphaColour Double -> Maybe LineStyle
-stroke = Just . solidLine 1.0
+         in (DL.singleton mean', DL.singleton alloc', DL.singleton dev')
+      (times, allocs, devs) = foldMap mkBarRow bg
+      timeBars =
+        BarData
+          { barData = map pure $ DL.toList times
+          , barRowLabels = []
+          , barColumnLabels = Map.keys bg
+          }
+      barOpts =
+        defaultBarOptions
+          & #displayValues .~ False
+          & #barRectStyles
+            .~ map
+              ( \nam ->
+                  let col = fromMaybe (grey 0.5 0.4) $ Map.lookup nam colMap
+                   in defaultRectStyle
+                        & #color .~ col
+                        & #borderSize .~ 0.0
+              )
+              (Map.keys bg)
+      barXYes =
+        timeBars
+          ^.. #barData
+            . to (barRects barOpts)
+            . folded
+            . folded
+            . to \(Rect x0 x1 _ y1) ->
+              (Point ((x0 + x1) / 2) y1, x1 - x0)
+      timeLabel =
+        defaultTitle ("Time [" <> T.pack (showPrefix timeSI) <> "s]")
+          & #place .~ PlaceLeft
+          & #anchor .~ AnchorMiddle
+          & #style . #size %~ (/ 2)
+      scat =
+        zipWith
+          ( \(Point x y, w) sigma ->
+              let sty = defaultLineStyle & #size .~ 0.003
+                  !y0 = y - sigma
+                  !y1 = y + sigma
+                  !dx = w / 10
+               in LineChart
+                    sty
+                    [ [Point (x - dx) y0, Point (x + dx) y0]
+                    , [Point x y0, Point x y1]
+                    , [Point (x - dx) y1, Point (x + dx) y1]
+                    ]
+          )
+          barXYes
+          $ DL.toList devs
+      theBar = barChart barOpts timeBars
+      xAxis =
+        defaultAxisOptions
+          & #ticks . #ltick .~ Nothing
+          & #ticks . #style .~ TickLabels (Map.keys bg)
+      yAxis = defaultAxisOptions & #place .~ PlaceLeft
+   in theBar
+        & #hudOptions . #chartAspect .~ FixedAspect ((1 + sqrt 5) / 2)
+        & #hudOptions . #axes .~ [(5, xAxis), (5, yAxis)]
+        & #hudOptions . #titles
+          .~ [ (6, defaultTitle title)
+             , (11, timeLabel)
+             ]
+        & #hudOptions . #frames .~ [(11, defaultFrameOptions & #buffer .~ 0.075)]
+        & #charts <>~ named "errors" scat
 
 stripCommonPrefices :: Trie.TMap T.Text a -> Trie.TMap T.Text a
 stripCommonPrefices = go
@@ -307,10 +331,10 @@ stripCommonPrefices = go
 newtype Prioritised s a = Prioritised {unprioritise :: a}
   deriving (Eq, Show)
 
-data Priority a = NoPrio | Prioritise (V.Vector a)
+data Priorities a = NoPrio | Prioritise (V.Vector a)
   deriving (Show, Eq, Ord, Generic)
 
-instance (Reifies s (Priority a), Ord a) => Ord (Prioritised s a) where
+instance (Reifies s (Priorities a), Ord a) => Ord (Prioritised s a) where
   compare = case reflect @s Proxy of
     NoPrio -> coerce $ compare @a
     Prioritise vec -> comparing $ prioritise vec . unprioritise
@@ -446,25 +470,3 @@ detectSISuffix orig i =
         else Just $ toEnum lvl
 
 -- Stolen from Chart-svg, but load font from local
-
-loadSansSerifFontsLocal ::
-  IO (FontSelector Double)
-loadSansSerifFontsLocal = do
-  sansR <- F.loadFont "fonts/SourceSansPro_R.svg"
-  sansRB <- F.loadFont "fonts/SourceSansPro_RB.svg"
-  sansRBI <- F.loadFont "fonts/SourceSansPro_RBI.svg"
-  sansRI <- F.loadFont "fonts/SourceSansPro_RI.svg"
-
-  let selectFont :: FontStyle -> F.PreparedFont Double
-      selectFont fs = case (_font_name fs, _font_slant fs, _font_weight fs) of
-        (_, FontSlantNormal, FontWeightNormal) -> alterFontFamily "sans-serif" sansR
-        (_, FontSlantNormal, FontWeightBold) -> alterFontFamily "sans-serif" sansRB
-        (_, FontSlantItalic, FontWeightNormal) -> alterFontFamily "sans-serif" sansRI
-        (_, FontSlantOblique, FontWeightNormal) -> alterFontFamily "sans-serif" sansRI
-        (_, FontSlantItalic, FontWeightBold) -> alterFontFamily "sans-serif" sansRBI
-        (_, FontSlantOblique, FontWeightBold) -> alterFontFamily "sans-serif" sansRBI
-
-  return selectFont
-  where
-    alterFontFamily :: String -> F.PreparedFont Double -> F.PreparedFont Double
-    alterFontFamily n (fd, om) = (fd {F.fontDataFamily = n}, om)
