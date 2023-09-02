@@ -191,7 +191,7 @@ jobs:
         tar
         czvf "${{env.report-tarball}}"
         --directory=bench-results
-        "${{env.report-dir}}"
+        "${{matrix.bench}}-report"
     - name: Upload Report
       uses: actions/upload-artifact@v3
       with:
