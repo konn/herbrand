@@ -92,7 +92,7 @@ main = do
                   }
           )
           bg
-    svgs <- iforM plots \plotType chart -> do
+    paths <- iforM plots \plotType chart -> do
       let typeStr = case plotType of
             TimePlot -> "time"
             AllocPlot -> "alloc"
@@ -103,7 +103,7 @@ main = do
       writeChartOptions outPath chart
       hPutStrLn stderr $ "Written: " <> outPath
       pure baseName
-    pure (svgs, mWinner)
+    pure (paths, mWinner)
 
   mGit <-
     if gitInspect
