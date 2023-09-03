@@ -23,6 +23,7 @@ module Logic.Propositional.Classical.SAT.CDCL (
   RestartStrategy (..),
   defaultRestartStrategy,
   defaultExponentialRestart,
+  defaultLubyRestart,
   solveWith,
   solveVarIdWith,
   solveState,

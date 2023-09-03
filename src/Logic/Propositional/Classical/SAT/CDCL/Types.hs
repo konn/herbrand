@@ -32,6 +32,7 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   RestartStrategy (..),
   defaultRestartStrategy,
   defaultExponentialRestart,
+  defaultLubyRestart,
   AssertionResult (..),
   Valuation,
   Clauses,
@@ -126,7 +127,7 @@ import Data.Array.Polarized.Push.Extra qualified as Push
 import Data.Bifunctor qualified as Bi
 import Data.Bifunctor.Linear qualified as BiL
 import Data.Bit (Bit (..))
-import Data.Bits (xor, (.&.), (.|.))
+import Data.Bits (popCount, xor, (.&.), (.|.))
 import Data.Coerce (coerce)
 import Data.DList qualified as DL
 import Data.Foldable qualified as F
@@ -161,6 +162,7 @@ import Generics.Linear qualified as L
 import Generics.Linear.TH (deriveGeneric)
 import Logic.Propositional.Classical.SAT.Types (SatResult (..))
 import Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
+import Math.NumberTheory.Logarithms (wordLog2')
 import Prelude.Linear (lseq, (&))
 import Prelude.Linear qualified as PL
 import Unsafe.Linear qualified as Unsafe
@@ -169,9 +171,14 @@ type RunCount = Word
 
 type RestartAt = Word
 
+type RestartCount = Word
+
 data RestartState where
   RestartState ::
-    {-# UNPACK #-} !RunCount -> {-# UNPACK #-} !RestartAt -> RestartState
+    {-# UNPACK #-} !RunCount ->
+    {-# UNPACK #-} !RestartAt ->
+    {-# UNPACK #-} !RestartCount ->
+    RestartState
   deriving (Show, Eq, Ord, Generic)
 
 deriving via L.AsMovable RestartState instance PL.Consumable RestartState
@@ -221,17 +228,35 @@ data RestartStrategy
       { initialRestart :: !Word
       , increaseFactor :: !Word
       }
+  | LubyRestart
+      { initialRestart :: !Word
+      , increaseFactor :: !Word
+      }
   deriving (Show, Eq, Ord, Generic)
 
 nextRestartState :: RestartStrategy -> RestartState %1 -> RestartState
 nextRestartState = \case
   NoRestart -> PL.id
-  ExponentialRestart {..} -> \(RestartState _ thresh) ->
-    RestartState 0 (thresh * increaseFactor)
+  ExponentialRestart {..} -> \(RestartState _ thresh c) ->
+    RestartState 0 (thresh * increaseFactor) (c + 1)
+  LubyRestart {..} -> \(RestartState _ _ c) ->
+    RestartState 0 (initialRestart * increaseFactor ^ luby c) (c + 1)
+
+luby :: Word -> Word
+luby = go
+  where
+    go 0 = 1
+    go 1 = 1
+    go !i =
+      let !k = wordLog2' (i + 1)
+       in if popCount (i + 2) == 1
+            then 2 ^ k
+            else go (i - 2 ^ k + 1)
 
 getInitRestart :: RestartStrategy -> Maybe Word
 getInitRestart NoRestart = Nothing
 getInitRestart ExponentialRestart {..} = Just initialRestart
+getInitRestart LubyRestart {..} = Just initialRestart
 
 defaultRestartStrategy :: RestartStrategy
 defaultRestartStrategy = NoRestart
@@ -243,10 +268,17 @@ defaultExponentialRestart =
     , increaseFactor = 2
     }
 
+defaultLubyRestart :: RestartStrategy
+defaultLubyRestart =
+  ExponentialRestart
+    { initialRestart = 100
+    , increaseFactor = 2
+    }
+
 data CDCLOptions = CDCLOptions
   { decayFactor :: !VariableSelection
   , activateResolved :: !Bool
-  , restartStrategy :: {-# UNPACK #-} !RestartStrategy
+  , restartStrategy :: !RestartStrategy
   }
   deriving (Show, Eq, Ord, Generic)
 
@@ -780,7 +812,7 @@ toCDCLState (CNF cls) lin =
           )
           cls
       numVars = maybe 0 ((+ 1) . fromEnum) maxVar
-      rs = RestartState 0 $ fromMaybe 0 $ getInitRestart restartOpt
+      rs = RestartState 0 (fromMaybe 0 $ getInitRestart restartOpt) 0
       vsidsS =
         VSIDSState
           (PSQ.fromList [(vid, 0, ()) | vid <- [0 .. (numVars - 1)]])
@@ -1041,7 +1073,7 @@ tryRestart :: forall s. (Reifies s CDCLOptions) => S.State (CDCLState s) ()
 tryRestart = case restartStrategy $ reflect @s Proxy of
   NoRestart -> S.pure ()
   strat -> S.do
-    RestartState count thresh <- S.use restartStateL
+    RestartState count thresh c <- S.use restartStateL
     let count' = count + 1
     if thresh <= count'
       then S.do
@@ -1049,4 +1081,4 @@ tryRestart = case restartStrategy $ reflect @s Proxy of
         restartStateL S.%= nextRestartState strat
         vsidsStateL S.%= \(VSIDSState unsats sats lbd p) ->
           VSIDSState (PSQ.fold' PSQ.insert unsats sats) PSQ.empty lbd p
-      else restartStateL S..= RestartState count' thresh
+      else restartStateL S..= RestartState count' thresh c

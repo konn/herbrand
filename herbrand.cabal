@@ -73,6 +73,7 @@ library
     , generic-lens
     , generically
     , hashable
+    , integer-logarithms
     , lens
     , linear-array-extra
     , linear-base
