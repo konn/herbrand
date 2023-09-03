@@ -42,7 +42,7 @@ main = do
         , withCnfs "Sudoku" sudoku $ \fml ->
             allowFailureBecause
               "Large input"
-              ( timeout 240
+              ( timeout 180
                   $ bench "DPLL"
                   $ nfAppIO (fmap $ DPLL.solve . fst) fml
               )
@@ -50,7 +50,7 @@ main = do
         , withCnfs "SATLIB" satlib $ \fml ->
             allowFailureBecause
               "Large input"
-              ( timeout 240
+              ( timeout 180
                   $ bench "DPLL"
                   $ nfAppIO (fmap $ DPLL.solve . fst) fml
               )
@@ -64,8 +64,6 @@ cdclBenches fml =
   , bench "CDCL (α = 0.75, mVISDS)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.75, activateResolved = True}) . fst) fml
   , bench "CDCL (α = 0.95)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.95, activateResolved = False}) . fst) fml
   , bench "CDCL (α = 0.95, mVISDS)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.95, activateResolved = True}) . fst) fml
-  , bench "CDCL (α = 0.99)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.99, activateResolved = False}) . fst) fml
-  , bench "CDCL (α = 0.99, mVISDS)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.99, activateResolved = True}) . fst) fml
   , bench "CDCL (adaptive)"
       $ nfAppIO
         ( fmap
