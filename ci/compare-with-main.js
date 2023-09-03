@@ -81,7 +81,7 @@ module.exports = async ({
       const baseline_desc = `${target_run.head_sha.slice(0, 7)} (${
         target_run.head_branch
       }): ${commit.message}`;
-      core.setOutput("bseline-desc", baseline_desc);
+      core.setOutput("baseline-desc", baseline_desc);
     }
   }
 
