@@ -192,7 +192,10 @@ jobs:
       if: always()
       run: |
         BASELINE=${{steps.benchmark.outputs.baseline-csv}}
-        BASELINE_DESC=${{steps.benchmark.outputs.baseline-desc}}
+        BASELINE_DESC=$(<<"STOP_HERE_EOF_HERE"
+        ${{steps.benchmark.outputs.baseline-desc}}
+        STOP_HERE_EOF_HERE
+        )
 
         if [[ -z "${BASELINE}" ]]; then
           ./artifacts/exes/bench-chart \
