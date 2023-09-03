@@ -71,16 +71,15 @@ module.exports = async ({
       await exec.exec("unzip", [zip_path, "-d", base_csv_dir]);
       core.setOutput("baseline-csv", base_csv_path);
       core.info(`Original CSV written to: ${base_csv_path}`);
-      core.info(`target_run: ${JSON.stringify(target_run)}`);
       const commit = (
         await github.rest.git.getCommit({
           owner: target_owner,
           repo: target_repo_name,
-          commit_sha: target_run.headSha,
+          commit_sha: target_run.head_sha,
         })
       ).data;
       const baseline_desc = `${target_run.head_sha.slice(0, 7)} (${
-        target_run.headBranch
+        target_run.head_branch
       }): ${commit.message}`;
       core.setOutput("bseline-desc", baseline_desc);
     }
