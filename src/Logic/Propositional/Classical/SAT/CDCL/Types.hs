@@ -228,10 +228,7 @@ data RestartStrategy
       { initialRestart :: !Word
       , increaseFactor :: !Word
       }
-  | LubyRestart
-      { initialRestart :: !Word
-      , increaseFactor :: !Word
-      }
+  | LubyRestart {initialRestart :: !Word}
   deriving (Show, Eq, Ord, Generic)
 
 nextRestartState :: RestartStrategy -> RestartState %1 -> RestartState
@@ -240,7 +237,7 @@ nextRestartState = \case
   ExponentialRestart {..} -> \(RestartState _ thresh c) ->
     RestartState 0 (thresh * increaseFactor) (c + 1)
   LubyRestart {..} -> \(RestartState _ _ c) ->
-    RestartState 0 (initialRestart * increaseFactor ^ luby c) (c + 1)
+    RestartState 0 (initialRestart * luby c) (c + 1)
 
 luby :: Word -> Word
 luby = go
