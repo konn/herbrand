@@ -45,7 +45,8 @@ module.exports = async ({
     data: { total_count: run_count, workflow_runs: runs },
   } = await github.rest.actions.listWorkflowRuns(filter);
   if (run_count != 0) {
-    const target_run_id = runs[0].id;
+    const target_run = runs[0];
+    const target_run_id = target_run.id;
     core.info(`Comparing results with: Run #${target_run_id}`);
     const {
       data: { artifacts },
@@ -68,8 +69,19 @@ module.exports = async ({
       io.mkdirP(base_csv_dir);
       base_csv_path = `${base_csv_dir}/${bench_name}.csv`;
       await exec.exec("unzip", [zip_path, "-d", base_csv_dir]);
-      core.setOutput("base-csv-path", base_csv_path);
+      core.setOutput("baseline-csv", base_csv_path);
       core.info(`Original CSV written to: ${base_csv_path}`);
+      const commit = (
+        await github.rest.git.getCommit({
+          owner: target_owner,
+          repo: target_repo_name,
+          commit_sha: target_run.head_sha,
+        })
+      ).data;
+      const baseline_desc = `${target_run.head_sha.slice(0, 7)} (${
+        target_run.head_branch
+      }): ${commit.message}`;
+      core.setOutput("baseline-desc", baseline_desc);
     }
   }
 
