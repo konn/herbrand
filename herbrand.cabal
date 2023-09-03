@@ -191,6 +191,10 @@ library herbrand-test-utils
 executable bench-chart
   main-is: Main.hs
   other-modules:
+      Plot
+      Report
+      Types
+      Units
       Paths_herbrand
   autogen-modules:
       Paths_herbrand
