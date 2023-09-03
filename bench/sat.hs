@@ -5,7 +5,7 @@ module Main (main) where
 import Control.DeepSeq (force)
 import Control.Exception (evaluate)
 import Herbrand.Bench
-import Logic.Propositional.Classical.SAT.CDCL (CDCLOptions (..), defaultAdaptiveFactor)
+import Logic.Propositional.Classical.SAT.CDCL (CDCLOptions (..), RestartStrategy (..), defaultAdaptiveFactor, defaultExponentialRestart)
 import qualified Logic.Propositional.Classical.SAT.CDCL as CDCL
 import qualified Logic.Propositional.Classical.SAT.DPLL as DPLL
 import qualified Logic.Propositional.Classical.SAT.Tableaux as Tableaux
@@ -62,8 +62,34 @@ cdclBenches :: IO (DPLL.CNF Word, Formula Full Word) -> [Benchmark]
 cdclBenches fml =
   [ bench "CDCL (α = 0.75)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.75, activateResolved = False}) . fst) fml
   , bench "CDCL (α = 0.75, mVISDS)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.75, activateResolved = True}) . fst) fml
+  , bench "CDCL (α = 0.75, mVISDS, ExpRestart(100, 2))"
+      $ nfAppIO
+        ( fmap
+            $ CDCL.solveWith
+              ( CDCL.defaultOptions
+                  { decayFactor = 0.75
+                  , activateResolved = True
+                  , restartStrategy = defaultExponentialRestart
+                  }
+              )
+            . fst
+        )
+        fml
   , bench "CDCL (α = 0.95)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.95, activateResolved = False}) . fst) fml
   , bench "CDCL (α = 0.95, mVISDS)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.95, activateResolved = True}) . fst) fml
+  , bench "CDCL (α = 0.95, mVISDS, ExpRestart(100, 2))"
+      $ nfAppIO
+        ( fmap
+            $ CDCL.solveWith
+              ( CDCL.defaultOptions
+                  { decayFactor = 0.95
+                  , activateResolved = True
+                  , restartStrategy = defaultExponentialRestart
+                  }
+              )
+            . fst
+        )
+        fml
   , bench "CDCL (adaptive)"
       $ nfAppIO
         ( fmap
@@ -83,6 +109,20 @@ cdclBenches fml =
               ( CDCL.defaultOptions
                   { decayFactor = defaultAdaptiveFactor
                   , activateResolved = True
+                  , restartStrategy = NoRestart
+                  }
+              )
+            . fst
+        )
+        fml
+  , bench "CDCL (adaptive, mVISDS, ExpRestart(100, 2))"
+      $ nfAppIO
+        ( fmap
+            $ CDCL.solveWith
+              ( CDCL.defaultOptions
+                  { decayFactor = defaultAdaptiveFactor
+                  , activateResolved = True
+                  , restartStrategy = defaultExponentialRestart
                   }
               )
             . fst

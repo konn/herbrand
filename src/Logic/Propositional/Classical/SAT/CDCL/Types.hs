@@ -31,6 +31,7 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   defaultAdaptiveFactor,
   RestartStrategy (..),
   defaultRestartStrategy,
+  defaultExponentialRestart,
   AssertionResult (..),
   Valuation,
   Clauses,
@@ -168,16 +169,16 @@ type RunCount = Word
 
 type RestartAt = Word
 
-data RestartState s where
+data RestartState where
   RestartState ::
-    {-# UNPACK #-} !RunCount -> {-# UNPACK #-} !RestartAt -> RestartState s
+    {-# UNPACK #-} !RunCount -> {-# UNPACK #-} !RestartAt -> RestartState
   deriving (Show, Eq, Ord, Generic)
 
-deriving via L.AsMovable (RestartState s) instance PL.Consumable (RestartState s)
+deriving via L.AsMovable RestartState instance PL.Consumable RestartState
 
-deriving via L.AsMovable (RestartState s) instance PL.Dupable (RestartState s)
+deriving via L.AsMovable RestartState instance PL.Dupable RestartState
 
-instance PL.Movable (RestartState s) where
+instance PL.Movable RestartState where
   move = Unsafe.toLinear Ur
 
 defaultDecayFactor :: VariableSelection
@@ -216,25 +217,31 @@ instance Fractional VariableSelection where
 
 data RestartStrategy
   = NoRestart
-  | Exponential
+  | ExponentialRestart
       { initialRestart :: !Word
       , increaseFactor :: !Word
       }
   deriving (Show, Eq, Ord, Generic)
 
-nextRestartState :: forall s. (Reifies s CDCLOptions) => RestartState s %1 -> RestartState s
-nextRestartState =
-  case restartStrategy $ reflect @s Proxy of
-    NoRestart -> PL.id
-    Exponential {..} -> \(RestartState _ thresh) ->
-      RestartState 0 (thresh * increaseFactor)
+nextRestartState :: RestartStrategy -> RestartState %1 -> RestartState
+nextRestartState = \case
+  NoRestart -> PL.id
+  ExponentialRestart {..} -> \(RestartState _ thresh) ->
+    RestartState 0 (thresh * increaseFactor)
 
 getInitRestart :: RestartStrategy -> Maybe Word
 getInitRestart NoRestart = Nothing
-getInitRestart Exponential {..} = Just initialRestart
+getInitRestart ExponentialRestart {..} = Just initialRestart
 
 defaultRestartStrategy :: RestartStrategy
 defaultRestartStrategy = NoRestart
+
+defaultExponentialRestart :: RestartStrategy
+defaultExponentialRestart =
+  ExponentialRestart
+    { initialRestart = 100
+    , increaseFactor = 2
+    }
 
 data CDCLOptions = CDCLOptions
   { decayFactor :: !VariableSelection
@@ -543,7 +550,7 @@ data CDCLState s where
     -- | Variable queue
     {-# UNPACK #-} !(VSIDSState s) %1 ->
     -- | Restart State
-    {-# UNPACK #-} !(RestartState s) %1 ->
+    {-# UNPACK #-} !RestartState %1 ->
     CDCLState s
   deriving anyclass (HasLinearWitness)
 
@@ -1024,9 +1031,22 @@ elemWatchLitIdx :: Index -> WatchedLitIndices -> Bool
 elemWatchLitIdx l (WatchOneI l1) = l == l1
 elemWatchLitIdx l (WatchTheseI l1 l2) = l == l1 || l == l2
 
+restartStateL :: LinLens.Lens' (CDCLState s) RestartState
+{- HLINT ignore restartStateL "Avoid lambda" -}
+restartStateL = LinLens.lens \(CDCLState numOrig ss cs ws vs vids varQ rs) ->
+  (rs, \rs -> CDCLState numOrig ss cs ws vs vids varQ rs)
+
 tryRestart :: forall s. (Reifies s CDCLOptions) => S.State (CDCLState s) ()
 {-# INLINE tryRestart #-}
 tryRestart = case restartStrategy $ reflect @s Proxy of
   NoRestart -> S.pure ()
   strat -> S.do
-    S.pure ()
+    RestartState count thresh <- S.use restartStateL
+    let count' = count + 1
+    if thresh <= count'
+      then S.do
+        valuationL S.%= LUA.map (const Indefinite)
+        restartStateL S.%= nextRestartState strat
+        vsidsStateL S.%= \(VSIDSState unsats sats lbd p) ->
+          VSIDSState (PSQ.fold' PSQ.insert unsats sats) PSQ.empty lbd p
+      else restartStateL S..= RestartState count' thresh
