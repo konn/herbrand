@@ -46,6 +46,7 @@ dependencies:
 - hashable
 - psqueues
 - parallel
+- random
 - reflection
 - recursion-schemes
 - semigroupoids

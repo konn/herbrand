@@ -25,8 +25,11 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   CDCLState (..),
   CDCLOptions (..),
   defaultOptions,
-  DecayFactor (..),
+  VariableSelection (..),
+  defaultDecayFactor,
   defaultAdaptiveFactor,
+  RestartStrategy (..),
+  defaultRestartStrategy,
   AssertionResult (..),
   Valuation,
   Clauses,
@@ -159,7 +162,10 @@ import Prelude.Linear (lseq, (&))
 import Prelude.Linear qualified as PL
 import Unsafe.Linear qualified as Unsafe
 
-defaultAdaptiveFactor :: DecayFactor
+defaultDecayFactor :: VariableSelection
+defaultDecayFactor = 0.95
+
+defaultAdaptiveFactor :: VariableSelection
 defaultAdaptiveFactor =
   Adaptive
     { lowLBDDecay = 0.85
@@ -167,7 +173,7 @@ defaultAdaptiveFactor =
     , lbdEmaDecayFactor = 0.95
     }
 
-data DecayFactor
+data VariableSelection
   = ConstantFactor {-# UNPACK #-} !Double
   | Adaptive
       { lowLBDDecay :: {-# UNPACK #-} !Double
@@ -177,30 +183,38 @@ data DecayFactor
   deriving (Show, Eq, Ord, Generic)
   deriving anyclass (NFData, Hashable)
 
-instance Num DecayFactor where
+instance Num VariableSelection where
   fromInteger = ConstantFactor . fromInteger
-  (+) = error "DecayFactor: (+) not implemented"
-  (-) = error "DecayFactor: (-) not implemented"
-  (*) = error "DecayFactor: (*) not implemented"
-  signum = error "DecayFactor: signum not implemented"
-  abs = error "DecayFactor: abs not implemented"
+  (+) = error "VariableSelection: (+) not implemented"
+  (-) = error "VariableSelection: (-) not implemented"
+  (*) = error "VariableSelection: (*) not implemented"
+  signum = error "VariableSelection: signum not implemented"
+  abs = error "VariableSelection: abs not implemented"
 
-instance Fractional DecayFactor where
+instance Fractional VariableSelection where
   fromRational = ConstantFactor . fromRational
-  (/) = error "DecayFactor: (/) not implemented"
-  recip = error "DecayFactor: recip not implemented"
+  (/) = error "VariableSelection: (/) not implemented"
+  recip = error "VariableSelection: recip not implemented"
+
+data RestartStrategy = NoRestart
+  deriving (Show, Eq, Ord, Generic)
+
+defaultRestartStrategy :: RestartStrategy
+defaultRestartStrategy = NoRestart
 
 data CDCLOptions = CDCLOptions
-  { decayFactor :: !DecayFactor
+  { decayFactor :: !VariableSelection
   , activateResolved :: !Bool
+  , restartStrategy :: {-# UNPACK #-} !RestartStrategy
   }
   deriving (Show, Eq, Ord, Generic)
 
 defaultOptions :: CDCLOptions
 defaultOptions =
   CDCLOptions
-    { decayFactor = 0.95
+    { decayFactor = defaultDecayFactor
     , activateResolved = True
+    , restartStrategy = NoRestart
     }
 
 newtype VarId = VarId {unVarId :: Word}
