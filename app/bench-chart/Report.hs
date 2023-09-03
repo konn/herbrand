@@ -12,6 +12,8 @@ module Report (buildReport) where
 
 import qualified Control.Foldl as L
 import Control.Lens hiding ((<.>))
+import Control.Monad (forM_)
+import qualified Data.DList.DNonEmpty as DLNE
 import Data.Generics.Labels ()
 import Data.List (sortOn)
 import qualified Data.Map.Strict as Map
@@ -22,8 +24,10 @@ import Lucid
 import Plot
 import Types
 
-buildReport :: Maybe T.Text -> Maybe GitInfo -> Map.Map [T.Text] (Criteria FilePath, Winner Integer) -> Html ()
-buildReport mReportName mGit benchs = doctypehtml_ do
+type BaselineDescr = T.Text
+
+buildReport :: Maybe T.Text -> Maybe GitInfo -> Maybe BaselineDescr -> Map.Map [T.Text] (Criteria FilePath, Winner Integer) -> Html ()
+buildReport mReportName mGit mbase benchs = doctypehtml_ do
   let resultName =
         case mReportName of
           Nothing -> "Benchmark Result"
@@ -49,21 +53,25 @@ buildReport mReportName mGit benchs = doctypehtml_ do
     h1_ $ toHtml resultName
     section_ do
       h2_ "Metadata"
-      case mGit of
+      let metas =
+            DLNE.toNonEmpty
+              <$> foldMap
+                ( \ginfo ->
+                    Just
+                      $ DLNE.fromList
+                        [ ("Branch", T.pack $ giBranch ginfo)
+                        , ("Commit", T.pack $ giHash ginfo)
+                        , ("Commit Message", T.pack $ giCommitMessage ginfo)
+                        ]
+                )
+                mGit
+              <> foldMap (\base -> Just $ DLNE.singleton ("Baseline", base)) mbase
+      case metas of
         Nothing -> p_ "N/A"
-        Just ginfo -> table_ $ tbody_ do
+        Just m -> table_ $ tbody_ $ forM_ m $ \(lab, col) ->
           tr_ do
-            th_ "Branch"
-            td_ $ code_ $ toHtml $ giBranch ginfo
-          tr_ do
-            th_ "Commit"
-            td_ $ code_ $ toHtml $ giHash ginfo
-          tr_ do
-            th_ "Description"
-            td_ $ code_ $ toHtml $ giDescribe ginfo
-          tr_ do
-            th_ "Commit Message"
-            td_ $ code_ $ toHtml $ giCommitMessage ginfo
+            th_ lab
+            td_ $ code_ $ toHtml col
     h2_ "Summary: Overall Winning Ranking"
     let renderRanking :: Html () -> Map.Map T.Text Int -> Html ()
         renderRanking name rank = do

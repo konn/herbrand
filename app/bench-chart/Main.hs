@@ -8,6 +8,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE ViewPatterns #-}
@@ -47,6 +48,7 @@ data Opts = Opts
   , reportName :: !(Maybe T.Text)
   , gitInspect :: !Bool
   , baseline :: !(Maybe FilePath)
+  , baselineDescr :: !(Maybe T.Text)
   }
   deriving (Show, Eq, Ord, Generic)
 
@@ -64,8 +66,9 @@ main = do
       =<< mapM decodeBenchs baseline
   let colorMap = buildColorMap trie
   createDirectoryIfMissing True output
+  let baseDesc = fromMaybe "Baseline" baselineDescr
   svgs <- pooledForConcurrently (Map.mapWithKey (,) trie) \(k, bg) -> do
-    let mbase = Map.lookup k =<< mbases
+    let mbase = (baseDesc,) <$> (Map.lookup k =<< mbases)
     !plots <- evaluate $ mkPlots colorMap k mbase bg
     !mWinner <-
       evaluate
@@ -112,7 +115,7 @@ main = do
           <*> L.premap copiedWinner winnerCountL
       )
       svgs
-  Lucid.renderToFile reportHtml $ buildReport reportName mGit svgs
+  Lucid.renderToFile reportHtml $ buildReport reportName mGit (baseDesc <$ baseline) svgs
   hPutStrLn stderr $ "Report Written to: " <> reportHtml
 
 pruneSuffices :: Maybe Int -> Benchs -> Benchs
@@ -169,4 +172,10 @@ optsP = Opt.info (p <**> Opt.helper) $ Opt.progDesc "Converts tasty-bench output
           <> Opt.short 'B'
           <> Opt.metavar "FILE"
           <> Opt.help "Optional path to the baseline CSV to compare with"
+      baselineDescr <-
+        Opt.optional
+          $ Opt.strOption
+          $ Opt.long "baseline-desc"
+          <> Opt.metavar "FILE"
+          <> Opt.help "Description for the baseline"
       pure Opts {..}

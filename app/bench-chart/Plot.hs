@@ -37,7 +37,7 @@ import Units
 mkPlots ::
   Map.Map T.Text Colour ->
   [T.Text] ->
-  Maybe (Map.Map T.Text BenchCase) ->
+  Maybe (T.Text, Map.Map T.Text BenchCase) ->
   Map.Map T.Text BenchCase ->
   Criteria ChartOptions
 mkPlots colMap k mbase bg =
@@ -45,10 +45,12 @@ mkPlots colMap k mbase bg =
       benchWithBase =
         maybe
           (fmap Current)
-          ( fmap catMaybes . alignWith \case
-              This {} -> Nothing
-              That a -> Just $ Current a
-              These a b -> Just $ b `WithBase` a
+          ( fmap catMaybes
+              . alignWith \case
+                This {} -> Nothing
+                That a -> Just $ Current a
+                These a b -> Just $ b `WithBase` a
+              . snd
           )
           mbase
           bg
