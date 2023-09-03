@@ -190,9 +190,10 @@ jobs:
     
     - name: Generate Report
       if: always()
+      shell: bash
       run: |
         BASELINE=${{steps.benchmark.outputs.baseline-csv}}
-        BASELINE_DESC=$(<<"STOP_HERE_EOF_HERE"
+        BASELINE_DESC=$(cat <<"STOP_HERE_EOF_HERE"
         ${{steps.benchmark.outputs.baseline-desc}}
         STOP_HERE_EOF_HERE
         )
