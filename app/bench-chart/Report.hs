@@ -22,7 +22,7 @@ import Lucid
 import Plot
 import Types
 
-buildReport :: Maybe T.Text -> Maybe GitInfo -> Map.Map [T.Text] (Plots FilePath, Winner Integer) -> Html ()
+buildReport :: Maybe T.Text -> Maybe GitInfo -> Map.Map [T.Text] (Criteria FilePath, Winner Integer) -> Html ()
 buildReport mReportName mGit benchs = doctypehtml_ do
   let resultName =
         case mReportName of
@@ -96,7 +96,7 @@ buildReport mReportName mGit benchs = doctypehtml_ do
           renderWinner "Alloc" allocWinner
           renderWinner "Copied" copiedWinner
       iforM_ plots \tag v -> do
-        let chartTitle = T.dropEnd 4 $ T.pack $ show tag
+        let chartTitle = T.pack $ show tag
         h4_ $ toHtml chartTitle
         p_
           $ figure_

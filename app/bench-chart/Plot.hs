@@ -2,7 +2,6 @@
 {-# LANGUAGE ApplicativeDo #-}
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE BlockArguments #-}
-{-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ImpredicativeTypes #-}
@@ -15,51 +14,25 @@
 {-# LANGUAGE ViewPatterns #-}
 {-# OPTIONS_GHC -funbox-strict-fields #-}
 
-module Plot (mkPlots, Plots (..), PlotType (..)) where
+module Plot (mkPlots, Criteria (..), Criterion (..)) where
 
 import Chart hiding (abs, (<.>))
 import Control.Applicative (Applicative (..))
 import Control.Arrow ((&&&))
-import Control.DeepSeq (NFData)
 import Control.Lens hiding ((<.>))
 import Data.DList qualified as DL
 import Data.Generics.Labels ()
-import Data.Hashable (Hashable)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
-import GHC.Generics (Generic, Generic1)
 import Types
 import Units
-
-data PlotType = TimePlot | AllocPlot | CopiedPlot
-  deriving (Show, Eq, Ord, Generic, Enum, Bounded)
-  deriving anyclass (NFData, Hashable)
-
-instance FunctorWithIndex PlotType Plots
-
-instance FoldableWithIndex PlotType Plots
-
-instance TraversableWithIndex PlotType Plots where
-  itraverse f p = do
-    timePlot <- f TimePlot $ timePlot p
-    allocPlot <- traverse (f AllocPlot) $ allocPlot p
-    copiedPlot <- traverse (f CopiedPlot) $ copiedPlot p
-    pure Plots {..}
-
-data Plots a = Plots
-  { timePlot :: !a
-  , allocPlot :: !(Maybe a)
-  , copiedPlot :: !(Maybe a)
-  }
-  deriving (Show, Eq, Ord, Generic, Generic1, Functor, Foldable, Traversable)
-  deriving anyclass (NFData)
 
 mkPlots ::
   Map.Map T.Text Colour ->
   [T.Text] ->
   Map.Map T.Text BenchCase ->
-  Plots ChartOptions
+  Criteria ChartOptions
 mkPlots colMap k bg =
   let caseName = T.intercalate "/" k
       Identity timePlot =
@@ -98,7 +71,7 @@ mkPlots colMap k bg =
           caseName
           colMap
           bg
-   in Plots {..}
+   in Criteria {..}
 
 data ChartDef t = ChartDef
   { chartTitle :: !T.Text

@@ -1,10 +1,13 @@
+{-# LANGUAGE GHC2021 #-}
 {-# LANGUAGE ApplicativeDo #-}
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MonoLocalBinds #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -14,6 +17,8 @@
 {-# OPTIONS_GHC -funbox-strict-fields #-}
 
 module Types (
+  Criteria (..),
+  Criterion (..),
   Prioritised (..),
   Priorities (..),
   Winner (..),
@@ -24,21 +29,23 @@ module Types (
 ) where
 
 import Control.DeepSeq
-import qualified Control.Foldl as L
-import qualified Data.Bifunctor as Bi
-import qualified Data.ByteString as BS
+import Control.Foldl qualified as L
+import Control.Lens
+import Data.Bifunctor qualified as Bi
+import Data.ByteString qualified as BS
 import Data.Coerce (coerce)
-import qualified Data.Csv as Csv
+import Data.Csv qualified as Csv
 import Data.Generics.Labels ()
-import qualified Data.Map.Strict as Map
+import Data.Hashable (Hashable)
+import Data.Map.Strict qualified as Map
 import Data.Maybe
 import Data.Ord (Down (..), comparing)
 import Data.Proxy (Proxy (..))
 import Data.Reflection
 import Data.Semigroup (Arg (..), ArgMin, Min (..))
-import qualified Data.Text as T
-import qualified Data.Vector as V
-import GHC.Generics (Generic)
+import Data.Text qualified as T
+import Data.Vector qualified as V
+import GHC.Generics (Generic, Generic1)
 import GHC.Generics.Generically
 
 newtype Prioritised s a = Prioritised {unprioritise :: a}
@@ -132,3 +139,26 @@ getMinArg (Min (Arg _ a)) = a
 
 getMinObj :: ArgMin w a -> w
 getMinObj (Min (Arg w _)) = w
+
+data Criterion = Time | Alloc | Copied
+  deriving (Show, Eq, Ord, Generic, Enum, Bounded)
+  deriving anyclass (NFData, Hashable)
+
+instance FunctorWithIndex Criterion Criteria
+
+instance FoldableWithIndex Criterion Criteria
+
+instance TraversableWithIndex Criterion Criteria where
+  itraverse f p = do
+    timePlot <- f Time $ timePlot p
+    allocPlot <- traverse (f Alloc) $ allocPlot p
+    copiedPlot <- traverse (f Copied) $ copiedPlot p
+    pure Criteria {..}
+
+data Criteria a = Criteria
+  { timePlot :: !a
+  , allocPlot :: !(Maybe a)
+  , copiedPlot :: !(Maybe a)
+  }
+  deriving (Show, Eq, Ord, Generic, Generic1, Functor, Foldable, Traversable)
+  deriving anyclass (NFData)
