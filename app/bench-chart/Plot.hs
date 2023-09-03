@@ -1,53 +1,148 @@
+{-# LANGUAGE GHC2021 #-}
 {-# LANGUAGE ApplicativeDo #-}
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DeriveAnyClass #-}
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE ImpredicativeTypes #-}
 {-# LANGUAGE MonoLocalBinds #-}
 {-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE ViewPatterns #-}
 {-# OPTIONS_GHC -funbox-strict-fields #-}
 
-module Plot (mkPlot) where
+module Plot (mkPlots, Plots (..), PlotType (..)) where
 
 import Chart hiding (abs, (<.>))
+import Control.Applicative (Applicative (..))
+import Control.Arrow ((&&&))
+import Control.DeepSeq (NFData)
 import Control.Lens hiding ((<.>))
-import qualified Data.DList as DL
+import Data.DList qualified as DL
 import Data.Generics.Labels ()
-import qualified Data.Map.Strict as Map
+import Data.Hashable (Hashable)
+import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe)
-import qualified Data.Text as T
+import Data.Text qualified as T
+import GHC.Generics (Generic, Generic1)
 import Types
 import Units
 
-mkPlot ::
+data PlotType = TimePlot | AllocPlot | CopiedPlot
+  deriving (Show, Eq, Ord, Generic, Enum, Bounded)
+  deriving anyclass (NFData, Hashable)
+
+instance FunctorWithIndex PlotType Plots
+
+instance FoldableWithIndex PlotType Plots
+
+instance TraversableWithIndex PlotType Plots where
+  itraverse f p = do
+    timePlot <- f TimePlot $ timePlot p
+    allocPlot <- traverse (f AllocPlot) $ allocPlot p
+    copiedPlot <- traverse (f CopiedPlot) $ copiedPlot p
+    pure Plots {..}
+
+data Plots a = Plots
+  { timePlot :: !a
+  , allocPlot :: !(Maybe a)
+  , copiedPlot :: !(Maybe a)
+  }
+  deriving (Show, Eq, Ord, Generic, Generic1, Functor, Foldable, Traversable)
+  deriving anyclass (NFData)
+
+mkPlots ::
   Map.Map T.Text Colour ->
   [T.Text] ->
   Map.Map T.Text BenchCase ->
-  ChartOptions
-mkPlot colMap k bg =
-  let title = "Time (fill): " <> T.intercalate "/" k
-      (timeSI, allocSI) =
-        foldMap ((,) <$> detectSIPrefix Pico . mean <*> detectSIPrefix Unit . fromMaybe 0 . alloc) bg
-          & both %~ fromMaybe Unit
-      mkBarRow BenchCase {..} =
-        let mean' = adjustSITo Pico mean timeSI
-            alloc' = adjustSITo Unit (fromMaybe 0 alloc) allocSI
-            dev' = adjustSITo Pico (stddev2 `quot` 2) timeSI
-         in (DL.singleton mean', DL.singleton alloc', DL.singleton dev')
-      (times, allocs, devs) = foldMap mkBarRow bg
-      timeBars =
+  Plots ChartOptions
+mkPlots colMap k bg =
+  let caseName = T.intercalate "/" k
+      Identity timePlot =
+        makeBarChart
+          ChartDef
+            { chartTitle = "Time"
+            , chartUnit = "s"
+            , defaultSIPrefix = Pico
+            , valueL = #mean . to Identity
+            , errorL = Just #stddev2
+            }
+          caseName
+          colMap
+          bg
+      allocPlot =
+        makeBarChart
+          ChartDef
+            { chartTitle = "Alloc"
+            , chartUnit = "B"
+            , defaultSIPrefix = Unit
+            , valueL = #alloc
+            , errorL = Nothing
+            }
+          caseName
+          colMap
+          bg
+      copiedPlot =
+        makeBarChart
+          ChartDef
+            { chartTitle = "Copied"
+            , chartUnit = "B"
+            , defaultSIPrefix = Unit
+            , valueL = #copied
+            , errorL = Nothing
+            }
+          caseName
+          colMap
+          bg
+   in Plots {..}
+
+data ChartDef t = ChartDef
+  { chartTitle :: !T.Text
+  , defaultSIPrefix :: !SIPrefix
+  , chartUnit :: !T.Text
+  , valueL :: Getter BenchCase (t Integer)
+  , errorL :: Maybe (Getter BenchCase Integer)
+  }
+
+makeBarChart ::
+  (Applicative t) =>
+  ChartDef t ->
+  T.Text ->
+  Map.Map T.Text Colour ->
+  Map.Map T.Text BenchCase ->
+  t ChartOptions
+makeBarChart ChartDef {..} caseName colMap bg0 =
+  traverse (liftA2 (,) <$> pure <*> view valueL) bg0 <&> \bg ->
+    let
+      mkBarRow !b !val =
+        let mean' = adjustSITo defaultSIPrefix val targetSI
+            dev' =
+              fmap
+                ( \l ->
+                    DL.singleton
+                      $ adjustSITo defaultSIPrefix (b ^. l `quot` 2) targetSI
+                )
+                errorL
+         in (DL.singleton mean', dev')
+      (fromMaybe Unit -> !targetSI, (values, devs)) =
+        foldMap
+          (detectSIPrefix defaultSIPrefix . snd &&& uncurry mkBarRow)
+          bg
+      theBars =
         BarData
-          { barData = map pure $ DL.toList times
+          { barData = map pure $ DL.toList values
           , barRowLabels = []
           , barColumnLabels = Map.keys bg
           }
+      xAxis =
+        defaultAxisOptions
+          & #ticks . #ltick .~ Nothing
+          & #ticks . #style .~ TickLabels (Map.keys bg)
+      yAxis = defaultAxisOptions & #place .~ PlaceLeft
       barOpts =
         defaultBarOptions
           & #displayValues .~ False
@@ -60,47 +155,47 @@ mkPlot colMap k bg =
                         & #borderSize .~ 0.0
               )
               (Map.keys bg)
+      theBar = barChart barOpts theBars
       barXYes =
-        timeBars
+        theBars
           ^.. #barData
             . to (barRects barOpts)
             . folded
             . folded
             . to \(Rect x0 x1 _ y1) ->
               (Point ((x0 + x1) / 2) y1, x1 - x0)
-      timeLabel =
-        defaultTitle ("Time [" <> T.pack (showPrefix timeSI) <> "s]")
+      errs =
+        foldMap
+          ( zipWith
+              ( \(Point x y, w) sigma ->
+                  let sty = defaultLineStyle & #size .~ 0.003
+                      !y0 = y - sigma
+                      !y1 = y + sigma
+                      !dx = w / 10
+                   in LineChart
+                        sty
+                        [ [Point (x - dx) y0, Point (x + dx) y0]
+                        , [Point x y0, Point x y1]
+                        , [Point (x - dx) y1, Point (x + dx) y1]
+                        ]
+              )
+              barXYes
+              . DL.toList
+          )
+          devs
+      yAxisLabel =
+        defaultTitle (chartTitle <> " [" <> T.pack (showPrefix targetSI) <> chartUnit <> "]")
           & #place .~ PlaceLeft
           & #anchor .~ AnchorMiddle
           & #style . #size %~ (/ 2)
-      scat =
-        zipWith
-          ( \(Point x y, w) sigma ->
-              let sty = defaultLineStyle & #size .~ 0.003
-                  !y0 = y - sigma
-                  !y1 = y + sigma
-                  !dx = w / 10
-               in LineChart
-                    sty
-                    [ [Point (x - dx) y0, Point (x + dx) y0]
-                    , [Point x y0, Point x y1]
-                    , [Point (x - dx) y1, Point (x + dx) y1]
-                    ]
-          )
-          barXYes
-          $ DL.toList devs
-      theBar = barChart barOpts timeBars
-      xAxis =
-        defaultAxisOptions
-          & #ticks . #ltick .~ Nothing
-          & #ticks . #style .~ TickLabels (Map.keys bg)
-      yAxis = defaultAxisOptions & #place .~ PlaceLeft
-   in theBar
+      title = chartTitle <> ": " <> caseName
+     in
+      theBar
         & #hudOptions . #chartAspect .~ FixedAspect ((1 + sqrt 5) / 2)
         & #hudOptions . #axes .~ [(5, xAxis), (5, yAxis)]
         & #hudOptions . #titles
           .~ [ (6, defaultTitle title)
-             , (11, timeLabel)
+             , (11, yAxisLabel)
              ]
-        & #hudOptions . #frames .~ [(11, defaultFrameOptions & #buffer .~ 0.075)]
-        & #charts <>~ named "errors" scat
+        & #hudOptions . #frames .~ [(11, defaultFrameOptions & #buffer .~ 0.2)]
+        & #charts <>~ named "errors" errs

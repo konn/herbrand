@@ -77,10 +77,7 @@ main = do
   let colorMap = buildColorMap trie
   createDirectoryIfMissing True output
   svgs <- pooledForConcurrently (Map.mapWithKey (,) trie) \(k, bg) -> do
-    let baseName = T.unpack (T.intercalate "-" k) <.> "svg"
-        outPath = output </> baseName
-    createDirectoryIfMissing True $ takeDirectory outPath
-    !plots <- evaluate $ mkPlot colorMap k bg
+    !plots <- evaluate $ mkPlots colorMap k bg
     !mWinner <-
       evaluate
         $ force
@@ -91,13 +88,22 @@ main = do
                 Winner
                   { timeWinner = Min $ Arg mean i
                   , allocWinner = Min $ Arg (fromMaybe 0 alloc) i
-                  , peakWinner = Min $ Arg (fromMaybe 0 peakMem) i
+                  , copiedWinner = Min $ Arg (fromMaybe 0 copied) i
                   }
           )
           bg
-    writeChartOptions outPath plots
-    hPutStrLn stderr $ "Written: " <> outPath
-    pure (baseName, mWinner)
+    svgs <- iforM plots \plotType chart -> do
+      let typeStr = case plotType of
+            TimePlot -> "time"
+            AllocPlot -> "alloc"
+            CopiedPlot -> "copied"
+          baseName = T.unpack (T.intercalate "-" k) </> typeStr <.> "svg"
+          outPath = output </> baseName
+      createDirectoryIfMissing True $ takeDirectory outPath
+      writeChartOptions outPath chart
+      hPutStrLn stderr $ "Written: " <> outPath
+      pure baseName
+    pure (svgs, mWinner)
 
   mGit <-
     if gitInspect
@@ -114,7 +120,7 @@ main = do
           $ (,,)
           <$> L.premap timeWinner winnerCountL
           <*> L.premap allocWinner winnerCountL
-          <*> L.premap peakWinner winnerCountL
+          <*> L.premap copiedWinner winnerCountL
       )
       svgs
   Lucid.renderToFile reportHtml $ buildReport reportName mGit svgs

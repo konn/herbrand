@@ -18,84 +18,87 @@ import qualified Data.Map.Strict as Map
 import Data.Ord (Down (..))
 import qualified Data.Text as T
 import GitHash
-import qualified Lucid
-import qualified Lucid.Html5 as H5
+import Lucid
+import Plot
 import Types
 
-buildReport :: Maybe T.Text -> Maybe GitInfo -> Map.Map [T.Text] (FilePath, Winner Integer) -> Lucid.Html ()
-buildReport mReportName mGit benchs = Lucid.doctypehtml_ do
+buildReport :: Maybe T.Text -> Maybe GitInfo -> Map.Map [T.Text] (Plots FilePath, Winner Integer) -> Html ()
+buildReport mReportName mGit benchs = doctypehtml_ do
   let resultName =
         case mReportName of
           Nothing -> "Benchmark Result"
           Just txt -> "Benchmark Result for " <> txt
-      (timeRank, allocRank, peakRank) =
+      (timeRank, allocRank, copiedRank) =
         L.fold
           ( L.premap snd
               $ (,,)
               <$> L.premap timeWinner winnerCountL
               <*> L.premap allocWinner winnerCountL
-              <*> L.premap peakWinner winnerCountL
+              <*> L.premap copiedWinner winnerCountL
           )
           benchs
-  H5.head_ do
-    H5.title_ $ Lucid.toHtml resultName
-    H5.meta_ [H5.charset_ "UTF-8"]
-    H5.meta_
-      [ H5.name_ "viewport"
-      , H5.content_ "width=device-width, initial-scale=1.0"
+  head_ do
+    title_ $ toHtml resultName
+    meta_ [charset_ "UTF-8"]
+    meta_
+      [ name_ "viewport"
+      , content_ "width=device-width, initial-scale=1.0"
       ]
-    H5.link_ [H5.rel_ "stylesheet", H5.href_ "https://cdn.simplecss.org/simple.min.css"]
-  H5.body_ do
-    H5.h1_ $ Lucid.toHtml resultName
-    H5.section_ do
-      H5.h2_ "Metadata"
+    link_ [rel_ "stylesheet", href_ "https://cdn.simplecss.org/simple.min.css"]
+  body_ do
+    h1_ $ toHtml resultName
+    section_ do
+      h2_ "Metadata"
       case mGit of
-        Nothing -> H5.p_ "N/A"
-        Just ginfo -> H5.table_ $ H5.tbody_ do
-          H5.tr_ do
-            H5.th_ "Branch"
-            H5.td_ $ H5.code_ $ Lucid.toHtml $ giBranch ginfo
-          H5.tr_ do
-            H5.th_ "Commit"
-            H5.td_ $ H5.code_ $ Lucid.toHtml $ giHash ginfo
-          H5.tr_ do
-            H5.th_ "Description"
-            H5.td_ $ H5.code_ $ Lucid.toHtml $ giDescribe ginfo
-          H5.tr_ do
-            H5.th_ "Commit Message"
-            H5.td_ $ H5.code_ $ Lucid.toHtml $ giCommitMessage ginfo
-    H5.h2_ "Summary: Overall Winning Ranking"
-    let renderRanking :: Lucid.Html () -> Map.Map T.Text Int -> Lucid.Html ()
+        Nothing -> p_ "N/A"
+        Just ginfo -> table_ $ tbody_ do
+          tr_ do
+            th_ "Branch"
+            td_ $ code_ $ toHtml $ giBranch ginfo
+          tr_ do
+            th_ "Commit"
+            td_ $ code_ $ toHtml $ giHash ginfo
+          tr_ do
+            th_ "Description"
+            td_ $ code_ $ toHtml $ giDescribe ginfo
+          tr_ do
+            th_ "Commit Message"
+            td_ $ code_ $ toHtml $ giCommitMessage ginfo
+    h2_ "Summary: Overall Winning Ranking"
+    let renderRanking :: Html () -> Map.Map T.Text Int -> Html ()
         renderRanking name rank = do
-          H5.h3_ name
-          H5.table_ do
-            H5.thead_ $ H5.tr_ $ do
-              H5.th_ "Rank"
-              H5.th_ "Name"
-              H5.th_ "Score"
-            H5.tbody_ $ iforM_ (take 3 $ sortOn (Down . snd) $ Map.toList rank) \i (algo, score) ->
-              H5.tr_ do
-                H5.td_ $ "#" <> Lucid.toHtml (show $ i + 1)
-                H5.td_ $ Lucid.toHtml algo
-                H5.td_ $ Lucid.toHtml $ show score <> " / " <> show (Map.size benchs)
+          h3_ name
+          table_ do
+            thead_ $ tr_ $ do
+              th_ "Rank"
+              th_ "Name"
+              th_ "Score"
+            tbody_ $ iforM_ (take 3 $ sortOn (Down . snd) $ Map.toList rank) \i (algo, score) ->
+              tr_ do
+                td_ $ "#" <> toHtml (show $ i + 1)
+                td_ $ toHtml algo
+                td_ $ toHtml $ show score <> " / " <> show (Map.size benchs)
     renderRanking "Time" timeRank
     renderRanking "Alloc" allocRank
-    renderRanking "Peak" peakRank
+    renderRanking "Copied" copiedRank
 
-    H5.h2_ "Results"
-    iforM_ benchs \k (v, win) -> H5.section_ do
-      H5.h3_ $ H5.code_ $ Lucid.toHtml $ T.intercalate "-" k
-      H5.table_ do
-        let renderWinner lab crit = H5.tr_ do
-              H5.th_ lab
-              H5.td_ $ H5.code_ $ Lucid.toHtml $ getMinArg $ crit win
-              H5.td_ $ H5.code_ $ Lucid.toHtml $ show $ getMinObj $ crit win
-        H5.thead_ $ H5.tr_ $ H5.th_ "Criterion" <> H5.th_ "Winner" <> H5.th_ "Score"
-        H5.tbody_ do
+    h2_ "Results"
+    iforM_ benchs \k (plots, win) -> section_ do
+      h3_ $ code_ $ toHtml $ T.intercalate "-" k
+      table_ do
+        let renderWinner lab crit = tr_ do
+              th_ lab
+              td_ $ code_ $ toHtml $ getMinArg $ crit win
+              td_ $ code_ $ toHtml $ show $ getMinObj $ crit win
+        thead_ $ tr_ $ th_ "Criterion" <> th_ "Winner" <> th_ "Score"
+        tbody_ do
           renderWinner "Time" timeWinner
           renderWinner "Alloc" allocWinner
-          renderWinner "Peak" peakWinner
-      H5.p_
-        $ H5.figure_
-        $ H5.a_ [H5.href_ (T.pack v)]
-        $ H5.img_ [H5.src_ (T.pack v), H5.alt_ "Bar chart"]
+          renderWinner "Copied" copiedWinner
+      iforM_ plots \tag v -> do
+        let chartTitle = T.dropEnd 4 $ T.pack $ show tag
+        h4_ $ toHtml chartTitle
+        p_
+          $ figure_
+          $ a_ [href_ (T.pack v)]
+          $ img_ [width_ "100%", src_ (T.pack v), alt_ "Bar chart"]

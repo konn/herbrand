@@ -58,7 +58,7 @@ prioritise vec = (,) <$> coerce . (`V.elemIndex` vec) <*> id
 data Winner a = Winner
   { timeWinner :: {-# UNPACK #-} !(ArgMin a T.Text)
   , allocWinner :: {-# UNPACK #-} !(ArgMin a T.Text)
-  , peakWinner :: {-# UNPACK #-} !(ArgMin a T.Text)
+  , copiedWinner :: {-# UNPACK #-} !(ArgMin a T.Text)
   }
   deriving (Show, Eq, Ord, Generic)
   deriving anyclass (NFData)
