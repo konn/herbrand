@@ -71,6 +71,7 @@ module.exports = async ({
       await exec.exec("unzip", [zip_path, "-d", base_csv_dir]);
       core.setOutput("baseline-csv", base_csv_path);
       core.info(`Original CSV written to: ${base_csv_path}`);
+      core.info(`target_run: ${JSON.stringify(target_run)}`);
       const commit = (
         await github.rest.git.getCommit({
           owner: target_owner,
