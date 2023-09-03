@@ -27,11 +27,11 @@ showPrefix Binary Mega = "Mi"
 showPrefix Decimal Giga = "G"
 showPrefix Binary Giga = "Gi"
 
-adjustSITo :: Radix -> SIPrefix -> Integer -> SIPrefix -> Double
-adjustSITo _ _ 0 _ = 0.0
-adjustSITo Decimal std i new =
+adjustSITo :: Radix -> SIPrefix -> SIPrefix -> Integer -> Double
+adjustSITo _ _ _ 0 = 0.0
+adjustSITo Decimal std new i =
   fromInteger i * 10 ^^ (3 * (fromEnum std - fromEnum new))
-adjustSITo Binary std i new =
+adjustSITo Binary std new i =
   fromInteger i * 2.0 ^^ (10 * (fromEnum std - fromEnum new))
 
 detectSIPrefix :: Radix -> SIPrefix -> Integer -> Maybe SIPrefix

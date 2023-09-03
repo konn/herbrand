@@ -5,6 +5,7 @@
 {-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ImpredicativeTypes #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MonoLocalBinds #-}
 {-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -20,21 +21,37 @@ import Chart hiding (abs, (<.>))
 import Control.Applicative (Applicative (..))
 import Control.Arrow ((&&&))
 import Control.Lens hiding ((<.>))
+import Data.Align (alignWith)
 import Data.DList qualified as DL
+import Data.Filtrable (catMaybes)
+import Data.Foldable (fold)
 import Data.Generics.Labels ()
 import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
+import Data.These (These (..))
+import GHC.Generics (Generic, Generic1)
 import Types
 import Units
 
 mkPlots ::
   Map.Map T.Text Colour ->
   [T.Text] ->
+  Maybe (Map.Map T.Text BenchCase) ->
   Map.Map T.Text BenchCase ->
   Criteria ChartOptions
-mkPlots colMap k bg =
+mkPlots colMap k mbase bg =
   let caseName = T.intercalate "/" k
+      benchWithBase =
+        maybe
+          (fmap Current)
+          ( fmap catMaybes . alignWith \case
+              This {} -> Nothing
+              That a -> Just $ Current a
+              These a b -> Just $ b `WithBase` a
+          )
+          mbase
+          bg
       Identity timePlot =
         makeBarChart
           ChartDef
@@ -47,7 +64,7 @@ mkPlots colMap k bg =
             }
           caseName
           colMap
-          bg
+          benchWithBase
       allocPlot =
         makeBarChart
           ChartDef
@@ -60,7 +77,7 @@ mkPlots colMap k bg =
             }
           caseName
           colMap
-          bg
+          benchWithBase
       copiedPlot =
         makeBarChart
           ChartDef
@@ -73,7 +90,7 @@ mkPlots colMap k bg =
             }
           caseName
           colMap
-          bg
+          benchWithBase
    in Criteria {..}
 
 data ChartDef t = ChartDef
@@ -85,54 +102,75 @@ data ChartDef t = ChartDef
   , errorL :: Maybe (Getter BenchCase Integer)
   }
 
+data WithBase a = Current a | a `WithBase` a
+  deriving (Show, Eq, Ord, Generic, Generic1, Functor, Foldable, Traversable)
+
+getCurrent :: WithBase a -> a
+getCurrent (Current a) = a
+getCurrent (WithBase a _) = a
+
+getBase :: WithBase a -> Maybe a
+getBase Current {} = Nothing
+getBase (_ `WithBase` b) = Just b
+
 makeBarChart ::
-  (Applicative t) =>
+  (Applicative t, Foldable t) =>
   ChartDef t ->
   T.Text ->
   Map.Map T.Text Colour ->
-  Map.Map T.Text BenchCase ->
+  Map.Map T.Text (WithBase BenchCase) ->
   t ChartOptions
 makeBarChart ChartDef {..} caseName colMap bg0 =
-  traverse (liftA2 (,) <$> pure <*> view valueL) bg0 <&> \bg ->
+  traverse (liftA2 (,) <$> pure <*> view valueL . getCurrent) bg0 <&> \bg ->
     let
-      mkBarRow !b !val =
-        let mean' = adjustSITo chartRadix defaultSIPrefix val targetSI
+      mkBarRow !nam !targ !val =
+        let cur = getCurrent targ
+            mbase = getBase targ
+            mBaseVal = preview (valueL . folded) =<< mbase
+            valStyle =
+              let col = fromMaybe (grey 0.5 0.4) $ Map.lookup nam colMap
+               in defaultRectStyle
+                    & #color .~ col
+                    & #borderSize .~ 0.0
+            baseStyle =
+              let col = fromMaybe (grey 0.5 0.4) $ Map.lookup nam colMap
+               in case col of
+                    Colour r g b a ->
+                      defaultRectStyle
+                        & #color .~ Colour r g b (a * 0.25)
+                        & #borderSize .~ 0.001
+                        & #borderColor .~ col
+            styles = DL.cons valStyle $ fold $ DL.singleton baseStyle <$ mBaseVal
+            vals =
+              adjustSITo chartRadix defaultSIPrefix targetSI
+                <$> DL.cons val (foldMap DL.singleton mBaseVal)
+            labs = DL.cons nam $ foldMap (const $ DL.singleton (nam <> ", Baseline")) mBaseVal
             dev' =
               fmap
                 ( \l ->
-                    DL.singleton
-                      $ adjustSITo chartRadix defaultSIPrefix (b ^. l `quot` 2) targetSI
+                    adjustSITo chartRadix defaultSIPrefix targetSI
+                      <$> DL.cons
+                        (cur ^. l `quot` 2)
+                        ( foldMap
+                            (DL.singleton . (`quot` 2) . view l)
+                            mbase
+                        )
                 )
                 errorL
-         in (DL.singleton mean', dev')
-      (fromMaybe Unit -> !targetSI, (values, devs)) =
-        foldMap
-          (detectSIPrefix chartRadix defaultSIPrefix . snd &&& uncurry mkBarRow)
+         in (vals, dev', labs, styles)
+      (fromMaybe Unit -> !targetSI, (values, devs, labels, rectStyles)) =
+        ifoldMap
+          ( \i ->
+              (detectSIPrefix chartRadix defaultSIPrefix . snd)
+                &&& uncurry (mkBarRow i)
+          )
           bg
       theBars =
         BarData
           { barData = map pure $ DL.toList values
           , barRowLabels = []
-          , barColumnLabels = Map.keys bg
+          , barColumnLabels = DL.toList labels
           }
-      xAxis =
-        defaultAxisOptions
-          & #ticks . #ltick .~ Nothing
-          & #ticks . #style .~ TickLabels (Map.keys bg)
-      yAxis = defaultAxisOptions & #place .~ PlaceLeft
-      barOpts =
-        defaultBarOptions
-          & #displayValues .~ False
-          & #barRectStyles
-            .~ map
-              ( \nam ->
-                  let col = fromMaybe (grey 0.5 0.4) $ Map.lookup nam colMap
-                   in defaultRectStyle
-                        & #color .~ col
-                        & #borderSize .~ 0.0
-              )
-              (Map.keys bg)
-      theBar = barChart barOpts theBars
       barXYes =
         theBars
           ^.. #barData
@@ -141,11 +179,25 @@ makeBarChart ChartDef {..} caseName colMap bg0 =
             . folded
             . to \(Rect x0 x1 _ y1) ->
               (Point ((x0 + x1) / 2) y1, x1 - x0)
+      xAxis =
+        defaultAxisOptions
+          & #ticks . #ltick .~ Nothing
+          & #ticks . #style
+            .~ TickPlaced
+              (zip (map (_x . fst) barXYes) $ DL.toList labels)
+      yAxis = defaultAxisOptions & #place .~ PlaceLeft
+      barOpts =
+        defaultBarOptions
+          & #displayValues .~ False
+          & #barRectStyles .~ DL.toList rectStyles
+          & #barLegendOptions . #place .~ PlaceAbsolute (Point 1.0 (-0.5))
+          & #barLegendOptions . #overallScale .~ 0.175
+      theBar = barChart barOpts theBars
       errs =
         foldMap
           ( zipWith
               ( \(Point x y, w) sigma ->
-                  let sty = defaultLineStyle & #size .~ 0.003
+                  let sty = defaultLineStyle & #size .~ 0.0015
                       !y0 = y - sigma
                       !y1 = y + sigma
                       !dx = w / 10
@@ -170,9 +222,6 @@ makeBarChart ChartDef {..} caseName colMap bg0 =
       theBar
         & #hudOptions . #chartAspect .~ FixedAspect ((1 + sqrt 5) / 2)
         & #hudOptions . #axes .~ [(5, xAxis), (5, yAxis)]
-        & #hudOptions . #titles
-          .~ [ (6, defaultTitle title)
-             , (11, yAxisLabel)
-             ]
+        & #hudOptions . #titles .~ [(6, defaultTitle title), (11, yAxisLabel)]
         & #hudOptions . #frames .~ [(11, defaultFrameOptions & #buffer .~ 0.2)]
         & #charts <>~ named "errors" errs

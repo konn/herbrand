@@ -191,6 +191,7 @@ library herbrand-test-utils
 executable bench-chart
   main-is: Main.hs
   other-modules:
+      Parse
       Plot
       Report
       Types
@@ -234,9 +235,11 @@ executable bench-chart
     , psqueues
     , recursion-schemes
     , reflection
+    , semialign
     , semigroupoids
     , strict
     , text
+    , these
     , transformers
     , trie-simple
     , unliftio

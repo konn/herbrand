@@ -169,6 +169,8 @@ executables:
     - integer-logarithms
     - lucid2
     - optparse-applicative
+    - semialign
+    - these
     - unliftio
 
 tests:

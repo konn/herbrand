@@ -21,37 +21,32 @@ import Control.DeepSeq
 import Control.Exception
 import qualified Control.Foldl as L
 import Control.Lens hiding ((<.>))
-import qualified Data.Bifunctor as Bi
-import qualified Data.ByteString.Lazy as LBS
-import Data.Coerce (coerce)
-import qualified Data.Csv as Csv
-import Data.Foldable (foldMap')
 import Data.Generics.Labels ()
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromJust, fromMaybe)
-import Data.Semigroup (Arg (..), First (..), Min (..))
+import Data.Semigroup (Arg (..), Min (..))
 import qualified Data.Text as T
-import qualified Data.Trie.Map as Trie
-import qualified Data.Trie.Map.Internal as Trie
 import qualified Data.Vector as V
 import GHC.Generics (Generic)
 import GitHash
 import qualified Lucid
 import qualified Options.Applicative as Opt
+import Parse (Benchs, decodeBenchs)
 import Plot
 import Report
 import System.Directory
 import System.FilePath
 import System.IO
 import Types
-import UnliftIO (pooledForConcurrently)
+import UnliftIO (evaluateDeep, pooledForConcurrently)
 
 data Opts = Opts
   { input :: !FilePath
   , output :: !FilePath
-  , stripSuffices :: !(Maybe Int)
+  , sufficesToStrip :: !(Maybe Int)
   , reportName :: !(Maybe T.Text)
   , gitInspect :: !Bool
+  , baseline :: !(Maybe FilePath)
   }
   deriving (Show, Eq, Ord, Generic)
 
@@ -59,24 +54,19 @@ main :: IO ()
 main = do
   Opts {..} <- Opt.execParser optsP
   hSetBuffering stderr LineBuffering
-  (_, !rows) <-
-    either error (evaluate . force) . Csv.decodeByName @BenchCase =<< LBS.readFile input
   !trie <-
-    evaluate
-      $ force
-      $ coerce
-      $ Map.filter (not . Map.null)
-      $ Map.mapKeysMonotonic
-        ( \(V.fromList -> xs) ->
-            V.toList $ V.take (max 0 (V.length xs - fromMaybe 0 stripSuffices)) xs
-        )
-      $ flatKeys
-      $ stripCommonPrefices
-      $ foldMap' (Trie.singleton <$> T.splitOn "." . fullName <*> First) rows
+    evaluateDeep
+      . pruneSuffices sufficesToStrip
+      =<< decodeBenchs input
+  !mbases <-
+    evaluateDeep
+      . fmap (pruneSuffices sufficesToStrip)
+      =<< mapM decodeBenchs baseline
   let colorMap = buildColorMap trie
   createDirectoryIfMissing True output
   svgs <- pooledForConcurrently (Map.mapWithKey (,) trie) \(k, bg) -> do
-    !plots <- evaluate $ mkPlots colorMap k bg
+    let mbase = Map.lookup k =<< mbases
+    !plots <- evaluate $ mkPlots colorMap k mbase bg
     !mWinner <-
       evaluate
         $ force
@@ -125,6 +115,13 @@ main = do
   Lucid.renderToFile reportHtml $ buildReport reportName mGit svgs
   hPutStrLn stderr $ "Report Written to: " <> reportHtml
 
+pruneSuffices :: Maybe Int -> Benchs -> Benchs
+pruneSuffices = maybe id \c ->
+  Map.mapKeysMonotonic
+    ( \(V.fromList -> xs) ->
+        V.toList $ V.take (max 0 (V.length xs - c)) xs
+    )
+
 buildColorMap :: (Foldable t) => t (Map.Map T.Text a) -> Map.Map T.Text Colour
 buildColorMap =
   Map.fromList
@@ -133,26 +130,6 @@ buildColorMap =
       ( L.premap Map.keysSet
           $ L.handles folded L.list
       )
-
-stripCommonPrefices :: Trie.TMap T.Text a -> Trie.TMap T.Text a
-stripCommonPrefices = go
-  where
-    go tr@(Trie.TMap (Trie.Node Nothing dic)) =
-      if Map.size dic == 1 then go $ snd $ Map.findMin dic else tr
-    go tr@(Trie.TMap (Trie.Node Just {} _)) = tr
-
-flatKeys :: (Semigroup a) => Trie.TMap T.Text a -> Map.Map [T.Text] (Map.Map T.Text a)
-flatKeys = go . Trie.getNode
-  where
-    go tr@(Trie.Node _ chs)
-      | any ((== 1) . Trie.count) chs =
-          Map.singleton [] $ Map.fromListWith (<>) $ map (Bi.first $ T.intercalate ".") $ Trie.toList $ Trie.TMap tr
-      | otherwise =
-          ifoldMapBy
-            (Map.unionWith (<>))
-            Map.empty
-            (Map.mapKeysMonotonic . (:))
-            (go . Trie.getNode <$> chs)
 
 optsP :: Opt.ParserInfo Opts
 optsP = Opt.info (p <**> Opt.helper) $ Opt.progDesc "Converts tasty-bench output to  bar charts, scaling per-group not global."
@@ -170,7 +147,7 @@ optsP = Opt.info (p <**> Opt.helper) $ Opt.progDesc "Converts tasty-bench output
           <> Opt.short 'o'
           <> Opt.metavar "DIR"
           <> Opt.help "Output directory"
-      stripSuffices <-
+      sufficesToStrip <-
         optional
           $ Opt.option Opt.auto
           $ Opt.long "strip-suffices"
@@ -185,6 +162,11 @@ optsP = Opt.info (p <**> Opt.helper) $ Opt.progDesc "Converts tasty-bench output
           <> Opt.metavar "TITLE"
           <> Opt.help "Optional Report Name"
       gitInspect <- Opt.switch $ Opt.long "git" <> Opt.help "Inspects git metadata and includes in the report"
+      baseline <-
+        Opt.optional
+          $ Opt.strOption
+          $ Opt.long "baseline"
+          <> Opt.short 'B'
+          <> Opt.metavar "FILE"
+          <> Opt.help "Optional path to the baseline CSV to compare with"
       pure Opts {..}
-
--- Stolen from Chart-svg, but load font from local
