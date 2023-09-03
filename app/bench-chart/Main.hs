@@ -8,7 +8,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE ViewPatterns #-}
@@ -92,11 +91,11 @@ main = do
                   }
           )
           bg
-    paths <- iforM plots \plotType chart -> do
-      let typeStr = case plotType of
-            TimePlot -> "time"
-            AllocPlot -> "alloc"
-            CopiedPlot -> "copied"
+    paths <- iforM plots \crit chart -> do
+      let typeStr = case crit of
+            Time -> "time"
+            Alloc -> "alloc"
+            Copied -> "copied"
           baseName = T.unpack (T.intercalate "-" k) </> typeStr <.> "svg"
           outPath = output </> baseName
       createDirectoryIfMissing True $ takeDirectory outPath

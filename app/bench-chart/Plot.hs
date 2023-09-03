@@ -39,6 +39,7 @@ mkPlots colMap k bg =
         makeBarChart
           ChartDef
             { chartTitle = "Time"
+            , chartRadix = Decimal
             , chartUnit = "s"
             , defaultSIPrefix = Pico
             , valueL = #mean . to Identity
@@ -51,6 +52,7 @@ mkPlots colMap k bg =
         makeBarChart
           ChartDef
             { chartTitle = "Alloc"
+            , chartRadix = Binary
             , chartUnit = "B"
             , defaultSIPrefix = Unit
             , valueL = #alloc
@@ -63,6 +65,7 @@ mkPlots colMap k bg =
         makeBarChart
           ChartDef
             { chartTitle = "Copied"
+            , chartRadix = Binary
             , chartUnit = "B"
             , defaultSIPrefix = Unit
             , valueL = #copied
@@ -75,6 +78,7 @@ mkPlots colMap k bg =
 
 data ChartDef t = ChartDef
   { chartTitle :: !T.Text
+  , chartRadix :: !Radix
   , defaultSIPrefix :: !SIPrefix
   , chartUnit :: !T.Text
   , valueL :: Getter BenchCase (t Integer)
@@ -92,18 +96,18 @@ makeBarChart ChartDef {..} caseName colMap bg0 =
   traverse (liftA2 (,) <$> pure <*> view valueL) bg0 <&> \bg ->
     let
       mkBarRow !b !val =
-        let mean' = adjustSITo defaultSIPrefix val targetSI
+        let mean' = adjustSITo chartRadix defaultSIPrefix val targetSI
             dev' =
               fmap
                 ( \l ->
                     DL.singleton
-                      $ adjustSITo defaultSIPrefix (b ^. l `quot` 2) targetSI
+                      $ adjustSITo chartRadix defaultSIPrefix (b ^. l `quot` 2) targetSI
                 )
                 errorL
          in (DL.singleton mean', dev')
       (fromMaybe Unit -> !targetSI, (values, devs)) =
         foldMap
-          (detectSIPrefix defaultSIPrefix . snd &&& uncurry mkBarRow)
+          (detectSIPrefix chartRadix defaultSIPrefix . snd &&& uncurry mkBarRow)
           bg
       theBars =
         BarData
@@ -157,7 +161,7 @@ makeBarChart ChartDef {..} caseName colMap bg0 =
           )
           devs
       yAxisLabel =
-        defaultTitle (chartTitle <> " [" <> T.pack (showPrefix targetSI) <> chartUnit <> "]")
+        defaultTitle (chartTitle <> " [" <> T.pack (showPrefix chartRadix targetSI) <> chartUnit <> "]")
           & #place .~ PlaceLeft
           & #anchor .~ AnchorMiddle
           & #style . #size %~ (/ 2)
