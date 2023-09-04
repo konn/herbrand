@@ -43,6 +43,7 @@ module Control.Functor.Linear.State.Extra (
   fail,
   uses,
   use,
+  usesDup,
 ) where
 
 import Control.Functor.Linear
@@ -94,6 +95,16 @@ uses ::
   StateT s m a
 {-# INLINE uses #-}
 uses l f = zoom l (state f)
+
+usesDup ::
+  (Applicative m, Dupable t) =>
+  Optics.Optic_ (Kleisli (Compose ((,) t) (FUN 'One t))) s s t t ->
+  (t %1 -> a) %1 ->
+  StateT s m a
+{-# INLINE usesDup #-}
+{- HLINT ignore usesDup "Use first" -}
+usesDup l f = zoom l $ state \s ->
+  dup2 s & \(x, x') -> (f x, x')
 
 use ::
   (Applicative m, Dupable a) =>

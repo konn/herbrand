@@ -73,12 +73,14 @@ library
     , generic-lens
     , generically
     , hashable
+    , integer-logarithms
     , lens
     , linear-array-extra
     , linear-base
     , linear-generics
     , parallel
     , psqueues
+    , random
     , recursion-schemes
     , reflection
     , semigroupoids
@@ -126,6 +128,7 @@ library herbrand-bench
     , lens
     , parallel
     , psqueues
+    , random
     , recursion-schemes
     , reflection
     , safe-exceptions
@@ -176,6 +179,7 @@ library herbrand-test-utils
     , lens
     , parallel
     , psqueues
+    , random
     , recursion-schemes
     , reflection
     , semigroupoids
@@ -233,6 +237,7 @@ executable bench-chart
     , optparse-applicative
     , parallel
     , psqueues
+    , random
     , recursion-schemes
     , reflection
     , semialign
@@ -283,6 +288,7 @@ executable cdcl-dry
     , optparse-applicative
     , parallel
     , psqueues
+    , random
     , recursion-schemes
     , reflection
     , semigroupoids
@@ -331,6 +337,7 @@ executable gen-sat
     , parallel
     , parser-combinators
     , psqueues
+    , random
     , recursion-schemes
     , reflection
     , semigroupoids
@@ -377,6 +384,7 @@ executable sudoku
     , parallel
     , parser-combinators
     , psqueues
+    , random
     , recursion-schemes
     , reflection
     , semigroupoids
@@ -429,6 +437,7 @@ test-suite herbrand-test
     , lens
     , parallel
     , psqueues
+    , random
     , recursion-schemes
     , reflection
     , semigroupoids
@@ -481,6 +490,7 @@ benchmark herbrand-cnf-bench
     , lens
     , parallel
     , psqueues
+    , random
     , recursion-schemes
     , reflection
     , semigroupoids
@@ -535,6 +545,7 @@ benchmark herbrand-sat-bench
     , lens
     , parallel
     , psqueues
+    , random
     , recursion-schemes
     , reflection
     , semigroupoids
