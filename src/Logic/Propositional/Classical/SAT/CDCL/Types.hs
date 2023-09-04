@@ -256,7 +256,7 @@ getInitRestart ExponentialRestart {..} = Just initialRestart
 getInitRestart LubyRestart {..} = Just initialRestart
 
 defaultRestartStrategy :: RestartStrategy
-defaultRestartStrategy = NoRestart
+defaultRestartStrategy = defaultLubyRestart
 
 defaultExponentialRestart :: RestartStrategy
 defaultExponentialRestart =
