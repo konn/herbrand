@@ -78,11 +78,12 @@ module.exports = async ({
       ]);
 
       base_csv_path = `${base_csv_dir}/${bench_name}.csv`;
+      const base_svg_path = `${base_csv_dir}/${bench_name}.svg`;
       core.info("Running the original benchmark first...");
       // FIXME: Checkout data directory for completeness
       await exec.exec(
         `${base_art_dir}/artifacts/benchs/${bench_name}`,
-        ["-j1", "--csv", base_csv_path],
+        ["-j1", "--csv", base_csv_path, "--svg", base_svg_path],
         { ignoreReturnCode: true }
       );
       core.setOutput("baseline-csv", base_csv_path);
