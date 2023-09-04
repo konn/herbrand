@@ -11,11 +11,9 @@ import qualified Logic.Propositional.Classical.SAT.DPLL as DPLL
 import qualified Logic.Propositional.Classical.SAT.Tableaux as Tableaux
 import Logic.Propositional.Syntax.General
 import System.Mem (performGC)
-import Test.Tasty (Timeout (..), localOption)
 
 main :: IO ()
 main = do
-  !larges <- evaluate . force =<< findCnfsIn "data/sat/large"
   !huges <- evaluate . force =<< findCnfsIn "data/sat/huge"
   !sudoku <- evaluate . force =<< findCnfsIn "data/sudoku"
   !satlib <- evaluate . force =<< findCnfsIn "data/satlib"
@@ -23,15 +21,7 @@ main = do
   defaultMain
     [ bgroup
         "solve"
-        [ withCnfs "large" larges $ \fml ->
-            [ allowFailureBecause "O(n^2)"
-                $ localOption (Timeout (30 * 10 ^ (6 :: Int)) "30s")
-                $ bench "tableaux"
-                $ nfAppIO (fmap $ Tableaux.solve . snd) fml
-            , bench "DPLL" $ nfAppIO (fmap $ DPLL.solve . fst) fml
-            ]
-              ++ cdclBenches fml
-        , withCnfs "huge" huges $ \fml ->
+        [ withCnfs "huge" huges $ \fml ->
             [ allowFailureBecause "O(n^2)"
                 $ timeout 30
                 $ bench "tableaux"
