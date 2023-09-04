@@ -51,7 +51,7 @@ module.exports = async ({
     const {
       data: { artifacts },
     } = await github.request(runs[0].artifacts_url);
-    const csvArt = artifacts.find((art) => art.name == `${bench_name}.csv`);
+    const csvArt = artifacts.find((art) => art.name == `artifacts`);
     if (csvArt !== undefined) {
       core.info(`Downloading artifact: ${csvArt.id}`);
       const { url } = await github.rest.actions.downloadArtifact({
@@ -61,21 +61,38 @@ module.exports = async ({
         archive_format: "zip",
       });
       core.info(`Downloading from: ${url}`);
+      const base_commit = target_run.head_sha;
       const response = await fetch(url, { compress: true });
       const body = await response.buffer();
-      const zip_path = `base-${bench_name}.zip`;
-      fs.writeFileSync(zip_path, body);
-      const base_csv_dir = "base-results";
+      const base_art_dir = `base-artifacts-${base_commit.slice(0, 7)}`;
+      const base_csv_dir = `base-csv-${base_commit.slice(0, 7)}`;
+      io.mkdirP(base_art_dir);
       io.mkdirP(base_csv_dir);
+      const zip_path = `${base_art_dir}/artifacts.zip`;
+      fs.writeFileSync(zip_path, body);
+      await exec.exec("unzip", [zip_path, "-d", base_art_dir]);
+      await exec.exec("tar", [
+        "xvf",
+        "artifacts.tar.gz",
+        `--directory=${base_art_dir}`,
+      ]);
+
       base_csv_path = `${base_csv_dir}/${bench_name}.csv`;
-      await exec.exec("unzip", [zip_path, "-d", base_csv_dir]);
+      core.info("Running the original benchmark first...");
+      // FIXME: Checkout data directory for completeness
+      await exec.exec(
+        `${base_art_dir}/artifacts/benchs/${bench_name}`,
+        ["-j1", "--csv", base_csv_path],
+        { ignoreReturnCode: true }
+      );
       core.setOutput("baseline-csv", base_csv_path);
+
       core.info(`Original CSV written to: ${base_csv_path}`);
       const commit = (
         await github.rest.git.getCommit({
           owner: target_owner,
           repo: target_repo_name,
-          commit_sha: target_run.head_sha,
+          commit_sha: base_commit,
         })
       ).data;
       const baseline_desc = `${target_run.head_sha.slice(0, 7)} (${
