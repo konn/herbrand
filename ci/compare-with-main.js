@@ -73,7 +73,7 @@ module.exports = async ({
       await exec.exec("unzip", [zip_path, "-d", base_art_dir]);
       await exec.exec("tar", [
         "xvf",
-        "artifacts.tar.zst",
+        `${base_art_dir}/artifacts.tar.zst`,
         `--directory=${base_art_dir}`,
       ]);
 
