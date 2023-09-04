@@ -60,111 +60,106 @@ main = do
 
 cdclBenches :: IO (DPLL.CNF Word, Formula Full Word) -> [Benchmark]
 cdclBenches fml =
-  [ bench "CDCL (α = 0.75)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.75, activateResolved = False}) . fst) fml
-  , bench "CDCL (α = 0.75, mVISDS)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.75, activateResolved = True}) . fst) fml
-  , bench "CDCL (α = 0.75, mVISDS, ExpRestart(100, 2))"
-      $ nfAppIO
-        ( fmap
-            $ CDCL.solveWith
-              ( CDCL.defaultOptions
-                  { decayFactor = 0.75
-                  , activateResolved = True
-                  , restartStrategy = defaultExponentialRestart
-                  }
-              )
-            . fst
-        )
-        fml
-  , bench "CDCL (α = 0.75, mVISDS, LubyRestart(100, 2))"
-      $ nfAppIO
-        ( fmap
-            $ CDCL.solveWith
-              ( CDCL.defaultOptions
-                  { decayFactor = 0.75
-                  , activateResolved = True
-                  , restartStrategy = defaultLubyRestart
-                  }
-              )
-            . fst
-        )
-        fml
-  , bench "CDCL (α = 0.95)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.95, activateResolved = False}) . fst) fml
-  , bench "CDCL (α = 0.95, mVISDS)" $ nfAppIO (fmap $ CDCL.solveWith (CDCL.defaultOptions {decayFactor = 0.95, activateResolved = True}) . fst) fml
-  , bench "CDCL (α = 0.95, mVISDS, ExpRestart(100, 2))"
-      $ nfAppIO
-        ( fmap
-            $ CDCL.solveWith
-              ( CDCL.defaultOptions
-                  { decayFactor = 0.95
-                  , activateResolved = True
-                  , restartStrategy = defaultExponentialRestart
-                  }
-              )
-            . fst
-        )
-        fml
-  , bench "CDCL (α = 0.95, mVISDS, LubyRestart(100, 2))"
-      $ nfAppIO
-        ( fmap
-            $ CDCL.solveWith
-              ( CDCL.defaultOptions
-                  { decayFactor = 0.95
-                  , activateResolved = True
-                  , restartStrategy = defaultLubyRestart
-                  }
-              )
-            . fst
-        )
-        fml
-  , bench "CDCL (adaptive)"
-      $ nfAppIO
-        ( fmap
-            $ CDCL.solveWith
-              ( CDCL.defaultOptions
-                  { decayFactor = defaultAdaptiveFactor
-                  , activateResolved = False
-                  }
-              )
-            . fst
-        )
-        fml
-  , bench "CDCL (adaptive, mVSIDS)"
-      $ nfAppIO
-        ( fmap
-            $ CDCL.solveWith
-              ( CDCL.defaultOptions
-                  { decayFactor = defaultAdaptiveFactor
-                  , activateResolved = True
-                  , restartStrategy = NoRestart
-                  }
-              )
-            . fst
-        )
-        fml
-  , bench "CDCL (adaptive, mVISDS, ExpRestart(100, 2))"
-      $ nfAppIO
-        ( fmap
-            $ CDCL.solveWith
-              ( CDCL.defaultOptions
-                  { decayFactor = defaultAdaptiveFactor
-                  , activateResolved = True
-                  , restartStrategy = defaultExponentialRestart
-                  }
-              )
-            . fst
-        )
-        fml
-  , bench "CDCL (adaptive, mVISDS, LubyRestart(100, 2))"
-      $ nfAppIO
-        ( fmap
-            $ CDCL.solveWith
-              ( CDCL.defaultOptions
-                  { decayFactor = defaultAdaptiveFactor
-                  , activateResolved = True
-                  , restartStrategy = defaultLubyRestart
-                  }
-              )
-            . fst
-        )
-        fml
+  [ bench lab $ nfAppIO (fmap $ CDCL.solveWith opt . fst) fml
+  | (lab, opt) <- cdclSolvers
+  ]
+
+cdclSolvers :: [(String, CDCLOptions)]
+cdclSolvers =
+  [
+    ( "CDCL (α = 0.75)"
+    , CDCL.CDCLOptions
+        { decayFactor = 0.75
+        , activateResolved = False
+        , restartStrategy = NoRestart
+        }
+    )
+  ,
+    ( "CDCL (α = 0.75, mVISDS)"
+    , CDCL.defaultOptions
+        { decayFactor = 0.75
+        , activateResolved = True
+        , restartStrategy = NoRestart
+        }
+    )
+  ,
+    ( "CDCL (α = 0.75, mVISDS, ExpRestart(100, 2))"
+    , CDCL.defaultOptions
+        { decayFactor = 0.75
+        , activateResolved = True
+        , restartStrategy = defaultExponentialRestart
+        }
+    )
+  ,
+    ( "CDCL (α = 0.75, mVISDS, LubyRestart(100, 2))"
+    , CDCLOptions
+        { decayFactor = 0.75
+        , activateResolved = True
+        , restartStrategy = defaultLubyRestart
+        }
+    )
+  ,
+    ( "CDCL (α = 0.95)"
+    , CDCLOptions
+        { decayFactor = 0.95
+        , activateResolved = False
+        , restartStrategy = NoRestart
+        }
+    )
+  ,
+    ( "CDCL (α = 0.95, mVISDS)"
+    , CDCLOptions
+        { decayFactor = 0.95
+        , activateResolved = True
+        , restartStrategy = NoRestart
+        }
+    )
+  ,
+    ( "CDCL (α = 0.95, mVISDS, ExpRestart(100, 2))"
+    , CDCLOptions
+        { decayFactor = 0.95
+        , activateResolved = True
+        , restartStrategy = defaultExponentialRestart
+        }
+    )
+  ,
+    ( "CDCL (α = 0.95, mVISDS, LubyRestart(100, 2))"
+    , CDCLOptions
+        { decayFactor = 0.95
+        , activateResolved = True
+        , restartStrategy = defaultLubyRestart
+        }
+    )
+  ,
+    ( "CDCL (adaptive)"
+    , CDCLOptions
+        { decayFactor = defaultAdaptiveFactor
+        , activateResolved = False
+        , restartStrategy = NoRestart
+        }
+    )
+  ,
+    ( "CDCL (adaptive, mVSIDS)"
+    , CDCLOptions
+        { decayFactor = defaultAdaptiveFactor
+        , activateResolved = True
+        , restartStrategy = NoRestart
+        }
+    )
+  ,
+    ( "CDCL (adaptive, mVISDS, ExpRestart(100, 2))"
+    , CDCL.defaultOptions
+        { decayFactor = defaultAdaptiveFactor
+        , activateResolved = True
+        , restartStrategy = defaultExponentialRestart
+        }
+    )
+  ,
+    ( "CDCL (adaptive, mVISDS, LubyRestart(100, 2))"
+    , CDCLOptions
+        { decayFactor = defaultAdaptiveFactor
+        , activateResolved = True
+        , restartStrategy = defaultLubyRestart
+        }
+    )
   ]
