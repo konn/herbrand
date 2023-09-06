@@ -116,7 +116,7 @@ import Control.Foldl qualified as L
 import Control.Functor.Linear qualified as C
 import Control.Functor.Linear.State.Extra qualified as S
 import Control.Lens (Lens', Prism', foldring, lens, prism', (.~))
-import Control.Monad (guard)
+import Control.Monad (guard, join)
 import Control.Optics.Linear qualified as LinLens
 import Data.Alloc.Linearly.Token
 import Data.Alloc.Linearly.Token.Unsafe (HasLinearWitness)
@@ -132,7 +132,6 @@ import Data.DList qualified as DL
 import Data.Foldable qualified as F
 import Data.Generics.Labels ()
 import Data.Hashable (Hashable)
-import Data.Int (Int64)
 import Data.IntPSQ qualified as PSQ
 import Data.IntSet (IntSet)
 import Data.IntSet qualified as IS
@@ -165,7 +164,7 @@ import Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
 import Math.NumberTheory.Logarithms (wordLog2')
 import Prelude.Linear (lseq, (&))
 import Prelude.Linear qualified as PL
-import System.Random (StdGen, mkStdGen, split)
+import System.Random (StdGen, mkStdGen, randomR, split)
 import System.Random.Stateful (RandomGen)
 import Unsafe.Linear qualified as Unsafe
 
@@ -276,6 +275,7 @@ defaultLubyRestart =
 
 data CDCLOptions = CDCLOptions
   { decayFactor :: !VariableSelection
+  , randomVarSelectionFreq :: !(Maybe Double)
   , randomSeed :: !Int
   , activateResolved :: !Bool
   , restartStrategy :: !RestartStrategy
@@ -287,6 +287,7 @@ defaultOptions =
   CDCLOptions
     { decayFactor = defaultDecayFactor
     , randomSeed = 42
+    , randomVarSelectionFreq = Just 0.25
     , activateResolved = True
     , restartStrategy = NoRestart
     }
@@ -528,14 +529,18 @@ data UnassignedVars where
     {-# UNPACK #-} !(LUV.Vector VarId) %1 ->
     UnassignedVars
 
+numUnassigneds :: UnassignedVars %1 -> (Ur Int, UnassignedVars)
+numUnassigneds (MkUnassignedVars q v) =
+  MkUnassignedVars q C.<$> LUV.size v
+
 insertUnassigned :: VarId -> Down Double -> UnassignedVars %1 -> UnassignedVars
 insertUnassigned v prio (MkUnassignedVars q vids) =
   LUV.size vids & \(Ur i, vids) ->
     LUV.push v vids & \vids ->
       MkUnassignedVars (PSQ.insert (fromIntegral $ unVarId v) prio i q) vids
 
-deleteUnasigedAt :: Int -> UnassignedVars %1 -> (Ur (Maybe (VarId, Down Double)), UnassignedVars)
-deleteUnasigedAt i (MkUnassignedVars q vids) =
+popUnassignedAt :: Int -> UnassignedVars %1 -> (Ur (Maybe (VarId, Down Double)), UnassignedVars)
+popUnassignedAt i (MkUnassignedVars q vids) =
   LUV.size vids & \(Ur sz, vids) ->
     LUV.pop vids & \(Ur mvLast, vids) ->
       case mvLast of
@@ -565,6 +570,10 @@ deleteUnasigedAt i (MkUnassignedVars q vids) =
                           )
                           vids
                       )
+
+type VarPopper =
+  UnassignedVars %1 ->
+  (Ur (Maybe (VarId, Down Double)), UnassignedVars)
 
 popUnassignedBy ::
   ( PSQ.IntPSQ (Down Double) Int ->
@@ -635,7 +644,7 @@ calcLBDL =
     $ L.generalize
       (L.handles L.folded $ Set.size <$> L.set)
 
-newtype RandGen = RandGen {getStdGen :: StdGen}
+newtype RandGen = RandGen StdGen
   deriving newtype (RandomGen)
 
 data VSIDSState s where
@@ -649,16 +658,23 @@ data VSIDSState s where
     -- | True if the last learnt clause exceeds LBD
     !Bool ->
     -- | Random Source for variable selection
-    !RandGen ->
+    !RandGen %1 ->
     VSIDSState s
 
+instance PL.Consumable RandGen where
+  consume = Unsafe.toLinear (const ())
+
+instance PL.Dupable RandGen where
+  dup2 = Unsafe.toLinear (join (,))
+
 instance PL.Consumable (VSIDSState s) where
-  consume (VSIDSState ua _ _ _ _) = PL.consume ua
+  consume (VSIDSState ua _ _ _ g) = ua `lseq` g `lseq` ()
 
 instance PL.Dupable (VSIDSState s) where
   dup2 (VSIDSState ua v lbd p g) =
     PL.dup2 ua & \(ua, ua') ->
-      (VSIDSState ua v lbd p g, VSIDSState ua' v lbd p g)
+      PL.dup2 g & \(g, g') ->
+        (VSIDSState ua v lbd p g, VSIDSState ua' v lbd p g')
 
 data CDCLState s where
   CDCLState ::
@@ -745,14 +761,35 @@ decayUnsatVars :: Double -> UnassignedVars %1 -> UnassignedVars
 decayUnsatVars = \alpha (MkUnassignedVars q w) ->
   MkUnassignedVars (decayVars alpha q) w
 
-findUnsatVar :: S.State (VSIDSState s) (Ur (Maybe VarId))
+findUnsatVar :: forall s. (Reifies s CDCLOptions) => S.State (VSIDSState s) (Ur (Maybe VarId))
 findUnsatVar = S.state \(VSIDSState unsat sat lbdEma exc g) ->
-  popUnassignedByPrio unsat & \case
-    (Ur (Just (k, p)), unsat) ->
-      ( Ur $ Just k
-      , VSIDSState unsat (PSQ.unsafeInsertNew (fromIntegral $ unVarId k) p () sat) lbdEma exc g
-      )
-    (Ur Nothing, unsat) -> (Ur Nothing, VSIDSState unsat sat lbdEma exc g)
+  numUnassigneds unsat & \(Ur nums, unsat) ->
+    nums == 0 & \case
+      True -> (Ur Nothing, VSIDSState unsat sat lbdEma exc g)
+      False ->
+        toPopperGen nums g & \(Ur popper, g) ->
+          popper unsat & \case
+            (Ur (Just (k, p)), unsat) ->
+              ( Ur $ Just k
+              , VSIDSState unsat (PSQ.unsafeInsertNew (fromIntegral $ unVarId k) p () sat) lbdEma exc g
+              )
+            (Ur Nothing, unsat) -> (Ur Nothing, VSIDSState unsat sat lbdEma exc g)
+  where
+    toPopperGen :: Int -> RandGen %1 -> (Ur VarPopper, RandGen)
+    toPopperGen n g = case randomVarSelectionFreq $ reflect @s Proxy of
+      Nothing -> (Ur popUnassignedByPrio, g)
+      Just freq ->
+        Unsafe.toLinear (randomR (0.0, 1.0)) g & \(!p, !g) ->
+          p PL.< freq & \case
+            False -> (Ur popUnassignedByPrio, g)
+            True ->
+              Unsafe.toLinear (randomR (0, n - 1)) g & \(i, g) ->
+                PL.move i & \(Ur i) ->
+                  (Ur (popUnassignedAt i), g)
+
+{- True ->
+  let (!i, !g'') = Unsafe.toLinear (randomR (0, nums - 1)) g'
+   in undefined g'' -}
 
 incrementVarM :: Lit -> S.State (VSIDSState s) ()
 incrementVarM l = S.modify \(VSIDSState unsats sats lbdEma exc g) ->
