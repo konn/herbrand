@@ -132,6 +132,7 @@ import Data.DList qualified as DL
 import Data.Foldable qualified as F
 import Data.Generics.Labels ()
 import Data.Hashable (Hashable)
+import Data.Int (Int64)
 import Data.IntPSQ qualified as PSQ
 import Data.IntSet (IntSet)
 import Data.IntSet qualified as IS
@@ -164,6 +165,8 @@ import Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
 import Math.NumberTheory.Logarithms (wordLog2')
 import Prelude.Linear (lseq, (&))
 import Prelude.Linear qualified as PL
+import System.Random (StdGen, mkStdGen, split)
+import System.Random.Stateful (RandomGen)
 import Unsafe.Linear qualified as Unsafe
 
 type RunCount = Word
@@ -273,6 +276,7 @@ defaultLubyRestart =
 
 data CDCLOptions = CDCLOptions
   { decayFactor :: !VariableSelection
+  , randomSeed :: !Int
   , activateResolved :: !Bool
   , restartStrategy :: !RestartStrategy
   }
@@ -282,6 +286,7 @@ defaultOptions :: CDCLOptions
 defaultOptions =
   CDCLOptions
     { decayFactor = defaultDecayFactor
+    , randomSeed = 42
     , activateResolved = True
     , restartStrategy = NoRestart
     }
@@ -630,6 +635,9 @@ calcLBDL =
     $ L.generalize
       (L.handles L.folded $ Set.size <$> L.set)
 
+newtype RandGen = RandGen {getStdGen :: StdGen}
+  deriving newtype (RandomGen)
+
 data VSIDSState s where
   VSIDSState ::
     -- | Unsatisfieds
@@ -640,15 +648,17 @@ data VSIDSState s where
     {-# UNPACK #-} !LBD ->
     -- | True if the last learnt clause exceeds LBD
     !Bool ->
+    -- | Random Source for variable selection
+    !RandGen ->
     VSIDSState s
 
 instance PL.Consumable (VSIDSState s) where
-  consume (VSIDSState ua _ _ _) = PL.consume ua
+  consume (VSIDSState ua _ _ _ _) = PL.consume ua
 
 instance PL.Dupable (VSIDSState s) where
-  dup2 (VSIDSState ua v lbd p) =
+  dup2 (VSIDSState ua v lbd p g) =
     PL.dup2 ua & \(ua, ua') ->
-      (VSIDSState ua v lbd p, VSIDSState ua' v lbd p)
+      (VSIDSState ua v lbd p g, VSIDSState ua' v lbd p g)
 
 data CDCLState s where
   CDCLState ::
@@ -698,29 +708,31 @@ pushClause = \Clause {..} -> S.do
   Ur !lbd <- S.zoom valuationL (Ur.runUrT (L.foldOverM (foldring U.foldr) calcLBDL lits))
   vsidsStateL
     S.%= case decayFactor $ reflect @s Proxy of
-      ConstantFactor {} -> \(VSIDSState unsats sats ema x) ->
+      ConstantFactor {} -> \(VSIDSState unsats sats ema x g) ->
         VSIDSState
           (Unsafe.toLinear (U.foldl' (\uns l -> incrementUnsatVar l uns)) unsats lits)
           (U.foldr incrementVar sats lits)
           ema
           x
-      Adaptive {..} -> \(VSIDSState unsats sats ema _) ->
+          g
+      Adaptive {..} -> \(VSIDSState unsats sats ema _ g) ->
         let ema' = ema * lbdEmaDecayFactor + fromIntegral lbd * (1 - lbdEmaDecayFactor)
          in VSIDSState
               (Unsafe.toLinear (U.foldl' (\uns l -> incrementUnsatVar l uns)) unsats lits)
               (U.foldr incrementVar sats lits)
               ema'
               (fromIntegral lbd >= ema')
+              g
   S.pure ()
 
 decayVarPriosM :: forall s. (Reifies s CDCLOptions) => S.State (VSIDSState s) ()
 {-# INLINE decayVarPriosM #-}
-decayVarPriosM = S.modify \(VSIDSState ls qs spec exc) ->
+decayVarPriosM = S.modify \(VSIDSState ls qs spec exc g) ->
   case decayFactor (reflect $ Proxy @s) of
-    ConstantFactor alpha -> VSIDSState (decayUnsatVars alpha ls) (decayVars alpha qs) spec exc
+    ConstantFactor alpha -> VSIDSState (decayUnsatVars alpha ls) (decayVars alpha qs) spec exc g
     Adaptive {..}
-      | exc -> VSIDSState (decayUnsatVars highLBDDecay ls) (decayVars highLBDDecay qs) spec exc
-      | otherwise -> VSIDSState (decayUnsatVars lowLBDDecay ls) (decayVars lowLBDDecay qs) spec exc
+      | exc -> VSIDSState (decayUnsatVars highLBDDecay ls) (decayVars highLBDDecay qs) spec exc g
+      | otherwise -> VSIDSState (decayUnsatVars lowLBDDecay ls) (decayVars lowLBDDecay qs) spec exc g
 
 -- Adaptive {..} -> VSIDSState (decayVars alpha ls) (decayVars alpha qs) spec
 
@@ -734,21 +746,22 @@ decayUnsatVars = \alpha (MkUnassignedVars q w) ->
   MkUnassignedVars (decayVars alpha q) w
 
 findUnsatVar :: S.State (VSIDSState s) (Ur (Maybe VarId))
-findUnsatVar = S.state \(VSIDSState unsat sat lbdEma exc) ->
+findUnsatVar = S.state \(VSIDSState unsat sat lbdEma exc g) ->
   popUnassignedByPrio unsat & \case
     (Ur (Just (k, p)), unsat) ->
       ( Ur $ Just k
-      , VSIDSState unsat (PSQ.unsafeInsertNew (fromIntegral $ unVarId k) p () sat) lbdEma exc
+      , VSIDSState unsat (PSQ.unsafeInsertNew (fromIntegral $ unVarId k) p () sat) lbdEma exc g
       )
-    (Ur Nothing, unsat) -> (Ur Nothing, VSIDSState unsat sat lbdEma exc)
+    (Ur Nothing, unsat) -> (Ur Nothing, VSIDSState unsat sat lbdEma exc g)
 
 incrementVarM :: Lit -> S.State (VSIDSState s) ()
-incrementVarM l = S.modify \(VSIDSState unsats sats lbdEma exc) ->
+incrementVarM l = S.modify \(VSIDSState unsats sats lbdEma exc g) ->
   VSIDSState
     (incrementUnsatVar l unsats)
     (incrementVar l sats)
     lbdEma
     exc
+    g
 
 incrementUnsatVar :: Lit -> UnassignedVars %1 -> UnassignedVars
 incrementUnsatVar l (MkUnassignedVars q u) =
@@ -763,20 +776,20 @@ incrementVar =
     . litVar
 
 moveToSatQueue :: VarId -> VSIDSState s %1 -> VSIDSState s
-moveToSatQueue vid = \(VSIDSState unsats sats lbdEma exc) ->
+moveToSatQueue vid = \(VSIDSState unsats sats lbdEma exc g) ->
   popUnassignedVarId vid unsats & \case
-    (Ur Nothing, unsats) -> VSIDSState unsats sats lbdEma exc
+    (Ur Nothing, unsats) -> VSIDSState unsats sats lbdEma exc g
     (Ur (Just p), unsats) ->
-      VSIDSState unsats (PSQ.unsafeInsertNew vidInt p () sats) lbdEma exc
+      VSIDSState unsats (PSQ.unsafeInsertNew vidInt p () sats) lbdEma exc g
   where
     !vidInt = fromIntegral $ unVarId vid
 
 moveToUnsatQueue :: VarId -> VSIDSState s %1 -> VSIDSState s
-moveToUnsatQueue vid = \(VSIDSState unsats sats lbdEma exc) ->
+moveToUnsatQueue vid = \(VSIDSState unsats sats lbdEma exc g) ->
   case PSQ.deleteView vidInt sats of
-    Nothing -> VSIDSState unsats sats lbdEma exc
+    Nothing -> VSIDSState unsats sats lbdEma exc g
     Just (p, (), sats) ->
-      VSIDSState (insertUnassigned vid p unsats) sats lbdEma exc
+      VSIDSState (insertUnassigned vid p unsats) sats lbdEma exc g
   where
     !vidInt = fromIntegral $ unVarId vid
 
@@ -888,7 +901,8 @@ toCDCLState ::
   Linearly %1 ->
   Either (Ur (SatResult ())) (CDCLState s)
 toCDCLState (CNF cls) lin =
-  let restartOpt = restartStrategy $ reflect @s Proxy
+  let opts = reflect @s Proxy
+      restartOpt = restartStrategy opts
       (cls', truth, contradicting, maxVar) =
         L.fold
           ( (,,,)
@@ -904,6 +918,8 @@ toCDCLState (CNF cls) lin =
       rs = RestartState 0 (fromMaybe 0 $ getInitRestart restartOpt) 0
       (numOrigCls :!: upds, cls'') = mapAccumL buildClause (0 :!: Map.empty) cls'
       watches0 = V.toList $ V.update (V.replicate numVars mempty) (V.fromList $ Map.toList upds)
+      gen = RandGen $ mkStdGen $ randomSeed opts
+      (gVarSel, _) = split gen
    in case () of
         _
           | truth -> lin `lseq` Left (Ur $ Satisfiable ())
@@ -935,6 +951,7 @@ toCDCLState (CNF cls) lin =
                               PSQ.empty
                               0
                               True
+                              gVarSel
                           )
                           rs
 
@@ -1177,7 +1194,7 @@ tryRestart = case restartStrategy $ reflect @s Proxy of
         valuationL S.%= LUA.map (const Indefinite)
         restartStateL S.%= nextRestartState strat
         (clausesL LinLens..> clauseBodiesL) S.%= PL.flip LUV.map \cf -> cf {satAt = -1}
-        vsidsStateL S.%= \(VSIDSState unsats sats lbd p) ->
+        vsidsStateL S.%= \(VSIDSState unsats sats lbd p g) ->
           VSIDSState
             ( Unsafe.toLinear
                 (PSQ.fold' (\l p () x -> insertUnassigned (fromIntegral l) p x))
@@ -1187,6 +1204,7 @@ tryRestart = case restartStrategy $ reflect @s Proxy of
             PSQ.empty
             lbd
             p
+            g
         steps0 <- S.state \s -> besides s (`LUV.fromListL` [0])
         stepsL S..= steps0
         Ur numCls <- getNumClauses
