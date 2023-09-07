@@ -51,7 +51,7 @@ main = do
 cdclBenches :: IO (DPLL.CNF Word, Formula Full Word) -> [Benchmark]
 cdclBenches fml =
   [ allowFailureBecause "Large input"
-    $ timeout 300
+    $ timeout 100
     $ bench lab
     $ nfAppIO (fmap $ CDCL.solveWith opt . fst) fml
   | (lab, opt) <- cdclSolvers
