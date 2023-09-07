@@ -588,6 +588,10 @@ clausesL :: LinLens.Lens' (CDCLState s) Clauses
 clausesL = LinLens.lens \(CDCLState numOrig ss cs ws vs vids varQ rs) ->
   (cs, \cs -> CDCLState numOrig ss cs ws vs vids varQ rs)
 
+clauseBodiesL :: LinLens.Lens' Clauses (LUV.Vector ClauseBody)
+clauseBodiesL = LinLens.lens \(Clauses lits bodies) ->
+  (bodies, \bodies -> Clauses lits bodies)
+
 pushClause :: forall s. (Reifies s CDCLOptions) => Clause -> S.State (CDCLState s) ()
 {-# INLINE pushClause #-}
 {- HLINT ignore pushClause "Redundant lambda" -}
@@ -1076,6 +1080,20 @@ tryRestart = case restartStrategy $ reflect @s Proxy of
       then S.do
         valuationL S.%= LUA.map (const Indefinite)
         restartStateL S.%= nextRestartState strat
+        (clausesL LinLens..> clauseBodiesL) S.%= PL.flip LUV.map \cf -> cf {satAt = -1}
         vsidsStateL S.%= \(VSIDSState unsats sats lbd p) ->
-          VSIDSState (PSQ.fold' PSQ.insert unsats sats) PSQ.empty lbd p
+          VSIDSState
+            ( Unsafe.toLinear
+                (PSQ.fold' (\l p () x -> PSQ.insert l p () x))
+                unsats
+                sats
+            )
+            PSQ.empty
+            lbd
+            p
+        steps0 <- S.state \s -> besides s (`LUV.fromListL` [0])
+        stepsL S..= steps0
+        Ur numCls <- getNumClauses
+        unsats0 <- S.state \s -> besides s (`LSet.fromListL` [0 .. fromIntegral $ numCls - 1])
+        unsatisfiedsL S..= unsats0
       else restartStateL S..= RestartState count' thresh c
