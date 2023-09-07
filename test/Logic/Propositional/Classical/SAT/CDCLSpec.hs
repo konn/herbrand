@@ -15,12 +15,9 @@ import qualified Control.Lens.Getter as Lens
 import Control.Monad ((<=<))
 import qualified Data.ByteString.Lazy as LBS
 import Data.Default (def)
-import Data.Function (on)
-import Data.Functor ((<&>))
 import Data.Generics.Labels ()
 import qualified Data.HashSet as HS
 import Data.List (intercalate)
-import Data.Ratio ((%))
 import qualified Data.Set as Set
 import Logic.Propositional.Classical.SAT.BruteForce
 import Logic.Propositional.Classical.SAT.CDCL
@@ -30,11 +27,10 @@ import Logic.Propositional.Classical.Syntax.TestUtils
 import Logic.Propositional.Syntax.General
 import Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
 import System.IO.Unsafe (unsafePerformIO)
-import Test.Falsify.Generator (bindIntegral)
 import qualified Test.Falsify.Generator as F
 import Test.Falsify.Predicate ((.$))
 import qualified Test.Falsify.Predicate as P
-import Test.Falsify.Range (ProperFraction (..), withOrigin)
+import Test.Falsify.Range (withOrigin)
 import Test.Tasty
 import Test.Tasty.Falsify
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
@@ -53,7 +49,7 @@ cdclOptions =
               }
         )
         ( Left . \(seedGen, freqGen) -> do
-            randomSeed <- seedGen
+            randomSeed <- F.withoutShrinking seedGen
             randomVarSelectionFreq <- Just <$> freqGen
             pure
               CDCLOptions
