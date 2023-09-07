@@ -203,8 +203,7 @@ solverLoop = fix $ \go mlit -> S.do
           )
           0
       mstt & \case
-        True -> S.do
-          S.pure Ok
+        True -> S.pure Ok
         -- Contracdiction! The last assigned variable must be
         False -> S.do
           resl <- propagateUnit mlit
@@ -288,7 +287,6 @@ backjump confCls lit = S.do
           $ S.state
           $ ((),)
           PL.. moveToUnsatQueue v
-
       C.void $ assertLit reason truth
       tryRestart
       solverLoop $ Just (truth, reason)
