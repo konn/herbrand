@@ -4,18 +4,22 @@
 {-# LANGUAGE OverloadedLists #-}
 {-# LANGUAGE TypeApplications #-}
 
-module Logic.Propositional.Classical.SAT.CDCLSpec (test_solve, test_solveVarId) where
+module Logic.Propositional.Classical.SAT.CDCLSpec (test_solve, test_solveVarId, test_sudoku) where
 
 import qualified Control.Foldl as L
-import Control.Lens (folded, maximumOf)
+import Control.Lens (folded, maximumOf, view, _3)
 import Control.Lens.Extras (is)
 import qualified Control.Lens.Getter as Lens
+import Control.Monad ((<=<))
+import qualified Data.ByteString.Lazy as LBS
 import Data.Generics.Labels ()
+import qualified Data.HashSet as HS
 import Data.List (intercalate)
 import qualified Data.Set as Set
 import Logic.Propositional.Classical.SAT.BruteForce
 import Logic.Propositional.Classical.SAT.CDCL
-import Logic.Propositional.Classical.SAT.Types (SatResult (..), eval)
+import Logic.Propositional.Classical.SAT.Format.DIMACS
+import Logic.Propositional.Classical.SAT.Types (Model (..), SatResult (..), eval)
 import Logic.Propositional.Classical.Syntax.TestUtils
 import Logic.Propositional.Syntax.General
 import Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
@@ -24,11 +28,11 @@ import qualified Test.Falsify.Predicate as P
 import Test.Falsify.Range (withOrigin)
 import Test.Tasty
 import Test.Tasty.Falsify
-import Test.Tasty.HUnit (assertBool, testCase, (@?=))
+import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
 cdclOptions :: [(String, CDCLOptions)]
 cdclOptions =
-  [ ( intercalate "; " [decayLabel, restLabel, vsidsType]
+  [ ( intercalate "; " [decayLabel, vsidsType, restLabel]
     , CDCLOptions
         { restartStrategy = rest
         , decayFactor = decayFac
@@ -40,12 +44,12 @@ cdclOptions =
       , ("ExponentialRestart(100, 2)", defaultExponentialRestart)
       , ("LubyRestart(100, 2)", defaultLubyRestart)
       ]
+  , (vsidsType, mVSIDS) <- [("VSIDS", False), ("mVSIDS", True)]
   , (decayLabel, decayFac) <-
-      [ ("Const Decay " <> show f, f)
+      [ ("Const Decay " <> show f, ConstantFactor f)
       | f <- [0.5, 0.75, 0.9, 0.1]
       ]
         ++ [("Adaptive Decay (default)", defaultAdaptiveFactor)]
-  , (vsidsType, mVSIDS) <- [("VSIDS", False), ("mVSIDS", True)]
   ]
 
 test_solve :: TestTree
@@ -95,6 +99,29 @@ test_solve =
           ]
       ]
     | (optName, opt) <- cdclOptions
+    ]
+
+decodeCNFFile :: FilePath -> IO (CNF Word)
+decodeCNFFile =
+  either error (pure . view _3) . parseCNFLazy <=< LBS.readFile
+
+test_sudoku :: TestTree
+test_sudoku =
+  testGroup
+    "Sudoku Regression Test"
+    [ withResource (decodeCNFFile "data/tests/sudoku-9x9.cnf") mempty \cnf ->
+        testGroup
+          "9x9 (Satisfiable)"
+          [ testCase optName do
+            ans <- solveWith opt <$> cnf
+            case ans of
+              Unsat -> assertFailure "Must be satisfiable, but got Unsat!"
+              Satisfiable m -> do
+                HS.size (positive m) @?= 81
+                let leftovers = HS.fromList [1 .. 46] `HS.difference` positive m
+                assertBool ("Initial solution must be met, but following failed: " <> show (HS.toList leftovers)) (HS.null leftovers)
+          | (optName, opt) <- cdclOptions
+          ]
     ]
 
 test_solveVarId :: TestTree
