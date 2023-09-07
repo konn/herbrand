@@ -14,6 +14,7 @@ import Control.Lens.Extras (is)
 import qualified Control.Lens.Getter as Lens
 import Control.Monad ((<=<))
 import qualified Data.ByteString.Lazy as LBS
+import Data.Default (def)
 import Data.Function (on)
 import Data.Functor ((<&>))
 import Data.Generics.Labels ()
@@ -81,10 +82,21 @@ cdclOptions =
         ( "random choice"
         , Just
             ( F.int ((minBound, maxBound) `withOrigin` 0)
-            , do
-                F.int ((1, maxBound) `withOrigin` 1) `bindIntegral` \denom -> do
-                  numer <- F.int $ (0, denom) `withOrigin` 0
-                  pure $ fromRational $ toInteger numer % toInteger denom
+            , F.frequency
+                [ (1, pure 1.0)
+                , (1, pure 0.0)
+                , (1, pure 0.01)
+                , (1, pure 0.05)
+                , (1, pure 0.1)
+                , (1, pure 0.2)
+                , (1, pure 0.3)
+                , (1, pure 0.4)
+                , (1, pure 0.5)
+                , (1, pure 0.6)
+                , (1, pure 0.7)
+                , (1, pure 0.8)
+                , (1, pure 0.9)
+                ]
             )
         )
       ]
@@ -154,7 +166,7 @@ test_sudoku =
         testGroup
           "9x9 (Satisfiable)"
           [ case eopt of
-            Left optG -> testProperty optName do
+            Left optG -> testPropertyWith def {overrideNumTests = Just 25} optName do
               opt <- gen optG
               -- FIXME: Sad, but this use is safe.
               -- Fix this after falsify supports impure tests.

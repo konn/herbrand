@@ -189,6 +189,7 @@ tests:
     dependencies:
     - herbrand
     - herbrand-test-utils
+    - data-default
     - tasty
     - falsify
     - tasty-hunit
