@@ -11,6 +11,7 @@ import Control.Lens (folded, maximumOf)
 import Control.Lens.Extras (is)
 import qualified Control.Lens.Getter as Lens
 import Data.Generics.Labels ()
+import Data.List (intercalate)
 import qualified Data.Set as Set
 import Logic.Propositional.Classical.SAT.BruteForce
 import Logic.Propositional.Classical.SAT.CDCL
@@ -25,111 +26,141 @@ import Test.Tasty
 import Test.Tasty.Falsify
 import Test.Tasty.HUnit (assertBool, testCase, (@?=))
 
+cdclOptions :: [(String, CDCLOptions)]
+cdclOptions =
+  [ ( intercalate "; " [decayLabel, restLabel, vsidsType]
+    , CDCLOptions
+        { restartStrategy = rest
+        , decayFactor = decayFac
+        , activateResolved = mVSIDS
+        }
+    )
+  | (restLabel, rest) <-
+      [ ("NoRestart", NoRestart)
+      , ("ExponentialRestart(100, 2)", defaultExponentialRestart)
+      , ("LubyRestart(100, 2)", defaultLubyRestart)
+      ]
+  , (decayLabel, decayFac) <-
+      [ ("Const Decay " <> show f, f)
+      | f <- [0.5, 0.75, 0.9, 0.1]
+      ]
+        ++ [("Adaptive Decay (default)", defaultAdaptiveFactor)]
+  , (vsidsType, mVSIDS) <- [("VSIDS", False), ("mVSIDS", True)]
+  ]
+
 test_solve :: TestTree
 test_solve =
   testGroup
-    "solve"
+    "solveWith"
     [ testGroup
-        "solve (CNF input)"
-        [ testProperty "Gives a correct decision" $ do
-            cnf <- gen $ cnfGen 10 10 ((0, 10) `withOrigin` 5)
-            collectCNF cnf
-            let ans = solve cnf
-            case classifyFormula $ toFormula @Full cnf of
-              Inconsistent ->
-                assert
-                  $ P.eq
-                  .$ ("expected", Unsat)
-                  .$ ("answer", ans)
-              f ->
-                assert
-                  $ P.satisfies
-                    ("Satisfiable (" <> show f <> ")", \case Satisfiable {} -> True; _ -> False)
-                  .$ ("answer", ans)
-        , testProperty "Gives a correct model" $ do
-            cnf <- gen $ cnfGen 10 10 ((0, 10) `withOrigin` 5)
-            collectCNF cnf
+      optName
+      [ testGroup
+          "CNF input"
+          [ testProperty "Gives a correct decision" $ do
+              cnf <- gen $ cnfGen 10 10 ((0, 10) `withOrigin` 5)
+              collectCNF cnf
+              let ans = solveWith opt cnf
+              case classifyFormula $ toFormula @Full cnf of
+                Inconsistent ->
+                  assert
+                    $ P.eq
+                    .$ ("expected", Unsat)
+                    .$ ("answer", ans)
+                f ->
+                  assert
+                    $ P.satisfies
+                      ("Satisfiable (" <> show f <> ")", \case Satisfiable {} -> True; _ -> False)
+                    .$ ("answer", ans)
+          , testProperty "Gives a correct model" $ do
+              cnf <- gen $ cnfGen 10 10 ((0, 10) `withOrigin` 5)
+              collectCNF cnf
 
-            case solve cnf of
-              Unsat -> discard
-              Satisfiable m -> do
-                info $ "Given model: " <> show m
-                assert
-                  $ P.eq
-                  .$ ("expected", Just True)
-                  .$ ("answer", eval m $ toFormula @Full cnf)
-        ]
-    , testGroup
-        "solve . fromWithFree . fromFormulaFast"
-        [ testSolverSemanticsWith
-            projVar
-            (fmap fromWithFree . fromFormulaFast)
-            10
-            128
-            solve
-        ]
+              case solveWith opt cnf of
+                Unsat -> discard
+                Satisfiable m -> do
+                  info $ "Given model: " <> show m
+                  assert
+                    $ P.eq
+                    .$ ("expected", Just True)
+                    .$ ("answer", eval m $ toFormula @Full cnf)
+          ]
+      , testGroup
+          "solveWith . fromWithFree . fromFormulaFast"
+          [ testSolverSemanticsWith
+              projVar
+              (fmap fromWithFree . fromFormulaFast)
+              10
+              128
+              (solveWith opt)
+          ]
+      ]
+    | (optName, opt) <- cdclOptions
     ]
 
 test_solveVarId :: TestTree
 test_solveVarId =
   testGroup
-    "solveVarId"
+    "solveVarIdWith"
     [ testGroup
-        "solveVarId (CNF input)"
-        [ testGroup
-            "Gives a correct decision"
-            [ testProperty "Random" $ do
-                cnf <- gen $ fmap toEnum <$> cnfGen 10 10 ((0, 10) `withOrigin` 5)
-                collectCNF cnf
-                let ans = solveVarId cnf
-                case classifyFormula $ toFormula @Full cnf of
-                  Inconsistent ->
-                    assert
-                      $ P.eq
-                      .$ ("expected", Unsat)
-                      .$ ("answer", ans)
-                  _ ->
-                    assert
-                      $ P.satisfies
-                        ("Satisfiable", \case Satisfiable {} -> True; _ -> False)
-                      .$ ("answer", ans)
-            , testGroup
-                "regressions"
-                [ testCase (show cnf) do
-                  let ans = solveVarId cnf
+      optName
+      [ testGroup
+          "CNF input"
+          [ testGroup
+              "Gives a correct decision"
+              [ testProperty "Random" $ do
+                  cnf <- gen $ fmap toEnum <$> cnfGen 10 10 ((0, 10) `withOrigin` 5)
+                  collectCNF cnf
+                  let ans = solveVarIdWith opt cnf
                   case classifyFormula $ toFormula @Full cnf of
-                    Inconsistent -> ans @?= Unsat
+                    Inconsistent ->
+                      assert
+                        $ P.eq
+                        .$ ("expected", Unsat)
+                        .$ ("answer", ans)
                     _ ->
-                      assertBool ("Satisfiable expected, but got: " <> show ans)
-                        $ is #_Satisfiable ans
-                | cnf <- regressionCNFs
-                ]
-            ]
-        , testGroup
-            "Gives a correct model"
-            [ testProperty "Random" $ do
-                cnf <- gen $ fmap toEnum <$> cnfGen 10 10 ((0, 10) `withOrigin` 5)
-                collectCNF cnf
+                      assert
+                        $ P.satisfies
+                          ("Satisfiable", \case Satisfiable {} -> True; _ -> False)
+                        .$ ("answer", ans)
+              , testGroup
+                  "regressions"
+                  [ testCase (show cnf) do
+                    let ans = solveVarIdWith opt cnf
+                    case classifyFormula $ toFormula @Full cnf of
+                      Inconsistent -> ans @?= Unsat
+                      _ ->
+                        assertBool ("Satisfiable expected, but got: " <> show ans)
+                          $ is #_Satisfiable ans
+                  | cnf <- regressionCNFs
+                  ]
+              ]
+          , testGroup
+              "Gives a correct model"
+              [ testProperty "Random" $ do
+                  cnf <- gen $ fmap toEnum <$> cnfGen 10 10 ((0, 10) `withOrigin` 5)
+                  collectCNF cnf
 
-                case solveVarId cnf of
-                  Unsat -> discard
-                  Satisfiable m -> do
-                    info $ "Given model: " <> show m
-                    assert
-                      $ P.eq
-                      .$ ("expected", Just True)
-                      .$ ("answer", eval m $ toFormula @Full cnf)
-            , testGroup
-                "regressions"
-                [ testCase (show cnf) do
-                  case solveVarId cnf of
-                    Unsat -> pure ()
+                  case solveVarIdWith opt cnf of
+                    Unsat -> discard
                     Satisfiable m -> do
-                      eval m (toFormula @Full cnf) @?= Just True
-                | cnf <- regressionCNFs
-                ]
-            ]
-        ]
+                      info $ "Given model: " <> show m
+                      assert
+                        $ P.eq
+                        .$ ("expected", Just True)
+                        .$ ("answer", eval m $ toFormula @Full cnf)
+              , testGroup
+                  "regressions"
+                  [ testCase (show cnf) do
+                    case solveVarIdWith opt cnf of
+                      Unsat -> pure ()
+                      Satisfiable m -> do
+                        eval m (toFormula @Full cnf) @?= Just True
+                  | cnf <- regressionCNFs
+                  ]
+              ]
+          ]
+      ]
+    | (optName, opt) <- cdclOptions
     ]
 
 regressionCNFs :: [CNF VarId]
