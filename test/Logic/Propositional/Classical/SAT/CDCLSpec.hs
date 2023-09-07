@@ -47,7 +47,7 @@ cdclOptions =
   , (vsidsType, mVSIDS) <- [("VSIDS", False), ("mVSIDS", True)]
   , (decayLabel, decayFac) <-
       [ ("Const Decay " <> show f, ConstantFactor f)
-      | f <- [0.5, 0.75, 0.9, 0.1]
+      | f <- [0.5, 0.75, 0.9]
       ]
         ++ [("Adaptive Decay (default)", defaultAdaptiveFactor)]
   ]
