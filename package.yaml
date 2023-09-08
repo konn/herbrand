@@ -44,6 +44,7 @@ dependencies:
 - generically
 - generic-lens
 - hashable
+- integer-logarithms
 - psqueues
 - parallel
 - random
@@ -75,7 +76,6 @@ library:
   - Logic.Propositional.Classical.SAT.CDCL.Types
   dependencies:
   - bitvec
-  - integer-logarithms
   - linear-array-extra
   - linear-base
   - linear-generics

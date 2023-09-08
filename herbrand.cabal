@@ -125,6 +125,7 @@ library herbrand-bench
     , generically
     , hashable
     , herbrand
+    , integer-logarithms
     , lens
     , parallel
     , psqueues
@@ -176,6 +177,7 @@ library herbrand-test-utils
     , generically
     , hashable
     , herbrand
+    , integer-logarithms
     , lens
     , parallel
     , psqueues
@@ -284,6 +286,7 @@ executable cdcl-dry
     , generically
     , hashable
     , herbrand
+    , integer-logarithms
     , lens
     , optparse-applicative
     , parallel
@@ -332,6 +335,7 @@ executable gen-sat
     , hashable
     , herbrand
     , herbrand-test-utils
+    , integer-logarithms
     , lens
     , optparse-applicative
     , parallel
@@ -379,6 +383,7 @@ executable sudoku
     , generically
     , hashable
     , herbrand
+    , integer-logarithms
     , lens
     , optparse-applicative
     , parallel
@@ -434,6 +439,7 @@ test-suite herbrand-test
     , hashable
     , herbrand
     , herbrand-test-utils
+    , integer-logarithms
     , lens
     , parallel
     , psqueues
@@ -487,6 +493,7 @@ benchmark herbrand-cnf-bench
     , hashable
     , herbrand
     , herbrand-bench
+    , integer-logarithms
     , lens
     , parallel
     , psqueues
@@ -542,6 +549,7 @@ benchmark herbrand-sat-bench
     , hashable
     , herbrand
     , herbrand-bench
+    , integer-logarithms
     , lens
     , parallel
     , psqueues
