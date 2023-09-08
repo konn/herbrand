@@ -24,6 +24,7 @@ import Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive.Sudoku
 import Math.NumberTheory.Logarithms (integerLog10')
 import System.Directory (createDirectoryIfMissing)
 import System.IO (stdout)
+import System.Random.Stateful (globalStdGen, uniformM)
 
 a :: Word -> Word -> Word -> Literal Placement
 a = fmap (fmap Positive) . Placement
