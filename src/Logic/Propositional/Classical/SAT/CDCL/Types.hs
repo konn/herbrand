@@ -111,7 +111,7 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   tryRestart,
 ) where
 
-import Control.DeepSeq (NFData)
+import Control.DeepSeq (NFData, force)
 import Control.Foldl qualified as Foldl
 import Control.Foldl qualified as L
 import Control.Functor.Linear qualified as C
@@ -821,7 +821,7 @@ toCDCLState (CNF cls) lin =
           0
           True
       (numOrigCls :!: upds, cls'') = mapAccumL buildClause (0 :!: Map.empty) cls'
-      watches0 = V.toList $ V.update (V.replicate numVars mempty) (V.fromList $ Map.toList upds)
+      !watches0 = force $ V.toList $ V.update (V.replicate numVars mempty) (V.fromList $ Map.toList upds)
    in case () of
         _
           | truth -> lin `lseq` Left (Ur $ Satisfiable ())

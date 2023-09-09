@@ -474,7 +474,7 @@ propagateUnit ml = S.do
         ContradictingAssertion -> S.do
           S.pure (ConflictFound reason l)
         Asserted -> S.do
-          Ur dest <-
+          Ur !dest <-
             C.fmap
               (Ur.lift IS.toList)
               $ S.uses watchesL
@@ -557,8 +557,9 @@ watch cid =
   Unsafe.toLinear \v ->
     watchesL
       S.%= \ws ->
-        LA.unsafeGet (fromEnum v) ws & \(Ur xs, ws) ->
-          LA.set (fromEnum v) (IS.insert (unClauseId cid) xs) ws
+        LA.unsafeGet (fromEnum v) ws & \(Ur !xs, ws) ->
+          let !xs' = IS.insert (unClauseId cid) xs
+           in LA.set (fromEnum v) xs' ws
 
 unwatch :: ClauseId -> VarId %1 -> S.State (CDCLState s) ()
 unwatch cid =
@@ -566,8 +567,9 @@ unwatch cid =
   Unsafe.toLinear \v ->
     watchesL
       S.%= \ws ->
-        LA.unsafeGet (fromEnum v) ws & \(Ur xs, ws) ->
-          LA.set (fromEnum v) (IS.delete (unClauseId cid) xs) ws
+        LA.unsafeGet (fromEnum v) ws & \(Ur !xs, ws) ->
+          let !xs' = IS.delete (unClauseId cid) xs
+           in LA.set (fromEnum v) xs' ws
 
 assertLit :: (HasCallStack) => ClauseId -> Lit -> S.State (CDCLState s) AssertionResult
 assertLit ante lit = S.do
