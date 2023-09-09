@@ -61,25 +61,31 @@ cdclSolvers :: [(String, CDCLOptions)]
 cdclSolvers =
   [
     ( "CDCL (α = 0.75)"
-    , CDCL.CDCLOptions
+    , CDCLOptions
         { decayFactor = 0.75
+        , randomSeed = 42
+        , randomVarSelectionFreq = Nothing
         , activateResolved = False
         , restartStrategy = NoRestart
         }
     )
   ,
     ( "CDCL (α = 0.75, mVISDS)"
-    , CDCL.defaultOptions
+    , CDCLOptions
         { decayFactor = 0.75
         , activateResolved = True
+        , randomSeed = 42
+        , randomVarSelectionFreq = Nothing
         , restartStrategy = NoRestart
         }
     )
   ,
     ( "CDCL (α = 0.75, mVISDS, ExpRestart(100, 2))"
-    , CDCL.defaultOptions
+    , CDCLOptions
         { decayFactor = 0.75
         , activateResolved = True
+        , randomSeed = 42
+        , randomVarSelectionFreq = Nothing
         , restartStrategy = defaultExponentialRestart
         }
     )
@@ -88,6 +94,8 @@ cdclSolvers =
     , CDCLOptions
         { decayFactor = 0.75
         , activateResolved = True
+        , randomSeed = 42
+        , randomVarSelectionFreq = Nothing
         , restartStrategy = defaultLubyRestart
         }
     )
@@ -96,6 +104,8 @@ cdclSolvers =
     , CDCLOptions
         { decayFactor = 0.95
         , activateResolved = False
+        , randomSeed = 42
+        , randomVarSelectionFreq = Nothing
         , restartStrategy = NoRestart
         }
     )
@@ -104,6 +114,8 @@ cdclSolvers =
     , CDCLOptions
         { decayFactor = 0.95
         , activateResolved = True
+        , randomSeed = 42
+        , randomVarSelectionFreq = Nothing
         , restartStrategy = NoRestart
         }
     )
@@ -112,6 +124,8 @@ cdclSolvers =
     , CDCLOptions
         { decayFactor = 0.95
         , activateResolved = True
+        , randomSeed = 42
+        , randomVarSelectionFreq = Nothing
         , restartStrategy = defaultExponentialRestart
         }
     )
@@ -120,6 +134,8 @@ cdclSolvers =
     , CDCLOptions
         { decayFactor = 0.95
         , activateResolved = True
+        , randomSeed = 42
+        , randomVarSelectionFreq = Nothing
         , restartStrategy = defaultLubyRestart
         }
     )
@@ -128,6 +144,8 @@ cdclSolvers =
     , CDCLOptions
         { decayFactor = defaultAdaptiveFactor
         , activateResolved = False
+        , randomSeed = 42
+        , randomVarSelectionFreq = Nothing
         , restartStrategy = NoRestart
         }
     )
@@ -136,14 +154,18 @@ cdclSolvers =
     , CDCLOptions
         { decayFactor = defaultAdaptiveFactor
         , activateResolved = True
+        , randomSeed = 42
+        , randomVarSelectionFreq = Nothing
         , restartStrategy = NoRestart
         }
     )
   ,
     ( "CDCL (adaptive, mVISDS, ExpRestart(100, 2))"
-    , CDCL.defaultOptions
+    , CDCLOptions
         { decayFactor = defaultAdaptiveFactor
         , activateResolved = True
+        , randomSeed = 42
+        , randomVarSelectionFreq = Nothing
         , restartStrategy = defaultExponentialRestart
         }
     )
@@ -152,6 +174,48 @@ cdclSolvers =
     , CDCLOptions
         { decayFactor = defaultAdaptiveFactor
         , activateResolved = True
+        , randomSeed = 42
+        , randomVarSelectionFreq = Nothing
+        , restartStrategy = defaultLubyRestart
+        }
+    )
+  ,
+    ( "CDCL (adaptive, mVISDS, LubyRestart(100, 2), random sel 50%)"
+    , CDCLOptions
+        { decayFactor = defaultAdaptiveFactor
+        , activateResolved = True
+        , randomSeed = 42
+        , randomVarSelectionFreq = Just 0.5
+        , restartStrategy = defaultLubyRestart
+        }
+    )
+  ,
+    ( "CDCL (adaptive, mVISDS, LubyRestart(100, 2), random sel 25%)"
+    , CDCLOptions
+        { decayFactor = defaultAdaptiveFactor
+        , activateResolved = True
+        , randomSeed = 42
+        , randomVarSelectionFreq = Just 0.25
+        , restartStrategy = defaultLubyRestart
+        }
+    )
+  ,
+    ( "CDCL (adaptive, mVISDS, LubyRestart(100, 2), random sel 10%)"
+    , CDCLOptions
+        { decayFactor = defaultAdaptiveFactor
+        , activateResolved = True
+        , randomSeed = 42
+        , randomVarSelectionFreq = Just 0.1
+        , restartStrategy = defaultLubyRestart
+        }
+    )
+  ,
+    ( "CDCL (adaptive, mVISDS, LubyRestart(100, 2), random sel 1%)"
+    , CDCLOptions
+        { decayFactor = defaultAdaptiveFactor
+        , activateResolved = True
+        , randomSeed = 42
+        , randomVarSelectionFreq = Just 0.01
         , restartStrategy = defaultLubyRestart
         }
     )

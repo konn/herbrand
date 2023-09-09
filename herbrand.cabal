@@ -425,6 +425,7 @@ test-suite herbrand-test
     , bifunctors
     , bytestring
     , containers
+    , data-default
     , data-fix
     , deepseq
     , distributive

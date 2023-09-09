@@ -1,4 +1,5 @@
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedLists #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
@@ -21,9 +22,10 @@ import Logic.Propositional.Classical.SAT.CDCL
 import Logic.Propositional.Classical.SAT.Format.DIMACS
 import Logic.Propositional.Classical.SAT.Types (SatResult (..), positive)
 import Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive.Sudoku
-import Math.NumberTheory.Logarithms (integerLog10')
+import Math.NumberTheory.Logarithms (integerLog10', wordLog2)
 import System.Directory (createDirectoryIfMissing)
 import System.IO (stdout)
+import System.Random.Stateful (globalStdGen, uniformM)
 
 a :: Word -> Word -> Word -> Literal Placement
 a = fmap (fmap Positive) . Placement
@@ -114,11 +116,18 @@ main = do
   BB.writeFile "data/gen/sudoku/9x9/2.cnf"
     $ formatDIMACS
     $ toDIMACS problem9x9_2
+  -- FIXME: Gave False answer for 1108426674595279831
+  -- FIXME: Seems to give false negative -6345527848158361671
+  -- with freq = 0.5 + defaultLubyRestart or Exponential Restart, but not with NoRestart
+  randomSeed <- uniformM @Int globalStdGen
+  putStrLn $ "Seed: " <> show randomSeed
   let ans =
         solveWith
           defaultOptions
-            { restartStrategy = defaultLubyRestart
+            { randomSeed
+            , restartStrategy = defaultLubyRestart
             , decayFactor = defaultAdaptiveFactor
+            , randomVarSelectionFreq = Just 0.5
             }
           problem9x9_2
   case ans of

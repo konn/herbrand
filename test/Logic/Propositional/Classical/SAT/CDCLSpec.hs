@@ -1,7 +1,9 @@
+{-# LANGUAGE ApplicativeDo #-}
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE OverloadedLists #-}
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TypeApplications #-}
 
 module Logic.Propositional.Classical.SAT.CDCLSpec (test_solve, test_solveVarId, test_sudoku) where
@@ -12,6 +14,7 @@ import Control.Lens.Extras (is)
 import qualified Control.Lens.Getter as Lens
 import Control.Monad ((<=<))
 import qualified Data.ByteString.Lazy as LBS
+import Data.Default (def)
 import Data.Generics.Labels ()
 import qualified Data.HashSet as HS
 import Data.List (intercalate)
@@ -23,6 +26,8 @@ import Logic.Propositional.Classical.SAT.Types (Model (..), SatResult (..), eval
 import Logic.Propositional.Classical.Syntax.TestUtils
 import Logic.Propositional.Syntax.General
 import Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
+import System.IO.Unsafe (unsafePerformIO)
+import qualified Test.Falsify.Generator as F
 import Test.Falsify.Predicate ((.$))
 import qualified Test.Falsify.Predicate as P
 import Test.Falsify.Range (withOrigin)
@@ -30,14 +35,31 @@ import Test.Tasty
 import Test.Tasty.Falsify
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
-cdclOptions :: [(String, CDCLOptions)]
+cdclOptions :: [(String, Either (Gen CDCLOptions) CDCLOptions)]
 cdclOptions =
-  [ ( intercalate "; " [decayLabel, vsidsType, restLabel]
-    , CDCLOptions
-        { restartStrategy = rest
-        , decayFactor = decayFac
-        , activateResolved = mVSIDS
-        }
+  [ ( intercalate "; " [decayLabel, vsidsType, restLabel, varSelName]
+    , maybe
+        ( Right
+            CDCLOptions
+              { restartStrategy = rest
+              , decayFactor = decayFac
+              , activateResolved = mVSIDS
+              , randomSeed = 42
+              , randomVarSelectionFreq = Nothing
+              }
+        )
+        ( Left . \(seedGen, freqGen) -> do
+            randomSeed <- F.withoutShrinking seedGen
+            randomVarSelectionFreq <- Just <$> freqGen
+            pure
+              CDCLOptions
+                { restartStrategy = rest
+                , decayFactor = decayFac
+                , activateResolved = mVSIDS
+                , ..
+                }
+        )
+        mSeed
     )
   | (restLabel, rest) <-
       [ ("NoRestart", NoRestart)
@@ -50,6 +72,30 @@ cdclOptions =
       | f <- [0.5, 0.75, 0.95]
       ]
         ++ [("Adaptive Decay (default)", defaultAdaptiveFactor)]
+  , (varSelName, mSeed) <-
+      [ ("deterministic", Nothing)
+      ,
+        ( "random choice"
+        , Just
+            ( F.int ((minBound, maxBound) `withOrigin` 0)
+            , F.frequency
+                [ (1, pure 1.0)
+                , (1, pure 0.0)
+                , (1, pure 0.01)
+                , (1, pure 0.05)
+                , (1, pure 0.1)
+                , (1, pure 0.2)
+                , (1, pure 0.3)
+                , (1, pure 0.4)
+                , (1, pure 0.5)
+                , (1, pure 0.6)
+                , (1, pure 0.7)
+                , (1, pure 0.8)
+                , (1, pure 0.9)
+                ]
+            )
+        )
+      ]
   ]
 
 test_solve :: TestTree
@@ -61,6 +107,7 @@ test_solve =
       [ testGroup
           "CNF input"
           [ testProperty "Gives a correct decision" $ do
+              opt <- either gen pure eopt
               cnf <- gen $ cnfGen 10 10 ((0, 10) `withOrigin` 5)
               collectCNF cnf
               let ans = solveWith opt cnf
@@ -76,6 +123,7 @@ test_solve =
                       ("Satisfiable (" <> show f <> ")", \case Satisfiable {} -> True; _ -> False)
                     .$ ("answer", ans)
           , testProperty "Gives a correct model" $ do
+              opt <- either gen pure eopt
               cnf <- gen $ cnfGen 10 10 ((0, 10) `withOrigin` 5)
               collectCNF cnf
 
@@ -91,14 +139,15 @@ test_solve =
       , testGroup
           "solveWith . fromWithFree . fromFormulaFast"
           [ testSolverSemanticsWith
-              projVar
-              (fmap fromWithFree . fromFormulaFast)
-              10
-              128
-              (solveWith opt)
+            projVar
+            (fmap fromWithFree . fromFormulaFast)
+            10
+            128
+            (solveWith opt)
+          | Right opt <- pure eopt
           ]
       ]
-    | (optName, opt) <- cdclOptions
+    | (optName, eopt) <- cdclOptions
     ]
 
 decodeCNFFile :: FilePath -> IO (CNF Word)
@@ -112,15 +161,33 @@ test_sudoku =
     [ withResource (decodeCNFFile "data/tests/sudoku-9x9.cnf") mempty \cnf ->
         testGroup
           "9x9 (Satisfiable)"
-          [ testCase optName do
-            ans <- solveWith opt <$> cnf
-            case ans of
-              Unsat -> assertFailure "Must be satisfiable, but got Unsat!"
-              Satisfiable m -> do
-                HS.size (positive m) @?= 81
-                let leftovers = HS.fromList [1 .. 46] `HS.difference` positive m
-                assertBool ("Initial solution must be met, but following failed: " <> show (HS.toList leftovers)) (HS.null leftovers)
-          | (optName, opt) <- cdclOptions
+          [ case eopt of
+            Left optG -> testPropertyWith def {overrideNumTests = Just 25} optName do
+              opt <- gen optG
+              -- FIXME: Sad, but this use is safe.
+              -- Fix this after falsify supports impure tests.
+              let ans = solveWith opt $ unsafePerformIO cnf
+              case ans of
+                Unsat ->
+                  assert
+                    $ P.satisfies ("Satisfiable", is #_Satisfiable)
+                    .$ ("Answer", ans)
+                Satisfiable m -> do
+                  let poss = positive m
+                  assert $ P.expect 81 .$ ("Placement size", HS.size poss)
+                  let leftovers = HS.fromList [1 .. 46] `HS.difference` positive m
+                  assert
+                    $ P.satisfies ("Initial position is enabled", HS.null)
+                    .$ ("Leftovers", leftovers)
+            Right opt -> testCase optName do
+              ans <- solveWith opt <$> cnf
+              case ans of
+                Unsat -> assertFailure "Must be satisfiable, but got Unsat!"
+                Satisfiable m -> do
+                  HS.size (positive m) @?= 81
+                  let leftovers = HS.fromList [1 .. 46] `HS.difference` positive m
+                  assertBool ("Initial solution must be met, but following failed: " <> show (HS.toList leftovers)) (HS.null leftovers)
+          | (optName, eopt) <- cdclOptions
           ]
     ]
 
@@ -135,6 +202,7 @@ test_solveVarId =
           [ testGroup
               "Gives a correct decision"
               [ testProperty "Random" $ do
+                  opt <- either gen pure eopt
                   cnf <- gen $ fmap toEnum <$> cnfGen 10 10 ((0, 10) `withOrigin` 5)
                   collectCNF cnf
                   let ans = solveVarIdWith opt cnf
@@ -151,22 +219,32 @@ test_solveVarId =
                         .$ ("answer", ans)
               , testGroup
                   "regressions"
-                  [ testCase (show cnf) do
-                    let ans = solveVarIdWith opt cnf
-                    case classifyFormula $ toFormula @Full cnf of
-                      Inconsistent -> ans @?= Unsat
-                      _ ->
-                        assertBool ("Satisfiable expected, but got: " <> show ans)
-                          $ is #_Satisfiable ans
+                  [ case eopt of
+                    Left optG -> testProperty (show cnf) do
+                      opt <- gen optG
+                      let ans = solveVarIdWith opt cnf
+                      case classifyFormula $ toFormula @Full cnf of
+                        Inconsistent -> assert $ P.expect Unsat .$ ("answer", ans)
+                        _ ->
+                          assert
+                            $ P.satisfies ("Satisfiable", is #_Satisfiable)
+                            .$ ("got", ans)
+                    Right opt -> testCase (show cnf) do
+                      let ans = solveVarIdWith opt cnf
+                      case classifyFormula $ toFormula @Full cnf of
+                        Inconsistent -> ans @?= Unsat
+                        _ ->
+                          assertBool ("Satisfiable expected, but got: " <> show ans)
+                            $ is #_Satisfiable ans
                   | cnf <- regressionCNFs
                   ]
               ]
           , testGroup
               "Gives a correct model"
               [ testProperty "Random" $ do
+                  opt <- either gen pure eopt
                   cnf <- gen $ fmap toEnum <$> cnfGen 10 10 ((0, 10) `withOrigin` 5)
                   collectCNF cnf
-
                   case solveVarIdWith opt cnf of
                     Unsat -> discard
                     Satisfiable m -> do
@@ -177,17 +255,26 @@ test_solveVarId =
                         .$ ("answer", eval m $ toFormula @Full cnf)
               , testGroup
                   "regressions"
-                  [ testCase (show cnf) do
-                    case solveVarIdWith opt cnf of
-                      Unsat -> pure ()
-                      Satisfiable m -> do
-                        eval m (toFormula @Full cnf) @?= Just True
+                  [ case eopt of
+                    Left optG -> testProperty (show cnf) do
+                      opt <- gen optG
+                      case solveVarIdWith opt cnf of
+                        Unsat -> pure ()
+                        Satisfiable m -> do
+                          assert
+                            $ P.expect (Just True)
+                            .$ ("Valuation", eval m (toFormula @Full cnf))
+                    Right opt -> testCase (show cnf) do
+                      case solveVarIdWith opt cnf of
+                        Unsat -> pure ()
+                        Satisfiable m -> do
+                          eval m (toFormula @Full cnf) @?= Just True
                   | cnf <- regressionCNFs
                   ]
               ]
           ]
       ]
-    | (optName, opt) <- cdclOptions
+    | (optName, eopt) <- cdclOptions
     ]
 
 regressionCNFs :: [CNF VarId]
