@@ -197,6 +197,7 @@ library herbrand-test-utils
 executable bench-chart
   main-is: Main.hs
   other-modules:
+      Pages
       Parse
       Plot
       Report
@@ -209,7 +210,8 @@ executable bench-chart
       app/bench-chart
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -flate-dmd-anal "-with-rtsopts=--nonmoving-gc -N8" -fproc-alignment=64 -O2 -rtsopts -threaded
   build-depends:
-      aeson
+      Glob
+    , aeson
     , attoparsec
     , base >=4.7 && <5
     , bifunctors
@@ -238,6 +240,8 @@ executable bench-chart
     , lucid2
     , optparse-applicative
     , parallel
+    , path
+    , path-io
     , psqueues
     , random
     , recursion-schemes
@@ -247,6 +251,7 @@ executable bench-chart
     , strict
     , text
     , these
+    , time
     , transformers
     , trie-simple
     , unliftio

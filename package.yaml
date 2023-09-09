@@ -161,6 +161,7 @@ executables:
     - -threaded
     dependencies:
     - herbrand
+    - aeson
     - blaze-markup
     - bytestring
     - cassava
@@ -168,11 +169,15 @@ executables:
     - directory
     - filepath
     - githash
+    - Glob
     - integer-logarithms
     - lucid2
     - optparse-applicative
+    - path
+    - path-io
     - semialign
     - these
+    - time
     - unliftio
 
 tests:
