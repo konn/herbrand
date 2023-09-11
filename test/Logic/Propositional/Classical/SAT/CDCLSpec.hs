@@ -224,6 +224,11 @@ regressionCNFs =
       , [Positive 13, Negative 1, Positive 11]
       ]
   , CNF [[Negative 5], [Positive 1], [Negative 3, Positive 1], [Negative 3, Positive 0], [Positive 3, Negative 1, Negative 0], [Negative 5, Negative 3], [Negative 5, Negative 1], [Positive 5, Positive 3, Positive 1]]
+  , CNF
+      [ [Positive 0, Positive 0, Negative 7, Positive 7, Negative 1]
+      , [Negative 6, Positive 5, Positive 0, Positive 0, Positive 0]
+      , [Positive 6, Positive 0, Positive 5]
+      ]
   ]
 
 collectCNF :: (Ord v) => CNF v -> Property ()
