@@ -149,6 +149,7 @@ jobs:
       svg-path: bench-results/${{matrix.bench}}.svg
       report-dir: bench-results/${{matrix.bench}}-report
       report-tarball: bench-results/${{matrix.bench}}-report.tar.gz
+      branch: ${{ github.head_ref || github.ref_name }}
     continue-on-error: true
     strategy:
       fail-fast: false
@@ -159,6 +160,8 @@ jobs:
     - uses: actions/checkout@v3
       with:
         ref: ${{github.event.pull_request.head.sha || github.sha}}
+    - name: Modify Branch Name
+      run: git switch -c ${{env.branch}}
     - name: Download artifacts
       id: download
       uses: actions/download-artifact@v3
@@ -197,20 +200,24 @@ jobs:
         ${{steps.benchmark.outputs.baseline-desc}}
         STOP_HERE_EOF_HERE
         )
+        PULL=${{github.event.pull_request.number}}
+        PULL_BASE_BRANCH=${{github.event.pull_request.head.ref}}
+        PULL_BASE_COMMIT=${{github.event.pull_request.head.sha}}
+        PULL_TITLE="${{github.event.pull_request.title}}"
 
-        if [[ -z "${BASELINE}" ]]; then
-          ./artifacts/exes/bench-chart \
-            -i "${{env.csv-path}}" \
-            -o "${{env.report-dir}}" --git \
-            -R "${{matrix.bench}}"
-        else
-          ./artifacts/exes/bench-chart \
-            -i "${{env.csv-path}}" \
-            -o "${{env.report-dir}}" --git \
-            -R "${{matrix.bench}}" \
-            --baseline "${BASELINE}" \
-            --baseline-desc "${BASELINE_DESC}"
+        ARGS=(--git --repo "${{github.event.repository.full_name}}")
+        ARGS+=(-i "${{env.csv-path}}" -o "${{env.report-dir}}")
+        ARGS+=(-R "${{matrix.bench}}")
+
+        if [[ -n "${BASELINE}" ]]; then
+          ARGS+=(--baseline "${BASELINE}")
+          ARGS+=(--baseline-desc "${BASELINE_DESC}")
+          ARGS+=(--pull-number "${PULL}")
+          ARGS+=(--pull-title "${PULL_TITLE}")
+          ARGS+=(--pull-base-branch "${PULL_BASE_BRANCH}")
+          ARGS+=(--pull-base-commit "${PULL_BASE_COMMIT}")
         fi
+        ./artifacts/exes/bench-chart "${ARGS[@]}"
 
     - name: Compress Report
       if: always()
@@ -225,3 +232,103 @@ jobs:
       with:
         path: ${{env.report-tarball}}
         name: ${{matrix.bench}}-report
+
+  upload-reports:
+    concurrency:
+      cancel-in-progress: false
+      group: "pages"
+    permissions: 
+      pages: write
+      id-token: write
+      contents: write
+      pull-requests: write
+    environment:
+      name: github-pages
+      url: ${{steps.deployment.outputs.page_url}}
+
+    name: Upload Reports
+    if: (github.head_ref || github.ref_name) != 'gh-pages'
+    needs: [build, bench]
+    runs-on: ubuntu-latest
+    env:
+      sha: ${{github.event.pull_request.head.sha || github.sha}}
+      branch: ${{ github.head_ref || github.ref_name }}
+      pages-dir: pages
+    steps:
+    - name: Checkout HEAD
+      uses: actions/checkout@v4
+      with:
+        ref: ${{env.sha}}
+    - name: Modify Branch Name
+      run: git switch -c ${{env.branch}}
+    - name: Checkout gh-pages
+      uses: actions/checkout@v4
+      with:
+        ref: gh-pages
+        path: ${{env.pages-dir}}
+        token: ${{secrets.GITHUB_TOKEN}}
+    - name: Download artifacts
+      id: download
+      uses: actions/download-artifact@v3
+      with:
+        path: workspace/downloads
+    - name: Extract bench results and generate
+      id: generate
+      shell: bash
+      run: |
+        set -euxo pipefail
+        DL_DIR="${{steps.download.outputs.download-path}}"
+        WORKDIR=workspace
+        tar xaf "${DL_DIR}/artifacts/artifacts.tar.zst" --directory="${WORKDIR}"
+        ARTIFACT_DIRS=${WORKDIR}/artifacts
+        REPORT_DIR=${WORKDIR}/reports
+        cat "${ARTIFACT_DIRS}/benchs.list" | while read -r BENCH; do
+          DEST=${REPORT_DIR}/${BENCH}
+          mkdir -p "${DEST}"
+          ORIG_REPORT_NAME=${BENCH}-report
+          tar xvf "${DL_DIR}/${ORIG_REPORT_NAME}/${ORIG_REPORT_NAME}.tar.gz" --directory "${DEST}" --strip-components=1
+        done
+        ls -R "${REPORT_DIR}"
+
+        ARGS=(-c "${{env.pages-dir}}/reports.json" -i "${REPORT_DIR}" -o "${{env.pages-dir}}/docs/reports")
+        ARGS+=(-R "${{github.event.repository.full_name}}")
+        PULL=${{github.event.pull_request.number}}
+        PULL_BASE_BRANCH=${{github.event.pull_request.head.ref}}
+        PULL_BASE_COMMIT=${{github.event.pull_request.head.sha}}
+        PULL_TITLE="${{github.event.pull_request.title}}"
+        if [[ -n "${PULL}" ]]; then
+          ARGS+=("--pull-number" "${PULL}")
+          ARGS+=("--pull-title" "${PULL_TITLE}")
+          ARGS+=("--pull-base-branch" "${PULL_BASE_BRANCH}")
+          ARGS+=("--pull-base-commit" "${PULL_BASE_COMMIT}")
+        fi
+
+        ls -R "${{env.pages-dir}}"
+
+        "${ARTIFACT_DIRS}/exes/bench-chart" update-report-pages "${ARGS[@]}"
+    - name: Setup Pages
+      uses: actions/configure-pages@v3
+    - name: Upload artifact
+      uses: actions/upload-pages-artifact@v2
+      with:
+        # Upload entire repository
+        path: ${{env.pages-dir}}/docs
+    - name: Deploy to GitHub Pages
+      id: deployment
+      uses: actions/deploy-pages@v2
+    - name: Report to PR
+      if: ${{ github.event_name == 'pull_request' }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        URL: ${{ github.event.pull_request.html_url }}
+      run: >
+        gh pr comment ${{github.event.pull_request.number}}
+        -b ":bar_chart: Benchmark report for ${{env.sha}} is uploaded to: ${{steps.generate.outputs.url}}"
+    - name: Make commit
+      run: |
+        cd pages
+        git config --global user.name "github-actions"
+        git config --global user.email "github-actions"
+        git add .
+        git commit -m "[bot] Report for ${{env.sha}} (${{env.branch}})"
+        git push origin gh-pages
