@@ -4,7 +4,6 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingVia #-}
-{-# LANGUAGE DisambiguateRecordFields #-}
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
@@ -21,13 +20,13 @@
 {-# LANGUAGE ViewPatterns #-}
 {-# OPTIONS_GHC -funbox-strict-fields #-}
 
-module Pages (PagesOpts (..), PullRequest (..), updateReportPages) where
+module Pages (PagesOpts (..), pagesOptsP, updateReportPages) where
 
 import Control.DeepSeq
 import Control.Lens hiding ((<.>))
 import Control.Monad (forM_, guard, when)
 import Control.Monad.Trans.Maybe (MaybeT (..))
-import Data.Aeson (FromJSON, FromJSONKey, ToJSON, ToJSONKey)
+import Data.Aeson (FromJSON, ToJSON)
 import qualified Data.Aeson as J
 import qualified Data.Bifunctor as Bi
 import qualified Data.Char as C
@@ -35,22 +34,23 @@ import Data.Function (on)
 import Data.Generics.Labels ()
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HM
-import Data.Hashable (Hashable)
 import Data.List (sortOn)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (catMaybes, fromJust)
 import Data.Ord (Down (..), comparing)
-import Data.String (IsString, fromString)
+import Data.String (fromString)
 import qualified Data.Text as T
 import Data.Time (FormatTime, ParseTime, ZonedTime, defaultTimeLocale, formatTime, parseTimeOrError, zonedTimeToUTC)
 import GHC.Generics (Generic)
 import GitHash
 import Lucid
+import qualified Options.Applicative as Opt
 import Path
 import Path.IO
 import System.Directory
 import System.FilePath.Glob (globDir1)
 import System.IO (hPutStrLn)
+import Types
 import UnliftIO.Environment (lookupEnv)
 import UnliftIO.Exception
 import UnliftIO.IO
@@ -66,6 +66,35 @@ data PagesOpts = PagesOpts
 
 data Dirs = Dirs {inputDir, commitOutDir :: Path Abs Dir}
   deriving (Show, Eq, Ord, Generic)
+
+pagesOptsP :: Opt.Parser PagesOpts
+pagesOptsP = do
+  configPath <-
+    Opt.strOption
+      $ Opt.long "config"
+      <> Opt.short 'c'
+      <> Opt.metavar "PATH"
+      <> Opt.help "The path to the reports.json"
+  input <-
+    Opt.strOption
+      $ Opt.long "input"
+      <> Opt.short 'i'
+      <> Opt.metavar "DIR"
+      <> Opt.help "The directory containing input report directories"
+  output <-
+    Opt.strOption
+      $ Opt.long "output"
+      <> Opt.short 'o'
+      <> Opt.metavar "DIR"
+      <> Opt.help "The deploy path"
+  repo <-
+    Opt.strOption
+      $ Opt.long "repo"
+      <> Opt.short 'R'
+      <> Opt.metavar "OWNER/REPO"
+      <> Opt.help "Repository full name"
+  pull <- Opt.optional pullReqOptsP
+  pure PagesOpts {..}
 
 updateReportPages :: PagesOpts -> IO ()
 updateReportPages opts@PagesOpts {..} = do
@@ -298,26 +327,9 @@ instance Eq Timestamp where
 instance Ord Timestamp where
   compare = comparing $ zonedTimeToUTC . getTimestamp
 
-newtype BranchName = BranchName {runBranchName :: T.Text}
-  deriving (Show, Eq, Ord, Generic)
-  deriving newtype (FromJSON, ToJSON, Hashable, IsString, FromJSONKey, ToJSONKey, NFData, ToHtml)
-
-newtype CommitHash = CommitHash {runCommitHash :: T.Text}
-  deriving (Show, Eq, Ord, Generic)
-  deriving newtype (FromJSON, ToJSON, Hashable, IsString, FromJSONKey, ToJSONKey, NFData, ToHtml)
-
 data ReportInfo = ReportInfo {commit :: T.Text, branch :: T.Text}
   deriving (Show, Eq, Ord, Generic)
   deriving anyclass (FromJSON, ToJSON)
-
-data PullRequest = PullRequest
-  { pullNumber :: Word
-  , pullTitle :: T.Text
-  , baseBranch :: BranchName
-  , baseCommit :: CommitHash
-  }
-  deriving (Show, Eq, Ord, Generic)
-  deriving anyclass (FromJSON, ToJSON, NFData)
 
 data Commit = Commit
   { commit :: CommitHash

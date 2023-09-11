@@ -23,6 +23,10 @@ module Types (
   Priorities (..),
   Winner (..),
   BenchCase (..),
+  BranchName (..),
+  CommitHash (..),
+  PullRequest (..),
+  pullReqOptsP,
   winnerCountL,
   getMinArg,
   getMinObj,
@@ -31,6 +35,7 @@ module Types (
 import Control.DeepSeq
 import Control.Foldl qualified as L
 import Control.Lens
+import Data.Aeson
 import Data.Bifunctor qualified as Bi
 import Data.ByteString qualified as BS
 import Data.Coerce (coerce)
@@ -43,10 +48,13 @@ import Data.Ord (Down (..), comparing)
 import Data.Proxy (Proxy (..))
 import Data.Reflection
 import Data.Semigroup (Arg (..), ArgMin, Min (..))
+import Data.String
 import Data.Text qualified as T
 import Data.Vector qualified as V
 import GHC.Generics (Generic, Generic1)
 import GHC.Generics.Generically
+import Lucid (ToHtml)
+import Options.Applicative qualified as Opt
 
 newtype Prioritised s a = Prioritised {unprioritise :: a}
   deriving (Eq, Show)
@@ -162,3 +170,44 @@ data Criteria a = Criteria
   }
   deriving (Show, Eq, Ord, Generic, Generic1, Functor, Foldable, Traversable)
   deriving anyclass (NFData)
+
+newtype BranchName = BranchName {runBranchName :: T.Text}
+  deriving (Show, Eq, Ord, Generic)
+  deriving newtype (FromJSON, ToJSON, Hashable, IsString, FromJSONKey, ToJSONKey, NFData, ToHtml)
+
+newtype CommitHash = CommitHash {runCommitHash :: T.Text}
+  deriving (Show, Eq, Ord, Generic)
+  deriving newtype (FromJSON, ToJSON, Hashable, IsString, FromJSONKey, ToJSONKey, NFData, ToHtml)
+
+data PullRequest = PullRequest
+  { pullNumber :: Word
+  , pullTitle :: T.Text
+  , baseBranch :: BranchName
+  , baseCommit :: CommitHash
+  }
+  deriving (Show, Eq, Ord, Generic)
+  deriving anyclass (FromJSON, ToJSON, NFData)
+
+pullReqOptsP :: Opt.Parser PullRequest
+pullReqOptsP = do
+  pullNumber <-
+    Opt.option Opt.auto
+      $ Opt.long "pull-number"
+      <> Opt.metavar "NUM"
+      <> Opt.help "Pull Request Number"
+  pullTitle <-
+    Opt.strOption
+      $ Opt.long "pull-title"
+      <> Opt.metavar "TITLE"
+      <> Opt.help "Pull Request Title"
+  baseBranch <-
+    Opt.strOption
+      $ Opt.long "pull-base-branch"
+      <> Opt.metavar "REF_NAME"
+      <> Opt.help "Pull Request base branch"
+  baseCommit <-
+    Opt.strOption
+      $ Opt.long "pull-base-commit"
+      <> Opt.metavar "SHA"
+      <> Opt.help "Pull Request base commit"
+  pure PullRequest {..}
