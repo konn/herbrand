@@ -181,7 +181,16 @@ test_solveVarId =
                     case solveVarIdWith opt cnf of
                       Unsat -> pure ()
                       Satisfiable m -> do
-                        eval m (toFormula @Full cnf) @?= Just True
+                        let value = eval m (toFormula @Full cnf)
+                        assertBool
+                          ( unlines
+                              [ "expected: Just True"
+                              , " but got: " <> show value
+                              , "   model: " <> show m
+                              ]
+                          )
+                          $ value
+                          == Just True
                   | cnf <- regressionCNFs
                   ]
               ]
