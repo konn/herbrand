@@ -200,20 +200,24 @@ jobs:
         ${{steps.benchmark.outputs.baseline-desc}}
         STOP_HERE_EOF_HERE
         )
+        PULL=${{github.event.pull_request.number}}
+        PULL_BASE_BRANCH=${{github.event.pull_request.head.ref}}
+        PULL_BASE_COMMIT=${{github.event.pull_request.head.sha}}
+        PULL_TITLE="${{github.event.pull_request.title}}"
 
-        if [[ -z "${BASELINE}" ]]; then
-          ./artifacts/exes/bench-chart \
-            -i "${{env.csv-path}}" \
-            -o "${{env.report-dir}}" --git \
-            -R "${{matrix.bench}}"
-        else
-          ./artifacts/exes/bench-chart \
-            -i "${{env.csv-path}}" \
-            -o "${{env.report-dir}}" --git \
-            -R "${{matrix.bench}}" \
-            --baseline "${BASELINE}" \
-            --baseline-desc "${BASELINE_DESC}"
+        ARGS=(--git --repo "${{github.event.repository.full_name}}")
+        ARGS+=(-i "${{env.csv-path}}" -o "${{env.report-dir}}")
+        ARGS+=(-R "${{matrix.bench}}")
+
+        if [[ -n "${BASELINE}" ]]; then
+          ARGS+=(--baseline "${BASELINE}")
+          ARGS+=(--baseline-desc "${BASELINE_DESC}")
+          ARGS+=(--pull-number "${PULL}")
+          ARGS+=(--pull-title "${PULL_TITLE}")
+          ARGS+=(--pull-base-branch "${PULL_BASE_BRANCH}")
+          ARGS+=(--pull-base-commit "${PULL_BASE_COMMIT}")
         fi
+        ./artifacts/exes/bench-chart "${ARGS[@]}"
 
     - name: Compress Report
       if: always()

@@ -53,16 +53,23 @@ type BaselineDescr = T.Text
 data SingleReportOpts = SingleReportOpts
   { input :: !FilePath
   , output :: !FilePath
+  , repo :: !T.Text
   , sufficesToStrip :: !(Maybe Int)
   , reportName :: !(Maybe T.Text)
   , gitInspect :: !Bool
   , baseline :: !(Maybe FilePath)
   , baselineDescr :: !(Maybe T.Text)
+  , pull :: !(Maybe PullRequest)
   }
   deriving (Show, Eq, Ord, Generic)
 
 singleReportOptsP :: Opt.Parser SingleReportOpts
 singleReportOptsP = do
+  repo <-
+    Opt.strOption
+      $ Opt.long "repo"
+      <> Opt.metavar "OWNER/REPO"
+      <> Opt.help "Repository full name"
   input <-
     Opt.strOption
       $ Opt.long "input"
@@ -103,6 +110,7 @@ singleReportOptsP = do
       $ Opt.long "baseline-desc"
       <> Opt.metavar "FILE"
       <> Opt.help "Description for the baseline"
+  pull <- Opt.optional pullReqOptsP
   pure SingleReportOpts {..}
 
 generateSingleReport :: SingleReportOpts -> IO ()
@@ -164,7 +172,8 @@ generateSingleReport SingleReportOpts {..} = do
           <*> L.premap copiedWinner winnerCountL
       )
       svgs
-  Lucid.renderToFile reportHtml $ buildReport reportName mGit (baseDesc <$ baseline) svgs
+  Lucid.renderToFile reportHtml
+    $ buildReport repo reportName mGit (baseDesc <$ baseline) pull svgs
   hPutStrLn stderr $ "Report Written to: " <> reportHtml
 
 pruneSuffices :: Maybe Int -> Benchs -> Benchs
@@ -183,8 +192,15 @@ buildColorMap =
           $ L.handles folded L.list
       )
 
-buildReport :: Maybe T.Text -> Maybe GitInfo -> Maybe BaselineDescr -> Map.Map [T.Text] (Criteria FilePath, Winner Integer) -> Html ()
-buildReport mReportName mGit mbase benchs = doctypehtml_ do
+buildReport ::
+  T.Text ->
+  Maybe T.Text ->
+  Maybe GitInfo ->
+  Maybe BaselineDescr ->
+  Maybe PullRequest ->
+  Map.Map [T.Text] (Criteria FilePath, Winner Integer) ->
+  Html ()
+buildReport repo mReportName mGit mbase pull benchs = doctypehtml_ do
   let resultName =
         case mReportName of
           Nothing -> "Benchmark Result"
@@ -216,19 +232,42 @@ buildReport mReportName mGit mbase benchs = doctypehtml_ do
                 ( \ginfo ->
                     Just
                       $ DLNE.fromList
-                        [ ("Branch", T.pack $ giBranch ginfo)
-                        , ("Commit", T.pack $ giHash ginfo)
-                        , ("Commit Message", T.pack $ giCommitMessage ginfo)
+                        [
+                          ( "Branch"
+                          , a_ [href_ $ "https://github.com/" <> repo <> "/tree/" <> T.pack (giBranch ginfo)]
+                              $ toHtml
+                              $ giBranch ginfo
+                          )
+                        ,
+                          ( "Commit"
+                          , a_ [href_ $ "https://github.com/" <> repo <> "/tree/" <> T.pack (giHash ginfo)]
+                              $ toHtml
+                              $ giHash ginfo
+                          )
+                        , ("Commit Message", toHtml $ giCommitMessage ginfo)
                         ]
                 )
                 mGit
-              <> foldMap (\base -> Just $ DLNE.singleton ("Baseline", base)) mbase
+              <> foldMap (\base -> Just $ DLNE.singleton ("Baseline", toHtml base)) mbase
+              <> foldMap
+                ( \PullRequest {..} ->
+                    Just
+                      $ DLNE.singleton
+                        ( "Pull Request"
+                        , a_ [href_ $ "https://github.com/" <> repo <> "/pull/" <> T.pack (show pullNumber)]
+                            $ "#"
+                            <> toHtml (show pullNumber)
+                            <> ": "
+                            <> toHtml pullTitle
+                        )
+                )
+                pull
       case metas of
         Nothing -> p_ "N/A"
         Just m -> table_ $ tbody_ $ forM_ m $ \(lab, col) ->
           tr_ do
             th_ lab
-            td_ $ code_ $ toHtml col
+            td_ $ code_ col
     h2_ "Summary: Overall Winning Ranking"
     let renderRanking :: Html () -> Map.Map T.Text Int -> Html ()
         renderRanking name rank = do
