@@ -559,7 +559,7 @@ watch cid =
       S.%= \ws ->
         LA.unsafeGet (fromEnum v) ws & \(Ur !xs, ws) ->
           let !xs' = IS.insert (unClauseId cid) xs
-           in LA.set (fromEnum v) xs' ws
+           in LA.unsafeSet (fromEnum v) xs' ws
 
 unwatch :: ClauseId -> VarId %1 -> S.State (CDCLState s) ()
 unwatch cid =
@@ -569,7 +569,7 @@ unwatch cid =
       S.%= \ws ->
         LA.unsafeGet (fromEnum v) ws & \(Ur !xs, ws) ->
           let !xs' = IS.delete (unClauseId cid) xs
-           in LA.set (fromEnum v) xs' ws
+           in LA.unsafeSet (fromEnum v) xs' ws
 
 assertLit :: (HasCallStack) => ClauseId -> Lit -> S.State (CDCLState s) AssertionResult
 assertLit ante lit = S.do
