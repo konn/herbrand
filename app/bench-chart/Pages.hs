@@ -246,7 +246,7 @@ mkHtmlTitled title body = doctypehtml_ do
       , content_ "width=device-width, initial-scale=1.0"
       ]
     link_ [rel_ "stylesheet", href_ "https://cdn.simplecss.org/simple.min.css"]
-  body
+  body_ body
 
 treeReportRelPath :: T.Text -> Path Rel Dir
 treeReportRelPath name = fromJust $ parseRelDir (T.unpack name)
