@@ -44,7 +44,6 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   setWatchVar,
   setSatisfiedLevel,
   getSatisfiedLevel,
-  withClauseLitsM,
   withClauseLits,
   foldClauseLits,
   watchesL,
@@ -64,7 +63,7 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   runClausesValsM,
   unsatisfiedsL,
   clausesAndValsL,
-  ifoldClauseLitsM,
+  -- ifoldClauseLitsM,
   clausesValsAndUnsatsL,
   Index,
 
@@ -131,6 +130,7 @@ import Data.Bits (popCount, xor, (.&.), (.|.))
 import Data.Coerce (coerce)
 import Data.DList qualified as DL
 import Data.Foldable qualified as F
+import Data.Functor.Linear qualified as D
 import Data.Generics.Labels ()
 import Data.Hashable (Hashable)
 import Data.IntPSQ qualified as PSQ
@@ -138,7 +138,6 @@ import Data.IntSet (IntSet)
 import Data.IntSet qualified as IS
 import Data.List (mapAccumL)
 import Data.Map.Strict qualified as Map
-import Data.Matrix.Mutable.Linear.Unboxed qualified as LUM
 import Data.Maybe (fromMaybe)
 import Data.Monoid.Linear.Orphans ()
 import Data.Ord (Down (..))
@@ -154,6 +153,7 @@ import Data.Unrestricted.Linear.Orphans ()
 import Data.Vector qualified as V
 import Data.Vector.Generic qualified as G
 import Data.Vector.Generic.Mutable qualified as MG
+import Data.Vector.Mutable.Linear.Extra qualified as LV
 import Data.Vector.Mutable.Linear.Unboxed qualified as LUV
 import Data.Vector.Unboxed qualified as U
 import Data.Vector.Unboxed.Deriving (derivingUnbox)
@@ -504,7 +504,7 @@ instance MG.MVector U.MVector ClauseBody where
 
 data Clauses where
   Clauses ::
-    {-# UNPACK #-} !(LUM.Matrix Lit) %1 ->
+    {-# UNPACK #-} !(LV.Vector (U.Vector Lit)) %1 ->
     {-# UNPACK #-} !(LUV.Vector ClauseBody) %1 ->
     Clauses
 
@@ -605,7 +605,7 @@ pushClause = \Clause {..} -> S.do
         }
       bs
       & \bs ->
-        LUM.pushRow lits litss & \litss -> Clauses litss bs
+        LV.push lits litss & \litss -> Clauses litss bs
   Ur !lbd <- S.zoom valuationL (Ur.runUrT (L.foldOverM (foldring U.foldr) calcLBDL lits))
   vsidsStateL
     S.%= case decayFactor $ reflect @s Proxy of
@@ -682,43 +682,39 @@ moveToUnsatQueue vid = \(VSIDSState unsats sats lbdEma exc) ->
   where
     !vidInt = fromIntegral $ unVarId vid
 
-getClauseLits :: ClauseId -> S.State (CDCLState s) (Ur (U.Vector Lit))
-getClauseLits i = S.uses clausesL \(Clauses litss bs) ->
-  LUM.unsafeGetRow (unClauseId i) litss & \(lits, litss) ->
+getClauseLits :: ClauseId -> S.State Clauses (Ur (U.Vector Lit))
+{-# INLINE getClauseLits #-}
+getClauseLits i = S.state \(Clauses litss bs) ->
+  LV.unsafeGet (unClauseId i) litss & \(lits, litss) ->
     (lits, Clauses litss bs)
-
-withClauseLitsM ::
-  ClauseId ->
-  (forall s. LUM.Slice s Lit %1 -> (b, LUM.Slice s Lit)) %1 ->
-  S.State Clauses b
-{-# INLINE withClauseLitsM #-}
-withClauseLitsM cid f = S.state \(Clauses litss bs) ->
-  LUM.unsafeWithRow (unClauseId cid) f litss & \(b, litss) ->
-    (b, Clauses litss bs)
 
 withClauseLits ::
   ClauseId ->
   Clauses %1 ->
-  (forall s. LUM.Slice s Lit %1 -> (b, LUM.Slice s Lit)) %1 ->
+  (U.Vector Lit -> b) %1 ->
   (b, Clauses)
 {-# INLINE withClauseLits #-}
-withClauseLits cid = \(Clauses litss bs) f ->
-  LUM.unsafeWithRow (unClauseId cid) f litss & \(b, litss) ->
-    (b, Clauses litss bs)
+withClauseLits i c f =
+  S.runState (getClauseLits i) c & \(Ur lits, c) ->
+    (f lits, c)
 
 foldClauseLits :: L.Fold Lit b -> ClauseId -> S.State Clauses (Ur b)
 {-# INLINE foldClauseLits #-}
-foldClauseLits f cid = withClauseLitsM cid (L.purely LUV.foldS' f)
+foldClauseLits f cid =
+  Ur.lift (L.purely (\step ini out -> out . U.foldl step ini) f)
+    D.<$> getClauseLits cid
 
+{-
 ifoldClauseLitsM :: (C.Monad m) => L.FoldM (UrT m) (Int, Lit) b -> ClauseId -> S.StateT Clauses m (Ur b)
 {-# INLINE ifoldClauseLitsM #-}
-ifoldClauseLitsM f cid = S.StateT \(Clauses litss bs) ->
-  C.fmap (`Clauses` bs)
-    C.<$> LUM.unsafeWithRowM
-      (unClauseId cid)
-      (L.impurely LUV.ifoldSML' f)
-      litss
-
+ifoldClauseLitsM f cid =
+  Ur.lift
+    ( L.impurely
+        (\step ini out -> out . U.ifoldl (curry . step) ini)
+        f
+    )
+    C.=<< getClauseLits cid
+ -}
 runClausesValsM :: S.StateT Clauses (S.State Valuation) a %1 -> S.State (CDCLState s) a
 {-# INLINE runClausesValsM #-}
 {- HLINT ignore runClausesValsM "Redundant lambda" -}
@@ -854,7 +850,7 @@ toClauses cs l =
       cs
       & \(Ur lits, bs) ->
         Clauses
-          (LUM.fromRowsL l (DL.toList lits))
+          (LV.fromListL l (DL.toList lits))
           (LUV.fromVectorL l' (Push.alloc bs))
 
 buildClause ::
@@ -1009,13 +1005,12 @@ deriving via L.Generically WatchedLits instance PL.Movable WatchedLits
 getWatchedLits :: ClauseId -> S.State Clauses (Ur WatchedLits)
 getWatchedLits cid = S.state \(Clauses ls bs) ->
   LUV.unsafeGet (unClauseId cid) bs & \(Ur ClauseBody {..}, bs) ->
-    LUM.unsafeGetEntry (unClauseId cid) wat1 ls & \(Ur l1, ls) ->
-      wat2 >= 0 & \case
-        True ->
-          LUM.unsafeGetEntry (unClauseId cid) wat2 ls & \(Ur l2, ls) ->
-            (Ur (WatchThese l1 l2), Clauses ls bs)
-        False ->
-          (Ur (WatchOne l1), Clauses ls bs)
+    LV.unsafeGet (unClauseId cid) ls & \(Ur lts, ls) ->
+      let l1 = U.unsafeIndex lts wat1
+          l2 = U.unsafeIndex lts wat2
+       in wat2 >= 0 & \case
+            True -> (Ur (WatchThese l1 l2), Clauses ls bs)
+            False -> (Ur (WatchOne l1), Clauses ls bs)
 
 getLit1 :: WatchedLits -> Lit
 getLit1 (WatchOne l) = l
@@ -1031,8 +1026,8 @@ watchLitOf W2 = fromMaybe (error "watchLitOf: no lit2") . getLit2
 
 getClauseLitAt :: ClauseId -> Index -> S.State Clauses (Ur Lit)
 getClauseLitAt cid j = S.state \(Clauses ls bs) ->
-  LUM.unsafeGetEntry (unClauseId cid) j ls & \(Ur l1, ls) ->
-    (Ur l1, Clauses ls bs)
+  LV.unsafeGet (unClauseId cid) ls & \(Ur l, ls) ->
+    (Ur (U.unsafeIndex l j), Clauses ls bs)
 
 elemWatchLit :: Lit -> WatchedLits -> Bool
 elemWatchLit l (WatchOne l1) = l == l1

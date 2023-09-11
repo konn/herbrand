@@ -735,34 +735,34 @@ findNextAvailable w cid = S.do
       cid
       clauses
       ( \slc ->
-          LUV.sizeS slc & \(Ur n, slc) ->
-            fix
-              -- Invariant: At least one of mSat and mUndet
-              -- must be Nothing when passed to go.
-              ( \go !i !mSat !mUndet !slc !vals ->
-                  if i == n
-                    then ((Ur (mSat, mUndet), vals), slc)
-                    else
-                      if i `elemWatchLitIdx` widx
-                        then go (i + 1) mSat mUndet slc vals
-                        else
-                          LUV.unsafeGetS i slc & \(Ur l, slc) ->
-                            S.runState (evalLit l) vals & \(v, vals) ->
-                              move v & \(Ur v) ->
-                                let (mSat', mUndet') = case v of
-                                      Nothing -> (St.Nothing, St.Just i)
-                                      Just False -> (St.Nothing, St.Nothing)
-                                      Just True -> (St.Just i, St.Nothing)
-                                 in (mSat <|>: mSat', mUndet <|>: mUndet') & \(mSat, mUndet) ->
-                                      if St.isJust mSat && St.isJust mUndet
-                                        then ((Ur (mSat, mUndet), vals), slc)
-                                        else go (i + 1) mSat mUndet slc vals
-              )
-              0
-              St.Nothing
-              St.Nothing
-              slc
-              vals
+          -- FIXME: Simple fold would suffice here.
+          let n = U.length slc
+           in fix
+                -- Invariant: At least one of mSat and mUndet
+                -- must be Nothing when passed to go.
+                ( \go !i !mSat !mUndet !vals ->
+                    if i == n
+                      then (Ur (mSat, mUndet), vals)
+                      else
+                        if i `elemWatchLitIdx` widx
+                          then go (i + 1) mSat mUndet vals
+                          else
+                            let l = U.unsafeIndex slc i
+                             in S.runState (evalLit l) vals & \(v, vals) ->
+                                  move v & \(Ur v) ->
+                                    let (mSat', mUndet') = case v of
+                                          Nothing -> (St.Nothing, St.Just i)
+                                          Just False -> (St.Nothing, St.Nothing)
+                                          Just True -> (St.Just i, St.Nothing)
+                                     in (mSat <|>: mSat', mUndet <|>: mUndet') & \(mSat, mUndet) ->
+                                          if St.isJust mSat && St.isJust mUndet
+                                            then (Ur (mSat, mUndet), vals)
+                                            else go (i + 1) mSat mUndet vals
+                )
+                0
+                St.Nothing
+                St.Nothing
+                vals
       )
       & \((a, vals), clauses) -> (a, (clauses, vals))
 
@@ -790,29 +790,29 @@ evalClause cid = S.do
   lvl >= 0 & \case
     True -> S.pure $ Just True
     False -> S.do
+      -- FIXME: simple fold would suffice
       S.uses clausesAndValsL \(clauses, vals) ->
         withClauseLits
           cid
           clauses
           ( \lits ->
-              LUV.sizeS lits & \(Ur n, lits) ->
-                fix
-                  ( \go !i !anyNothing !lits !vals ->
-                      if i == n
-                        then
-                          anyNothing & \case
-                            True -> ((Nothing, vals), lits)
-                            False -> ((Just False, vals), lits)
-                        else
-                          LUV.unsafeGetS i lits & \(Ur l, lits) ->
-                            S.runState (evalLit l) vals & \case
-                              (Nothing, vals) -> go (i + 1) True lits vals
-                              (Just False, vals) -> go (i + 1) anyNothing lits vals
-                              (Just True, vals) -> ((Just True, vals), lits)
-                  )
-                  0
-                  False
-                  lits
-                  vals
+              let n = U.length lits
+               in fix
+                    ( \go !i !anyNothing !vals ->
+                        if i == n
+                          then
+                            anyNothing & \case
+                              True -> (Nothing, vals)
+                              False -> (Just False, vals)
+                          else
+                            let l = U.unsafeIndex lits i
+                             in S.runState (evalLit l) vals & \case
+                                  (Nothing, vals) -> go (i + 1) True vals
+                                  (Just False, vals) -> go (i + 1) anyNothing vals
+                                  (Just True, vals) -> (Just True, vals)
+                    )
+                    0
+                    False
+                    vals
           )
           & \((ans, vals), clauses) -> (ans, (clauses, vals))
