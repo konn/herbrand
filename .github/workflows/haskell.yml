@@ -2,6 +2,12 @@ name: Build and Test
 on: 
   push: {branches: ["main"]}
   pull_request:
+  workflow_dispatch:
+    inputs:
+      baseline:
+        type: string
+        required: false
+        description: Comparison baseline for benchmark
 
 jobs:
   build:
@@ -176,7 +182,7 @@ jobs:
           await script({
             core, glob, io, exec, context, github, fetch,
             bench_name: "${{matrix.bench}}",
-            threshold: 20
+            threshold: 20, inputs: ${{toJSON(inputs)}}
           })
     - name: Upload CSV
       if: always()

@@ -7,14 +7,21 @@
 module Logic.Propositional.Classical.SAT.CDCLSpec (test_solve, test_solveVarId, test_sudoku) where
 
 import qualified Control.Foldl as L
-import Control.Lens (folded, maximumOf, view, _3)
+import Control.Lens (both, folded, maximumOf, view, (%~), _3)
 import Control.Lens.Extras (is)
 import qualified Control.Lens.Getter as Lens
 import Control.Monad ((<=<))
 import qualified Data.ByteString.Lazy as LBS
+import qualified Data.DList as DL
+import Data.Foldable (foldMap')
 import Data.Generics.Labels ()
+import Data.HashSet (HashSet)
 import qualified Data.HashSet as HS
+import Data.Hashable (Hashable)
 import Data.List (intercalate)
+import qualified Data.List.NonEmpty as NE
+import Data.Maybe (fromMaybe)
+import Data.Monoid (Ap (..))
 import qualified Data.Set as Set
 import Logic.Propositional.Classical.SAT.BruteForce
 import Logic.Propositional.Classical.SAT.CDCL
@@ -23,6 +30,7 @@ import Logic.Propositional.Classical.SAT.Types (Model (..), SatResult (..), eval
 import Logic.Propositional.Classical.Syntax.TestUtils
 import Logic.Propositional.Syntax.General
 import Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
+import qualified Test.Falsify.Generator as F
 import Test.Falsify.Predicate ((.$))
 import qualified Test.Falsify.Predicate as P
 import Test.Falsify.Range (withOrigin)
@@ -83,10 +91,16 @@ test_solve =
                 Unsat -> discard
                 Satisfiable m -> do
                   info $ "Given model: " <> show m
+                  complete <-
+                    gen
+                      $ F.elem
+                      $ fromMaybe (NE.singleton m)
+                      $ NE.nonEmpty
+                      $ completedModels (L.fold L.hashSet cnf) m
                   assert
                     $ P.eq
                     .$ ("expected", Just True)
-                    .$ ("answer", eval m $ toFormula @Full cnf)
+                    .$ ("answer", eval complete $ toFormula @Full cnf)
           ]
       , testGroup
           "solveWith . fromWithFree . fromFormulaFast"
@@ -171,17 +185,35 @@ test_solveVarId =
                     Unsat -> discard
                     Satisfiable m -> do
                       info $ "Given model: " <> show m
+                      complete <-
+                        gen
+                          $ F.elem
+                          $ fromMaybe (NE.singleton m)
+                          $ NE.nonEmpty
+                          $ completedModels (L.fold L.hashSet cnf) m
                       assert
                         $ P.eq
                         .$ ("expected", Just True)
-                        .$ ("answer", eval m $ toFormula @Full cnf)
+                        .$ ("answer", eval complete $ toFormula @Full cnf)
               , testGroup
                   "regressions"
                   [ testCase (show cnf) do
                     case solveVarIdWith opt cnf of
                       Unsat -> pure ()
                       Satisfiable m -> do
-                        eval m (toFormula @Full cnf) @?= Just True
+                        let models = completedModels (L.fold L.hashSet cnf) m
+                            modVals =
+                              filter ((/= Just True) . snd)
+                                $ map ((,) <$> id <*> flip eval (toFormula @Full cnf)) models
+                        assertBool
+                          ( unlines
+                              [ "       expected: Just True"
+                              , "        but got: " <> show (map snd modVals)
+                              , "  partial model: " <> show m
+                              , " complete model: " <> show (map fst modVals)
+                              ]
+                          )
+                          $ null modVals
                   | cnf <- regressionCNFs
                   ]
               ]
@@ -189,6 +221,13 @@ test_solveVarId =
       ]
     | (optName, opt) <- cdclOptions
     ]
+
+completedModels :: (Hashable w) => HashSet w -> Model w -> [Model w]
+completedModels vars m =
+  let missings = HS.toList $ vars `HS.difference` L.fold L.hashSet m
+   in map ((m <>) . uncurry Model . (both %~ L.fold L.hashSet))
+        $ getAp
+        $ foldMap' (\w -> Ap [(DL.singleton w, mempty), (mempty, DL.singleton w)]) missings
 
 regressionCNFs :: [CNF VarId]
 regressionCNFs =
@@ -224,6 +263,11 @@ regressionCNFs =
       , [Positive 13, Negative 1, Positive 11]
       ]
   , CNF [[Negative 5], [Positive 1], [Negative 3, Positive 1], [Negative 3, Positive 0], [Positive 3, Negative 1, Negative 0], [Negative 5, Negative 3], [Negative 5, Negative 1], [Positive 5, Positive 3, Positive 1]]
+  , CNF
+      [ [Positive 0, Positive 0, Negative 7, Positive 7, Negative 1]
+      , [Negative 6, Positive 5, Positive 0, Positive 0, Positive 0]
+      , [Positive 6, Positive 0, Positive 5]
+      ]
   ]
 
 collectCNF :: (Ord v) => CNF v -> Property ()

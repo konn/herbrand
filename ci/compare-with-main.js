@@ -7,6 +7,7 @@ module.exports = async ({
   context,
   bench_name,
   threshold,
+  inputs,
 }) => {
   const fs = require("fs");
 
@@ -22,6 +23,13 @@ module.exports = async ({
     target_repo = pull.base.repo;
     context.payload.repository.target_branch = pull.base.ref;
     target_sha = pull.base.sha;
+  } else if (
+    context.eventName == "workflow_dispatch" &&
+    inputs.baseline != ""
+  ) {
+    source_branch = context.ref;
+    target_sha = inputs.baseline;
+    target_repo = context.payload.repository;
   } else {
     source_branch = "main";
     target_branch = context.ref;

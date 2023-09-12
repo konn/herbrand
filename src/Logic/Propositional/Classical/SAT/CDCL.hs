@@ -43,10 +43,14 @@ import Control.Functor.Linear.State.Extra qualified as S
 import Control.Lens hiding (Index, lens, (%=), (&), (.=))
 import Control.Lens qualified as Lens
 import Control.Monad qualified as P
+import Control.Monad.Trans.Class (lift)
+import Control.Monad.Trans.Except (runExceptT, throwE)
+import Control.Monad.Trans.Maybe (runMaybeT)
 import Control.Optics.Linear qualified as LinOpt
 import Data.Alloc.Linearly.Token (besides, linearly)
 import Data.Array.Mutable.Linear qualified as LA
 import Data.Array.Mutable.Linear.Unboxed qualified as LUA
+import Data.Bifunctor qualified as Bi
 import Data.Bifunctor.Linear qualified as BiL
 import Data.Foldable qualified as Foldable
 import Data.Function (fix)
@@ -559,7 +563,7 @@ watch cid =
       S.%= \ws ->
         LA.unsafeGet (fromEnum v) ws & \(Ur !xs, ws) ->
           let !xs' = IS.insert (unClauseId cid) xs
-           in LA.set (fromEnum v) xs' ws
+           in LA.unsafeSet (fromEnum v) xs' ws
 
 unwatch :: ClauseId -> VarId %1 -> S.State (CDCLState s) ()
 unwatch cid =
@@ -569,7 +573,7 @@ unwatch cid =
       S.%= \ws ->
         LA.unsafeGet (fromEnum v) ws & \(Ur !xs, ws) ->
           let !xs' = IS.delete (unClauseId cid) xs
-           in LA.set (fromEnum v) xs' ws
+           in LA.unsafeSet (fromEnum v) xs' ws
 
 assertLit :: (HasCallStack) => ClauseId -> Lit -> S.State (CDCLState s) AssertionResult
 assertLit ante lit = S.do
@@ -730,41 +734,33 @@ findNextAvailable w cid = S.do
   Ur wlits <- S.zoom clausesL $ getWatchedLits cid
   let origVar = litVar $ watchLitOf w wlits
 
-  Ur (mSat, mUndet) <- S.uses clausesAndValsL \(clauses, vals) ->
-    withClauseLits
-      cid
-      clauses
-      ( \slc ->
-          LUV.sizeS slc & \(Ur n, slc) ->
-            fix
-              -- Invariant: At least one of mSat and mUndet
-              -- must be Nothing when passed to go.
-              ( \go !i !mSat !mUndet !slc !vals ->
-                  if i == n
-                    then ((Ur (mSat, mUndet), vals), slc)
-                    else
-                      if i `elemWatchLitIdx` widx
-                        then go (i + 1) mSat mUndet slc vals
-                        else
-                          LUV.unsafeGetS i slc & \(Ur l, slc) ->
-                            S.runState (evalLit l) vals & \(v, vals) ->
-                              move v & \(Ur v) ->
-                                let (mSat', mUndet') = case v of
-                                      Nothing -> (St.Nothing, St.Just i)
-                                      Just False -> (St.Nothing, St.Nothing)
-                                      Just True -> (St.Just i, St.Nothing)
-                                 in (mSat <|>: mSat', mUndet <|>: mUndet') & \(mSat, mUndet) ->
-                                      if St.isJust mSat && St.isJust mUndet
-                                        then ((Ur (mSat, mUndet), vals), slc)
-                                        else go (i + 1) mSat mUndet slc vals
-              )
-              0
-              St.Nothing
-              St.Nothing
-              slc
-              vals
-      )
-      & \((a, vals), clauses) -> (a, (clauses, vals))
+  Ur lits <- S.zoom clausesL $ getClauseLits cid
+  Ur (mSat :!: mUndet) <-
+    S.zoom valuationL
+      $ runUrT
+      $ fmap (P.either P.id P.id)
+      $ runExceptT
+      $ U.ifoldM'
+        -- Loop invariant: both mSat and mUndet must be Nothing
+        ( \(mSat :!: mUndet) !i !l -> do
+            if i `elemWatchLitIdx` widx
+              then pure (mSat :!: mUndet)
+              else do
+                !v <- lift $ liftUrT (evalLit l)
+                let (!mSat', !mUndet') =
+                      Bi.bimap
+                        (mSat <|>:)
+                        (mUndet <|>:)
+                        case v of
+                          Nothing -> (St.Nothing, St.Just i)
+                          Just False -> (St.Nothing, St.Nothing)
+                          Just True -> (St.Just i, St.Nothing)
+                if St.isJust mSat' && St.isJust mUndet'
+                  then throwE (mSat' :!: mUndet')
+                  else pure (mSat' :!: mUndet')
+        )
+        (St.Nothing :!: St.Nothing)
+        lits
 
   case mSat of
     St.Just i -> S.do
@@ -790,29 +786,18 @@ evalClause cid = S.do
   lvl >= 0 & \case
     True -> S.pure $ Just True
     False -> S.do
-      S.uses clausesAndValsL \(clauses, vals) ->
-        withClauseLits
-          cid
-          clauses
-          ( \lits ->
-              LUV.sizeS lits & \(Ur n, lits) ->
-                fix
-                  ( \go !i !anyNothing !lits !vals ->
-                      if i == n
-                        then
-                          anyNothing & \case
-                            True -> ((Nothing, vals), lits)
-                            False -> ((Just False, vals), lits)
-                        else
-                          LUV.unsafeGetS i lits & \(Ur l, lits) ->
-                            S.runState (evalLit l) vals & \case
-                              (Nothing, vals) -> go (i + 1) True lits vals
-                              (Just False, vals) -> go (i + 1) anyNothing lits vals
-                              (Just True, vals) -> ((Just True, vals), lits)
-                  )
-                  0
-                  False
-                  lits
-                  vals
+      Ur lits <- S.zoom clausesL $ getClauseLits cid
+      S.zoom valuationL
+        $ D.fmap unur
+        $ runUrT
+        $ fmap (P.fromMaybe (Just True))
+        $ runMaybeT
+        $ U.foldM'
+          ( \ !anyNothing !l ->
+              lift (liftUrT $ evalLit l) >>= \case
+                Nothing -> pure Nothing
+                Just False -> pure anyNothing
+                Just True -> empty
           )
-          & \((ans, vals), clauses) -> (ans, (clauses, vals))
+          (Just False)
+          lits
