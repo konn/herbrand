@@ -643,7 +643,7 @@ findUnsatVar :: S.State (VSIDSState s) (Ur (Maybe VarId))
 findUnsatVar = S.state \(VSIDSState unsat sat lbdEma exc) ->
   PSQ.minView unsat & \case
     Just (k, p, (), unsat) ->
-      ( Ur $ Just $ fromIntegral k
+      ( Ur (Just $ fromIntegral k)
       , VSIDSState unsat (PSQ.unsafeInsertNew k p () sat) lbdEma exc
       )
     Nothing -> (Ur Nothing, VSIDSState unsat sat lbdEma exc)

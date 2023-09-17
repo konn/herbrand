@@ -309,7 +309,7 @@ findUIP1 !lit !curCls
       case ml of
         Ur (Just (l', decLvl)) -> S.do
           -- Already Unit clause. Learn it!
-          S.pure $ Just $ Ur $ mkLearntClause decLvl l' curCls
+          S.pure $ Just $ Ur (mkLearntClause decLvl l' curCls)
         Ur Nothing -> S.do
           -- Not a UIP. resolve.
           Ur v <- S.uses valuationL $ LUA.unsafeGet $ fromVarId $ litVar lit
@@ -402,7 +402,7 @@ checkUnitClauseLit ls = S.do
       (ULS 0 St.Nothing 0 (-1))
       ls
   S.pure $ case lcnd of
-    (ULS 1 mx _ pu) | pu >= 0 -> Ur $ (,pu) <$> St.toLazy mx
+    (ULS 1 mx _ pu) | pu >= 0 -> Ur ((,pu) <$> St.toLazy mx)
     _ -> Ur Nothing
 
 foldlLin' :: (Foldable.Foldable t) => b %1 -> (b %1 -> Ur x -> a -> (Ur x, b)) -> x -> t a -> (Ur x, b)
