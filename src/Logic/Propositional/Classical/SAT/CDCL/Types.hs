@@ -820,7 +820,7 @@ toCDCLState (CNF cls) lin =
       !watches0 = force $ V.toList $ V.update (V.replicate numVars mempty) (V.fromList $ Map.toList upds)
    in case () of
         _
-          | truth -> lin `lseq` Left (Ur $ Satisfiable ())
+          | truth -> lin `lseq` Left (Ur (Satisfiable ()))
           | contradicting -> lin `lseq` Left (Ur Unsat)
         _ ->
           besides lin (`LUV.fromListL` [0]) PL.& \(steps, lin) ->
