@@ -58,7 +58,7 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   findUnsatVar,
   decayVarPriosM,
   VarQueue,
-  VSIDSState (.., MkVSIDSState, unsatVarQ, satVarQ, lbdEma, lbdEmaExcceded),
+  VSIDSState (..),
   numInitialClausesL,
   runClausesValsM,
   unsatisfiedsL,
@@ -123,7 +123,6 @@ import Data.Alloc.Linearly.Token.Unsafe (HasLinearWitness)
 import Data.Array.Mutable.Linear.Extra qualified as LA
 import Data.Array.Mutable.Linear.Unboxed qualified as LUA
 import Data.Array.Polarized.Push.Extra qualified as Push
-import Data.Bifunctor qualified as Bi
 import Data.Bifunctor.Linear qualified as BiL
 import Data.Bit (Bit (..))
 import Data.Bits (popCount, xor, (.&.), (.|.))
@@ -143,6 +142,7 @@ import Data.Monoid.Linear.Orphans ()
 import Data.Ord (Down (..))
 import Data.Proxy (Proxy (..))
 import Data.Reflection (Reifies, reflect)
+import Data.Semigroup (Max (..))
 import Data.Set qualified as Set
 import Data.Set.Mutable.Linear.Extra qualified as LSet
 import Data.Strict.Tuple (Pair (..))
@@ -538,6 +538,8 @@ calcLBDL =
     $ L.generalize
       (L.handles L.folded $ Set.size <$> L.set)
 
+type VarActivityIncr = Double
+
 data VSIDSState s where
   VSIDSState ::
     -- | Unsatisfieds
@@ -548,19 +550,16 @@ data VSIDSState s where
     {-# UNPACK #-} !LBD ->
     -- | True if the last learnt clause exceeds LBD
     !Bool ->
+    -- | Current variable activity increment
+    !VarActivityIncr ->
     VSIDSState s
-
-pattern MkVSIDSState :: VarQueue -> VarQueue -> LBD -> Bool -> VSIDSState s
-pattern MkVSIDSState {unsatVarQ, satVarQ, lbdEma, lbdEmaExcceded} = VSIDSState unsatVarQ satVarQ lbdEma lbdEmaExcceded
-
-{-# COMPLETE MkVSIDSState #-}
 
 deriving via L.AsMovable (VSIDSState s) instance PL.Consumable (VSIDSState s)
 
 deriving via L.AsMovable (VSIDSState s) instance PL.Dupable (VSIDSState s)
 
 instance PL.Movable (VSIDSState s) where
-  move (VSIDSState ql qr spec x) = Ur (VSIDSState ql qr spec x)
+  move (VSIDSState ql qr spec x l) = Ur (VSIDSState ql qr spec x l)
 
 data CDCLState s where
   CDCLState ::
@@ -609,75 +608,90 @@ pushClause = \Clause {..} -> S.do
   Ur !lbd <- S.zoom valuationL (Ur.runUrT (L.foldOverM (foldring U.foldr) calcLBDL lits))
   vsidsStateL
     S.%= case decayFactor $ reflect @s Proxy of
-      ConstantFactor {} -> \(VSIDSState unsats sats ema x) ->
-        VSIDSState
-          (U.foldr incrementVar unsats lits)
-          (U.foldr incrementVar sats lits)
-          ema
-          x
-      Adaptive {..} -> \(VSIDSState unsats sats ema _) ->
-        let ema' = ema * lbdEmaDecayFactor + fromIntegral lbd * (1 - lbdEmaDecayFactor)
-         in VSIDSState
-              (U.foldr incrementVar unsats lits)
-              (U.foldr incrementVar sats lits)
-              ema'
-              (fromIntegral lbd >= ema')
-  S.pure ()
+      ConstantFactor {} -> \(VSIDSState unsats sats ema x l) ->
+        let (unsats' :!: mq1) = insertsQ l unsats lits
+            (sats' :!: mq2) = insertsQ l sats lits
+            !mq = mq1 <> mq2
+         in adjustVarActivities
+              mq
+              (VSIDSState unsats' sats' ema x l)
+      Adaptive {..} -> \(VSIDSState unsats sats ema _ l) ->
+        let (unsats' :!: mq1) = insertsQ l unsats lits
+            (sats' :!: mq2) = insertsQ l sats lits
+            !mq = mq1 <> mq2
+            !ema' = ema * lbdEmaDecayFactor + fromIntegral lbd * (1 - lbdEmaDecayFactor)
+         in adjustVarActivities mq
+              $ VSIDSState unsats' sats' ema' (fromIntegral lbd >= ema') l
+  where
+    insertsQ !l !q0 =
+      U.foldr'
+        ( \lit (q :!: mMax) ->
+            let (mp, q') = incrementVar l lit q
+             in (q' :!: (Max <$> mp) <> mMax)
+        )
+        (q0 :!: Nothing)
 
--- TODO: re-implement decay as the increasing (and uniform decay) on increment factor ala MiniSAT
 decayVarPriosM :: forall s. (Reifies s CDCLOptions) => S.State (VSIDSState s) ()
 {-# INLINE decayVarPriosM #-}
-decayVarPriosM = S.modify \(VSIDSState ls qs spec exc) ->
+decayVarPriosM = S.modify \(VSIDSState ls qs spec exc l) ->
   case decayFactor (reflect $ Proxy @s) of
-    ConstantFactor alpha -> VSIDSState (decayVars alpha ls) (decayVars alpha qs) spec exc
+    ConstantFactor alpha -> VSIDSState ls qs spec exc (l / alpha)
     Adaptive {..}
-      | exc -> VSIDSState (decayVars highLBDDecay ls) (decayVars highLBDDecay qs) spec exc
-      | otherwise -> VSIDSState (decayVars lowLBDDecay ls) (decayVars lowLBDDecay qs) spec exc
+      | exc -> VSIDSState ls qs spec exc (l / highLBDDecay)
+      | otherwise -> VSIDSState ls qs spec exc (l / lowLBDDecay)
 
-decayVars :: Double -> VarQueue -> VarQueue
-{-# INLINE decayVars #-}
-decayVars = \alpha -> PSQ.unsafeMapMonotonic \_ (Down p) v -> (Down $ p * alpha, v)
+multiplyVarActs :: Double -> VarQueue -> VarQueue
+{-# INLINE multiplyVarActs #-}
+multiplyVarActs = \alpha -> PSQ.unsafeMapMonotonic \_ (Down p) v -> (Down $ p * alpha, v)
 
 findUnsatVar :: S.State (VSIDSState s) (Ur (Maybe VarId))
-findUnsatVar = S.state \(VSIDSState unsat sat lbdEma exc) ->
+findUnsatVar = S.state \(VSIDSState unsat sat lbdEma exc l) ->
   PSQ.minView unsat & \case
     Just (k, p, (), unsat) ->
       ( Ur (Just $ fromIntegral k)
-      , VSIDSState unsat (PSQ.unsafeInsertNew k p () sat) lbdEma exc
+      , VSIDSState unsat (PSQ.unsafeInsertNew k p () sat) lbdEma exc l
       )
-    Nothing -> (Ur Nothing, VSIDSState unsat sat lbdEma exc)
+    Nothing -> (Ur Nothing, VSIDSState unsat sat lbdEma exc l)
 
 incrementVarM :: Lit -> S.State (VSIDSState s) ()
-incrementVarM l = S.modify \(VSIDSState unsats sats lbdEma exc) ->
-  VSIDSState
-    (incrementVar l unsats)
-    (incrementVar l sats)
-    lbdEma
-    exc
+incrementVarM lit = S.modify \(VSIDSState unsats sats lbdEma exc l) ->
+  let (mq, uns') = incrementVar l lit unsats
+      (mq', sat') = incrementVar l lit sats
+   in adjustVarActivities ((Max <$> mq) <> (Max <$> mq'))
+        $ VSIDSState uns' sat' lbdEma exc l
 
-incrementVar :: Lit -> VarQueue -> VarQueue
-incrementVar =
-  fmap snd
-    . PSQ.alter (((),) . fmap (Bi.first (+ 1)))
+adjustVarActivities :: Maybe (Max Double) -> VSIDSState s -> VSIDSState s
+adjustVarActivities (Just (Max p)) | p >= 1e100 =
+  \(VSIDSState uns sat lbdEma exc l) ->
+    VSIDSState (multiplyVarActs 1e-100 uns) (multiplyVarActs 1e-100 sat) lbdEma exc (l * 1e-100)
+adjustVarActivities _ = id
+
+incrementVar :: Double -> Lit -> VarQueue -> (Maybe Double, VarQueue)
+incrementVar l =
+  PSQ.alter
+    ( maybe (Nothing, Nothing) \(p, ()) ->
+        let !p' = p + Down l
+         in (Just $ getDown p', Just (p', ()))
+    )
     . fromIntegral
     . unVarId
     . litVar
 
 moveToSatQueue :: VarId -> VSIDSState s %1 -> VSIDSState s
-moveToSatQueue vid = \(VSIDSState unsats sats lbdEma exc) ->
+moveToSatQueue vid = \(VSIDSState unsats sats lbdEma exc l) ->
   case PSQ.deleteView vidInt unsats of
-    Nothing -> VSIDSState unsats sats lbdEma exc
+    Nothing -> VSIDSState unsats sats lbdEma exc l
     Just (p, (), unsats) ->
-      VSIDSState unsats (PSQ.unsafeInsertNew vidInt p () sats) lbdEma exc
+      VSIDSState unsats (PSQ.unsafeInsertNew vidInt p () sats) lbdEma exc l
   where
     !vidInt = fromIntegral $ unVarId vid
 
 moveToUnsatQueue :: VarId -> VSIDSState s %1 -> VSIDSState s
-moveToUnsatQueue vid = \(VSIDSState unsats sats lbdEma exc) ->
+moveToUnsatQueue vid = \(VSIDSState unsats sats lbdEma exc l) ->
   case PSQ.deleteView vidInt sats of
-    Nothing -> VSIDSState unsats sats lbdEma exc
+    Nothing -> VSIDSState unsats sats lbdEma exc l
     Just (p, (), sats) ->
-      VSIDSState (PSQ.unsafeInsertNew vidInt p () unsats) sats lbdEma exc
+      VSIDSState (PSQ.unsafeInsertNew vidInt p () unsats) sats lbdEma exc l
   where
     !vidInt = fromIntegral $ unVarId vid
 
@@ -754,13 +768,13 @@ vsidsStateL = LinLens.lens \(CDCLState norig ss cs ws vs vids varQ rs) ->
 
 unsatVarQL :: LinLens.Lens' (CDCLState s) (Ur VarQueue)
 unsatVarQL =
-  vsidsStateL LinLens..> LinLens.lens \(VSIDSState qs rs x exc) ->
-    (Ur qs, \(Ur qs) -> VSIDSState qs rs x exc)
+  vsidsStateL LinLens..> LinLens.lens \(VSIDSState qs rs x exc l) ->
+    (Ur qs, \(Ur qs) -> VSIDSState qs rs x exc l)
 
 satVarQL :: LinLens.Lens' (CDCLState s) (Ur VarQueue)
 satVarQL =
-  vsidsStateL LinLens..> LinLens.lens \(VSIDSState qs rs x exc) ->
-    (Ur rs, \(Ur rs) -> VSIDSState qs rs x exc)
+  vsidsStateL LinLens..> LinLens.lens \(VSIDSState qs rs x exc l) ->
+    (Ur rs, \(Ur rs) -> VSIDSState qs rs x exc l)
 
 unsatisfiedsL :: LinLens.Lens' (CDCLState s) (LSet.Set ClauseId)
 {-# INLINE unsatisfiedsL #-}
@@ -815,6 +829,7 @@ toCDCLState (CNF cls) lin =
           PSQ.empty
           0
           True
+          1.0
       (numOrigCls :!: upds, cls'') = mapAccumL buildClause (0 :!: Map.empty) cls'
       !watches0 = force $ V.toList $ V.update (V.replicate numVars mempty) (V.fromList $ Map.toList upds)
    in case () of
@@ -1075,7 +1090,7 @@ tryRestart = case restartStrategy $ reflect @s Proxy of
         valuationL S.%= LUA.map (const Indefinite)
         restartStateL S.%= nextRestartState strat
         (clausesL LinLens..> clauseBodiesL) S.%= PL.flip LUV.map \cf -> cf {satAt = -1}
-        vsidsStateL S.%= \(VSIDSState unsats sats lbd p) ->
+        vsidsStateL S.%= \(VSIDSState unsats sats lbd p i) ->
           VSIDSState
             ( Unsafe.toLinear
                 (PSQ.fold' (\l p () x -> PSQ.insert l p () x))
@@ -1085,6 +1100,7 @@ tryRestart = case restartStrategy $ reflect @s Proxy of
             PSQ.empty
             lbd
             p
+            i
         steps0 <- S.state \s -> besides s (`LUV.fromListL` [0])
         stepsL S..= steps0
         Ur numCls <- getNumClauses
