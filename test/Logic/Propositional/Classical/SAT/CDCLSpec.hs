@@ -40,11 +40,12 @@ import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
 cdclOptions :: [(String, CDCLOptions)]
 cdclOptions =
-  [ ( intercalate "; " [decayLabel, vsidsType, restLabel]
+  [ ( intercalate "; " [decayLabel, vsidsType, restLabel, claDecayLabel]
     , CDCLOptions
         { restartStrategy = rest
-        , decayFactor = decayFac
+        , variableDecayFactor = decayFac
         , activateResolved = mVSIDS
+        , clauseDecayFactor = claDecayFac
         }
     )
   | (restLabel, rest) <-
@@ -58,6 +59,10 @@ cdclOptions =
       | f <- [0.5, 0.75, 0.95]
       ]
         ++ [("Adaptive Decay (default)", defaultAdaptiveFactor)]
+  , (claDecayLabel, claDecayFac) <-
+      [ (maybe "No Clause Decay" (("Clause Decay " ++) . show) f, f)
+      | f <- [Nothing, Just 0.999, Just 0.99, Just 0.9]
+      ]
   ]
 
 test_solve :: TestTree

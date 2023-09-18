@@ -118,7 +118,7 @@ main = do
         solveWith
           defaultOptions
             { restartStrategy = defaultLubyRestart
-            , decayFactor = defaultAdaptiveFactor
+            , variableDecayFactor = defaultAdaptiveFactor
             }
           problem9x9_2
   case ans of

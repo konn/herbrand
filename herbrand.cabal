@@ -90,6 +90,7 @@ library
     , trie-simple
     , unordered-containers
     , vector
+    , vector-algorithms
     , vector-th-unbox
   default-language: Haskell2010
 

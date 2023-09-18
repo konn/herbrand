@@ -80,6 +80,7 @@ library:
   - linear-base
   - linear-generics
   - vector-th-unbox
+  - vector-algorithms
 
 internal-libraries:
   herbrand-bench:

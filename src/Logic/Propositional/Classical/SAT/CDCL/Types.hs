@@ -40,6 +40,9 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   stepsL,
   pushClause,
   getClauseLits,
+  decayClauseActivity,
+  bumpClauseActivity,
+  reduceLearntClause,
   getNumClauses,
   setWatchVar,
   setSatisfiedLevel,
@@ -133,24 +136,30 @@ import Data.Foldable qualified as F
 import Data.Functor.Linear qualified as D
 import Data.Generics.Labels ()
 import Data.Hashable (Hashable)
+import Data.Int (Int64)
 import Data.IntPSQ qualified as PSQ
 import Data.IntSet (IntSet)
 import Data.IntSet qualified as IS
 import Data.List (mapAccumL)
+import Data.List qualified as List
+import Data.List.Linear qualified as PList
 import Data.Map.Strict qualified as Map
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Monoid (Any (..), Ap (..), Sum (..))
 import Data.Monoid.Linear.Orphans ()
-import Data.Ord (Down (..))
+import Data.Ord (Down (..), comparing)
 import Data.Proxy (Proxy (..))
 import Data.Reflection (Reifies, reflect)
 import Data.Set qualified as Set
 import Data.Set.Mutable.Linear.Extra qualified as LSet
 import Data.Strict.Tuple (Pair (..))
+import Data.Strict.Tuple qualified as St
 import Data.Unrestricted.Linear (Ur (..), UrT (..))
 import Data.Unrestricted.Linear qualified as L
 import Data.Unrestricted.Linear qualified as Ur
 import Data.Unrestricted.Linear.Orphans ()
 import Data.Vector qualified as V
+import Data.Vector.Algorithms.Intro qualified as Intro
 import Data.Vector.Generic qualified as G
 import Data.Vector.Generic.Mutable qualified as MG
 import Data.Vector.Mutable.Linear.Extra qualified as LV
@@ -165,6 +174,7 @@ import Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
 import Math.NumberTheory.Logarithms (wordLog2')
 import Prelude.Linear (lseq, (&))
 import Prelude.Linear qualified as PL
+import Unsafe.Coerce (unsafeCoerce)
 import Unsafe.Linear qualified as Unsafe
 
 type RunCount = Word
@@ -273,18 +283,20 @@ defaultLubyRestart =
     }
 
 data CDCLOptions = CDCLOptions
-  { decayFactor :: !VariableSelection
+  { variableDecayFactor :: !VariableSelection
   , activateResolved :: !Bool
   , restartStrategy :: !RestartStrategy
+  , clauseDecayFactor :: !(Maybe Double)
   }
   deriving (Show, Eq, Ord, Generic)
 
 defaultOptions :: CDCLOptions
 defaultOptions =
   CDCLOptions
-    { decayFactor = defaultDecayFactor
+    { variableDecayFactor = defaultDecayFactor
     , activateResolved = True
     , restartStrategy = NoRestart
+    , clauseDecayFactor = Nothing
     }
 
 newtype VarId = VarId {unVarId :: Word}
@@ -434,18 +446,19 @@ type WatchMap = LA.Array IntSet
 data ClauseBody = ClauseBody
   { satAt :: {-# UNPACK #-} !DecideLevel
   , wat1, wat2 :: {-# UNPACK #-} !Index
+  , activity :: {-# UNPACK #-} !Double
   }
   deriving (Show, Eq, Ord, Generic)
 
 data instance U.Vector ClauseBody
   = V_CB
       {-# UNPACK #-} !Int
-      {-# UNPACK #-} !(U.Vector Int)
+      {-# UNPACK #-} !(U.Vector Int64)
 
 data instance U.MVector s ClauseBody
   = MV_CB
       {-# UNPACK #-} !Int
-      {-# UNPACK #-} !(U.MVector s Int)
+      {-# UNPACK #-} !(U.MVector s Int64)
 
 instance U.Unbox ClauseBody
 
@@ -458,12 +471,13 @@ instance G.Vector U.Vector ClauseBody where
   basicLength = \(V_CB l _) -> l
   {-# INLINE basicLength #-}
   basicUnsafeSlice off len = \(V_CB _ v) ->
-    V_CB len (G.basicUnsafeSlice (off * 3) (len * 3) v)
+    V_CB len (G.basicUnsafeSlice (off * 4) (len * 4) v)
   {-# INLINE basicUnsafeSlice #-}
   basicUnsafeIndexM = \(V_CB _ v) i -> do
-    satAt <- DecideLevel <$> G.basicUnsafeIndexM v (3 * i)
-    wat1 <- G.basicUnsafeIndexM v (3 * i + 1)
-    wat2 <- G.basicUnsafeIndexM v (3 * i + 2)
+    satAt <- DecideLevel . fromIntegral <$> G.basicUnsafeIndexM v (4 * i)
+    wat1 <- fromIntegral <$> G.basicUnsafeIndexM v (4 * i + 1)
+    wat2 <- fromIntegral <$> G.basicUnsafeIndexM v (4 * i + 2)
+    activity <- G.basicUnsafeIndexM (asDoubleUVector v) (4 * i + 3)
     pure $! ClauseBody {..}
   {-# INLINE basicUnsafeIndexM #-}
   basicUnsafeCopy = \(MV_CB _ mv) (V_CB _ v) ->
@@ -474,24 +488,26 @@ instance MG.MVector U.MVector ClauseBody where
   basicLength = \(MV_CB l _) -> l
   {-# INLINE basicLength #-}
   basicUnsafeSlice off len = \(MV_CB _ v) ->
-    MV_CB len (MG.basicUnsafeSlice (off * 3) (len * 3) v)
+    MV_CB len (MG.basicUnsafeSlice (off * 4) (len * 4) v)
   {-# INLINE basicUnsafeSlice #-}
   basicOverlaps = \(MV_CB _ l) (MV_CB _ r) -> MG.basicOverlaps l r
   {-# INLINE basicOverlaps #-}
-  basicUnsafeNew l = MV_CB l <$> MG.unsafeNew (3 * l)
+  basicUnsafeNew l = MV_CB l <$> MG.unsafeNew (4 * l)
   {-# INLINE basicUnsafeNew #-}
   basicInitialize (MV_CB _ l) = MG.basicInitialize l
   {-# INLINE basicInitialize #-}
   basicUnsafeRead (MV_CB _ v) i = do
-    satAt <- DecideLevel <$> MG.basicUnsafeRead v (3 * i)
-    wat1 <- MG.basicUnsafeRead v (3 * i + 1)
-    wat2 <- MG.basicUnsafeRead v (3 * i + 2)
+    satAt <- DecideLevel . fromIntegral <$> MG.basicUnsafeRead v (4 * i)
+    wat1 <- fromIntegral <$> MG.basicUnsafeRead v (4 * i + 1)
+    wat2 <- fromIntegral <$> MG.basicUnsafeRead v (4 * i + 2)
+    activity <- MG.basicUnsafeRead (asDoubleMUVector v) (4 * i + 3)
     pure $! ClauseBody {..}
   {-# INLINE basicUnsafeRead #-}
   basicUnsafeWrite (MV_CB _ v) i ClauseBody {..} = do
-    MG.basicUnsafeWrite v (3 * i) $ unDecideLevel satAt
-    MG.basicUnsafeWrite v (3 * i + 1) wat1
-    MG.basicUnsafeWrite v (3 * i + 2) wat2
+    MG.basicUnsafeWrite v (4 * i) $ fromIntegral $ unDecideLevel satAt
+    MG.basicUnsafeWrite v (4 * i + 1) $ fromIntegral wat1
+    MG.basicUnsafeWrite v (4 * i + 2) $ fromIntegral wat2
+    MG.basicUnsafeWrite (asDoubleMUVector v) (4 * i + 3) activity
   {-# INLINE basicUnsafeWrite #-}
   basicClear (MV_CB _ l) = MG.basicClear l
   {-# INLINE basicClear #-}
@@ -500,21 +516,45 @@ instance MG.MVector U.MVector ClauseBody where
   basicUnsafeMove (MV_CB _ dst) (MV_CB _ src) = MG.basicUnsafeMove dst src
   {-# INLINE basicUnsafeMove #-}
   basicUnsafeGrow = \(MV_CB l mv) growth ->
-    MV_CB (l + growth) <$> MG.basicUnsafeGrow mv (3 * growth)
+    MV_CB (l + growth) <$> MG.basicUnsafeGrow mv (4 * growth)
 
-data Clauses where
+asDoubleMUVector :: U.MVector s Int64 -> U.MVector s Double
+{-# INLINE asDoubleMUVector #-}
+asDoubleMUVector = unsafeCoerce
+
+{-
+Equivalent to:
+\(U.MV_Int (PV.MVector l off ba)) -> U.MV_Double (PV.MVector l off ba)
+-}
+
+asDoubleUVector :: U.Vector Int64 -> U.Vector Double
+{-# INLINE asDoubleUVector #-}
+asDoubleUVector = unsafeCoerce
+
+{-
+Equivalent to:
+\(U.V_Int (PV.Vector l off ba)) -> U.V_Double (PV.Vector l off ba)
+-}
+
+type ClauseIncFactor = Double
+
+type MaxLearntClause = Double
+
+data Clauses s where
   Clauses ::
     {-# UNPACK #-} !(LV.Vector (U.Vector Lit)) %1 ->
     {-# UNPACK #-} !(LUV.Vector ClauseBody) %1 ->
-    Clauses
+    {-# UNPACK #-} !ClauseIncFactor ->
+    {-# UNPACK #-} !MaxLearntClause ->
+    Clauses s
 
-instance PL.Consumable Clauses where
-  consume (Clauses lits bs) = lits `lseq` bs `lseq` ()
+instance PL.Consumable (Clauses s) where
+  consume (Clauses lits bs _d _i) = lits `lseq` bs `lseq` ()
 
-instance PL.Dupable Clauses where
-  dup2 (Clauses lits bs) =
+instance PL.Dupable (Clauses s) where
+  dup2 (Clauses lits bs d i) =
     PL.dup2 (lits, bs) & \((lits, bs), (lits', bs')) ->
-      (Clauses lits bs, Clauses lits' bs')
+      (Clauses lits bs d i, Clauses lits' bs' d i)
 
 type VarQueue = PSQ.IntPSQ (Down Double) ()
 
@@ -569,7 +609,7 @@ data CDCLState s where
     -- | Level-wise maximum steps
     {-# UNPACK #-} !(LUV.Vector Step) %1 ->
     -- | Clauses
-    {-# UNPACK #-} !Clauses %1 ->
+    {-# UNPACK #-} !(Clauses s) %1 ->
     -- | Watches
     {-# UNPACK #-} !WatchMap %1 ->
     -- | Valuations
@@ -583,32 +623,38 @@ data CDCLState s where
     CDCLState s
   deriving anyclass (HasLinearWitness)
 
-clausesL :: LinLens.Lens' (CDCLState s) Clauses
+clausesL :: LinLens.Lens' (CDCLState s) (Clauses s)
 {-# INLINE clausesL #-}
 clausesL = LinLens.lens \(CDCLState numOrig ss cs ws vs vids varQ rs) ->
   (cs, \cs -> CDCLState numOrig ss cs ws vs vids varQ rs)
 
-clauseBodiesL :: LinLens.Lens' Clauses (LUV.Vector ClauseBody)
-clauseBodiesL = LinLens.lens \(Clauses lits bodies) ->
-  (bodies, \bodies -> Clauses lits bodies)
+clauseBodiesL :: LinLens.Lens' (Clauses s) (LUV.Vector ClauseBody)
+clauseBodiesL = LinLens.lens \(Clauses lits bodies d i) ->
+  (bodies, \bodies -> Clauses lits bodies d i)
 
 pushClause :: forall s. (Reifies s CDCLOptions) => Clause -> S.State (CDCLState s) ()
 {-# INLINE pushClause #-}
 {- HLINT ignore pushClause "Redundant lambda" -}
 pushClause = \Clause {..} -> S.do
-  clausesL S.%= \(Clauses litss bs) ->
-    LUV.push
-      ClauseBody
-        { satAt = satisfiedAt
-        , wat1 = watched1
-        , wat2 = watched2
-        }
-      bs
-      & \bs ->
-        LV.push lits litss & \litss -> Clauses litss bs
+  S.zoom clausesL S.do
+    Ur cid' <- S.state \(Clauses litss bs d i) ->
+      LUV.push
+        ClauseBody
+          { satAt = satisfiedAt
+          , wat1 = watched1
+          , wat2 = watched2
+          , activity = 0
+          }
+        bs
+        & \bs ->
+          LUV.size bs
+            & \(Ur nIdx, bs) ->
+              LV.push lits litss
+                & \litss -> (Ur (ClauseId (nIdx - 1)), Clauses litss bs d i)
+    bumpClauseActivity cid'
   Ur !lbd <- S.zoom valuationL (Ur.runUrT (L.foldOverM (foldring U.foldr) calcLBDL lits))
   vsidsStateL
-    S.%= case decayFactor $ reflect @s Proxy of
+    S.%= case variableDecayFactor $ reflect @s Proxy of
       ConstantFactor {} -> \(VSIDSState unsats sats ema x) ->
         VSIDSState
           (U.foldr incrementVar unsats lits)
@@ -622,13 +668,12 @@ pushClause = \Clause {..} -> S.do
               (U.foldr incrementVar sats lits)
               ema'
               (fromIntegral lbd >= ema')
-  S.pure ()
 
 -- TODO: re-implement decay as the increasing (and uniform decay) on increment factor ala MiniSAT
 decayVarPriosM :: forall s. (Reifies s CDCLOptions) => S.State (VSIDSState s) ()
 {-# INLINE decayVarPriosM #-}
 decayVarPriosM = S.modify \(VSIDSState ls qs spec exc) ->
-  case decayFactor (reflect $ Proxy @s) of
+  case variableDecayFactor (reflect $ Proxy @s) of
     ConstantFactor alpha -> VSIDSState (decayVars alpha ls) (decayVars alpha qs) spec exc
     Adaptive {..}
       | exc -> VSIDSState (decayVars highLBDDecay ls) (decayVars highLBDDecay qs) spec exc
@@ -681,40 +726,29 @@ moveToUnsatQueue vid = \(VSIDSState unsats sats lbdEma exc) ->
   where
     !vidInt = fromIntegral $ unVarId vid
 
-getClauseLits :: ClauseId -> S.State Clauses (Ur (U.Vector Lit))
+getClauseLits :: ClauseId -> S.State (Clauses s) (Ur (U.Vector Lit))
 {-# INLINE getClauseLits #-}
-getClauseLits i = S.state \(Clauses litss bs) ->
-  LV.unsafeGet (unClauseId i) litss & \(lits, litss) ->
-    (lits, Clauses litss bs)
+getClauseLits cid = S.state \(Clauses litss bs d i) ->
+  LV.unsafeGet (unClauseId cid) litss & \(lits, litss) ->
+    (lits, Clauses litss bs d i)
 
 withClauseLits ::
   ClauseId ->
-  Clauses %1 ->
+  Clauses s %1 ->
   (U.Vector Lit -> b) %1 ->
-  (b, Clauses)
+  (b, Clauses s)
 {-# INLINE withClauseLits #-}
 withClauseLits i c f =
   S.runState (getClauseLits i) c & \(Ur lits, c) ->
     (f lits, c)
 
-foldClauseLits :: L.Fold Lit b -> ClauseId -> S.State Clauses (Ur b)
+foldClauseLits :: L.Fold Lit b -> ClauseId -> S.State (Clauses s) (Ur b)
 {-# INLINE foldClauseLits #-}
 foldClauseLits f cid =
   Ur.lift (L.purely (\step ini out -> out . U.foldl step ini) f)
     D.<$> getClauseLits cid
 
-{-
-ifoldClauseLitsM :: (C.Monad m) => L.FoldM (UrT m) (Int, Lit) b -> ClauseId -> S.StateT Clauses m (Ur b)
-{-# INLINE ifoldClauseLitsM #-}
-ifoldClauseLitsM f cid =
-  Ur.lift
-    ( L.impurely
-        (\step ini out -> out . U.ifoldl (curry . step) ini)
-        f
-    )
-    C.=<< getClauseLits cid
- -}
-runClausesValsM :: S.StateT Clauses (S.State Valuation) a %1 -> S.State (CDCLState s) a
+runClausesValsM :: S.StateT (Clauses s) (S.State Valuation) a %1 -> S.State (CDCLState s) a
 {-# INLINE runClausesValsM #-}
 {- HLINT ignore runClausesValsM "Redundant lambda" -}
 runClausesValsM = \act -> S.uses clausesAndValsL \(clauses, vals) ->
@@ -723,11 +757,182 @@ runClausesValsM = \act -> S.uses clausesAndValsL \(clauses, vals) ->
     vals
     & \((ans, clauses), val) -> (ans, (clauses, val))
 
+-- | Unformly decaying activity of clauses. Implemented by bumping up increasing factor.
+decayClauseActivity :: forall s. (Reifies s CDCLOptions) => S.State (Clauses s) ()
+decayClauseActivity = S.modify \(Clauses litss bs d i) ->
+  clauseDecayFactor (reflect @s Proxy) & \case
+    Nothing -> Clauses litss bs d i
+    Just fac -> Clauses litss bs (d / fac) i
+
+{- | Bumps up clause activity. If the new activity exceeds the threshold,
+it rescales activity uniformly after the bumping.
+-}
+bumpClauseActivity ::
+  forall s.
+  ClauseId ->
+  S.State (Clauses s) ()
+bumpClauseActivity cid =
+  S.modify \(Clauses litss bs d i) ->
+    if isInfinite i
+      then Clauses litss bs d i
+      else
+        LUV.modify
+          ( \ClauseBody {..} ->
+              let !act' = activity + d
+               in (ClauseBody {satAt, wat1, wat2, activity = act'}, act')
+          )
+          (unClauseId cid)
+          bs
+          PL.& \(Ur act, bs) ->
+            (act > 1e20) & \case
+              False -> Clauses litss bs d i
+              True ->
+                Clauses
+                  litss
+                  ( LUV.mapSame bs \ClauseBody {..} ->
+                      ClauseBody {activity = activity * 1e-20, ..}
+                  )
+                  (d * 1e-20)
+                  i
+
+reduceLearntClause :: S.State (CDCLState s) ()
+reduceLearntClause = S.do
+  Ur numCls <- getNumClauses
+  Ur lStart <- PL.move S.<$> S.use numInitialClausesL
+  let !numLearnts = numCls - lStart
+  Ur (claInc, maxLearnts) <- S.uses clausesL \(Clauses ls bs claInc maxLnts) ->
+    (Ur (claInc, maxLnts), Clauses ls bs claInc maxLnts)
+  fromIntegral numLearnts < maxLearnts & \case
+    True -> S.pure ()
+    False -> S.do
+      let !halfIdc = numLearnts `quot` 2
+          !extraLim = claInc / fromIntegral numLearnts
+      Ur cidsToRemove <-
+        Ur.runUrT
+          ( getAp
+              . U.foldMap'
+                ( \(i, (cid, act)) -> Ap do
+                    !locked <- Ur.UrT (isLocked cid)
+                    !n <- U.length <$> Ur.UrT (S.zoom clausesL (getClauseLits cid))
+                    pure $! if not locked && n > 2 && (act < extraLim || i < halfIdc) then Set.singleton cid else mempty
+                )
+              . U.indexed
+              . U.modify (Intro.sortBy (comparing snd))
+              =<< U.generateM numLearnts \((lStart +) -> !idx) ->
+                (ClauseId idx,)
+                  <$> Ur.UrT
+                    ( S.uses clausesL \(Clauses ls bs d i) ->
+                        LUV.unsafeGet idx bs PL.& \(Ur ClauseBody {..}, bs) ->
+                          (Ur activity, Clauses ls bs d i)
+                    )
+          )
+      removeClauses cidsToRemove
+      clausesL S.%= \(Clauses ls bs d i) -> Clauses ls bs d (i * 1.1)
+
+-- | Invariant: Input list is sorted in ascending order.
+deleteAscIndices :: forall a. [Int] -> LV.Vector a %1 -> LV.Vector a
+{-# INLINE deleteAscIndices #-}
+deleteAscIndices = \idcs v ->
+  LV.size v & \(Ur n, v) -> go 0 n 0 idcs v
+  where
+    copy :: Int -> Int -> Int -> LV.Vector a %1 -> LV.Vector a
+    copy !s !len !dst v =
+      s == len PL.& \case
+        True -> v
+        False ->
+          LV.unsafeGet s v PL.& \(Ur x, v) ->
+            LV.unsafeSet dst x v PL.& \v ->
+              copy (s + 1) len (dst + 1) v
+    -- Invariant: dst <= s <= head is < ... < last is < len
+    go :: Int -> Int -> Int -> [Int] -> LV.Vector a %1 -> LV.Vector a
+    go !s !len !_ !_ !v | s == len = v
+    go s len dst [] v = copy s len dst v
+    go s len dst (i : is) v =
+      s == i & \case
+        True -> go (s + 1) len dst is v
+        False ->
+          LV.unsafeGet s v PL.& \(Ur x, v) ->
+            LV.unsafeSet dst x v PL.& \v ->
+              go (s + 1) len (dst + 1) (i : is) v
+
+-- | Invariant: Input list is sorted in ascending order.
+deleteAscIndicesU :: forall a. (U.Unbox a) => [Int] -> LUV.Vector a %1 -> LUV.Vector a
+{-# INLINE deleteAscIndicesU #-}
+deleteAscIndicesU = \idcs v ->
+  LUV.size v & \(Ur n, v) -> go 0 n 0 idcs v
+  where
+    copy :: Int -> Int -> Int -> LUV.Vector a %1 -> LUV.Vector a
+    copy !s !len !dst v =
+      s == len PL.& \case
+        True -> v
+        False ->
+          LUV.unsafeGet s v PL.& \(Ur x, v) ->
+            LUV.unsafeSet dst x v PL.& \v ->
+              copy (s + 1) len (dst + 1) v
+    -- Invariant: dst <= s <= head is < ... < last is < len
+    go :: Int -> Int -> Int -> [Int] -> LUV.Vector a %1 -> LUV.Vector a
+    go !s !len !_ !_ !v | s == len = v
+    go s len dst [] v = copy s len dst v
+    go s len dst (i : is) v =
+      s == i & \case
+        True -> go (s + 1) len dst is v
+        False ->
+          LUV.unsafeGet s v PL.& \(Ur x, v) ->
+            LUV.unsafeSet dst x v PL.& \v ->
+              go (s + 1) len (dst + 1) (i : is) v
+
+removeClauses :: Set.Set ClauseId -> S.State (CDCLState s) ()
+removeClauses clsToDel = S.do
+  let !ascIds = Set.toAscList clsToDel
+  watchesL
+    S.%= LA.map
+      ( IS.fromAscList
+          . mapMaybe (fmap unClauseId . idMapper ascIds . ClauseId)
+          . IS.toAscList
+      )
+  clausesL S.%= \(Clauses lits bs d i) ->
+    Clauses (deleteAscIndices (coerce ascIds) lits) (deleteAscIndicesU (coerce ascIds) bs) d i
+  where
+    idMapper :: [ClauseId] -> ClauseId -> Maybe ClauseId
+    idMapper =
+      St.snd
+        . List.foldl'
+          ( \(n :!: f) delId ->
+              let !n' = n + 1
+                  f' = \cid ->
+                    case compare cid delId of
+                      LT -> f cid
+                      EQ -> Nothing
+                      GT -> Just (cid - n')
+               in (n' :!: f')
+          )
+          (0 :!: Just)
+
+isLocked :: ClauseId -> S.State (CDCLState s) (Ur Bool)
+isLocked cid = S.do
+  Ur vars <- Ur.lift watchedLitVars S.<$> S.zoom clausesL (getWatchedLits cid)
+  S.zoom valuationL
+    PL.$ Ur.lift getAny
+    C.<$> getAp
+      ( PList.foldMap'
+          ( \vid ->
+              PL.move vid & \(Ur vid) ->
+                Ap PL.$ S.state \vals ->
+                  LUA.unsafeGet (fromIntegral (unVarId vid)) vals
+                    & \case
+                      (Ur Definite {..}, vals)
+                        | antecedent == Just cid -> (Ur (Any True), vals)
+                      (Ur _, vals) -> (Ur (Any False), vals)
+          )
+          vars
+      )
+
 getNumClauses :: S.State (CDCLState s) (Ur Int)
 {-# INLINE getNumClauses #-}
 getNumClauses =
-  S.uses clausesL \(Clauses litss bs) ->
-    Clauses litss C.<$> LUV.size bs
+  S.uses clausesL \(Clauses litss bs d i) ->
+    LUV.size bs PL.& \(n, bs) ->
+      (n, Clauses litss bs d i)
 
 stepsL :: LinLens.Lens' (CDCLState s) (LUV.Vector Step)
 {-# INLINE stepsL #-}
@@ -767,12 +972,12 @@ unsatisfiedsL :: LinLens.Lens' (CDCLState s) (LSet.Set ClauseId)
 unsatisfiedsL = LinLens.lens \(CDCLState norig ss cs ws vs vids varQ rs) ->
   (vids, \vids -> CDCLState norig ss cs ws vs vids varQ rs)
 
-clausesValsAndUnsatsL :: LinLens.Lens' (CDCLState s) (Clauses, Valuation, LSet.Set ClauseId)
+clausesValsAndUnsatsL :: LinLens.Lens' (CDCLState s) (Clauses s, Valuation, LSet.Set ClauseId)
 {-# INLINE clausesValsAndUnsatsL #-}
 clausesValsAndUnsatsL = LinLens.lens \(CDCLState norig ss cs ws vs vids varQ rs) ->
   ((cs, vs, vids), \(cs, vs, vids) -> CDCLState norig ss cs ws vs vids varQ rs)
 
-clausesAndValsL :: LinLens.Lens' (CDCLState s) (Clauses, Valuation)
+clausesAndValsL :: LinLens.Lens' (CDCLState s) (Clauses s, Valuation)
 {-# INLINE clausesAndValsL #-}
 clausesAndValsL = LinLens.lens \(CDCLState norig ss cs ws vs vids varQ rs) ->
   ((cs, vs), \(cs, vs) -> CDCLState norig ss cs ws vs vids varQ rs)
@@ -837,20 +1042,23 @@ toCDCLState (CNF cls) lin =
                       vsidsS
                       rs
 
-toClauses :: [Clause] -> Linearly %1 -> Clauses
+toClauses :: forall s. (Reifies s CDCLOptions) => [Clause] -> Linearly %1 -> Clauses s
 toClauses cs l =
   PL.dup2 l & \(l, l') ->
     F.foldMap'
       ( \Clause {..} ->
-          ( Ur (DL.singleton lits)
-          , Push.singleton ClauseBody {satAt = satisfiedAt, wat1 = watched1, wat2 = watched2}
+          ( Ur (Sum 1)
+          , Ur (DL.singleton lits)
+          , Push.singleton ClauseBody {satAt = satisfiedAt, wat1 = watched1, wat2 = watched2, activity = 0.0}
           )
       )
       cs
-      & \(Ur lits, bs) ->
+      & \(Ur (Sum size), Ur lits, bs) ->
         Clauses
           (LV.fromListL l (DL.toList lits))
           (LUV.fromVectorL l' (Push.alloc bs))
+          (fromMaybe 0.999 $ clauseDecayFactor $ reflect @s Proxy)
+          (maybe (1 / 0.0) (const $ size / 3.0) $ clauseDecayFactor $ reflect @s Proxy)
 
 buildClause ::
   Pair Int (Map.Map Int IntSet) ->
@@ -878,6 +1086,26 @@ buildClause (i :!: watches) xs =
   , Clause {lits = U.fromList xs, satisfiedAt = -1, watched1 = 0, watched2 = 1}
   )
 
+watchedLitVars :: WatchedLits -> [VarId]
+watchedLitVars (WatchOne l) = [litVar l]
+watchedLitVars (WatchThese l r) = List.nub [litVar l, litVar r]
+
+getWatchedLits :: ClauseId -> S.State (Clauses s) (Ur WatchedLits)
+getWatchedLits cid = S.state \(Clauses ls bs d i) ->
+  LUV.unsafeGet (unClauseId cid) bs & \(Ur ClauseBody {..}, bs) ->
+    LV.unsafeGet (unClauseId cid) ls & \(Ur lts, ls) ->
+      let l1 = U.unsafeIndex lts wat1
+          l2 = U.unsafeIndex lts wat2
+       in wat2 >= 0 & \case
+            True -> (Ur (WatchThese l1 l2), Clauses ls bs d i)
+            False -> (Ur (WatchOne l1), Clauses ls bs d i)
+
+data WatchedLits
+  = WatchOne {-# UNPACK #-} !Lit
+  | WatchThese {-# UNPACK #-} !Lit {-# UNPACK #-} !Lit
+  deriving (Show, Eq, Ord, Generic)
+
+deriveGeneric ''WatchedLits
 deriveGeneric ''CDCLState
 
 deriving via L.Generically (CDCLState s) instance PL.Consumable (CDCLState s)
@@ -967,49 +1195,32 @@ deriving via L.Generically AssertionResult instance L.Movable AssertionResult
 setWatchVar :: ClauseId -> WatchVar %1 -> Index %1 -> S.State (CDCLState s) ()
 {-# INLINE setWatchVar #-}
 setWatchVar cid W1 = Unsafe.toLinear \vid ->
-  clausesL S.%= \(Clauses litss bs) ->
+  clausesL S.%= \(Clauses litss bs d i) ->
     LUV.modify_ (#wat1 .~ vid) (unClauseId cid) bs & \bs ->
-      Clauses litss bs
+      Clauses litss bs d i
 setWatchVar cid W2 = Unsafe.toLinear \vid ->
-  clausesL S.%= \(Clauses litss bs) ->
+  clausesL S.%= \(Clauses litss bs d i) ->
     LUV.modify_ (#wat2 .~ vid) (unClauseId cid) bs & \bs ->
-      Clauses litss bs
+      Clauses litss bs d i
 
 setSatisfiedLevel :: ClauseId -> DecideLevel -> S.State (CDCLState s) ()
 {-# INLINE setSatisfiedLevel #-}
 setSatisfiedLevel cid lvl =
-  clausesL S.%= \(Clauses litss bs) ->
+  clausesL S.%= \(Clauses litss bs d i) ->
     LUV.modify_ (#satAt .~ lvl) (unClauseId cid) bs & \bs ->
-      Clauses litss bs
+      Clauses litss bs d i
 
 getSatisfiedLevel :: ClauseId -> S.State (CDCLState s) (Ur DecideLevel)
 getSatisfiedLevel cid =
-  S.uses clausesL \(Clauses ls bs) ->
+  S.uses clausesL \(Clauses ls bs d i) ->
     LUV.unsafeGet (unClauseId cid) bs & \(Ur ClauseBody {..}, bs) ->
-      (Ur satAt, Clauses ls bs)
-
-data WatchedLits
-  = WatchOne {-# UNPACK #-} !Lit
-  | WatchThese {-# UNPACK #-} !Lit {-# UNPACK #-} !Lit
-  deriving (Show, Eq, Ord, Generic)
-
-deriveGeneric ''WatchedLits
+      (Ur satAt, Clauses ls bs d i)
 
 deriving via L.AsMovable WatchedLits instance PL.Consumable WatchedLits
 
 deriving via L.AsMovable WatchedLits instance PL.Dupable WatchedLits
 
 deriving via L.Generically WatchedLits instance PL.Movable WatchedLits
-
-getWatchedLits :: ClauseId -> S.State Clauses (Ur WatchedLits)
-getWatchedLits cid = S.state \(Clauses ls bs) ->
-  LUV.unsafeGet (unClauseId cid) bs & \(Ur ClauseBody {..}, bs) ->
-    LV.unsafeGet (unClauseId cid) ls & \(Ur lts, ls) ->
-      let l1 = U.unsafeIndex lts wat1
-          l2 = U.unsafeIndex lts wat2
-       in wat2 >= 0 & \case
-            True -> (Ur (WatchThese l1 l2), Clauses ls bs)
-            False -> (Ur (WatchOne l1), Clauses ls bs)
 
 getLit1 :: WatchedLits -> Lit
 getLit1 (WatchOne l) = l
@@ -1023,10 +1234,10 @@ watchLitOf :: WatchVar -> WatchedLits -> Lit
 watchLitOf W1 = getLit1
 watchLitOf W2 = fromMaybe (error "watchLitOf: no lit2") . getLit2
 
-getClauseLitAt :: ClauseId -> Index -> S.State Clauses (Ur Lit)
-getClauseLitAt cid j = S.state \(Clauses ls bs) ->
+getClauseLitAt :: ClauseId -> Index -> S.State (Clauses s) (Ur Lit)
+getClauseLitAt cid j = S.state \(Clauses ls bs d i) ->
   LV.unsafeGet (unClauseId cid) ls & \(Ur l, ls) ->
-    (Ur (U.unsafeIndex l j), Clauses ls bs)
+    (Ur (U.unsafeIndex l j), Clauses ls bs d i)
 
 elemWatchLit :: Lit -> WatchedLits -> Bool
 elemWatchLit l (WatchOne l1) = l == l1
@@ -1046,13 +1257,13 @@ deriving via L.AsMovable WatchedLitIndices instance PL.Dupable WatchedLitIndices
 
 deriving via L.Generically WatchedLitIndices instance PL.Movable WatchedLitIndices
 
-getWatchedLitIndices :: ClauseId -> S.State Clauses (Ur WatchedLitIndices)
-getWatchedLitIndices cid = S.state \(Clauses ls bs) ->
+getWatchedLitIndices :: ClauseId -> S.State (Clauses s) (Ur WatchedLitIndices)
+getWatchedLitIndices cid = S.state \(Clauses ls bs d i) ->
   LUV.unsafeGet (unClauseId cid) bs & \(Ur ClauseBody {..}, bs) ->
     wat2 >= 0 & \case
-      True -> (Ur (WatchTheseI wat1 wat2), Clauses ls bs)
+      True -> (Ur (WatchTheseI wat1 wat2), Clauses ls bs d i)
       False ->
-        (Ur (WatchOneI wat1), Clauses ls bs)
+        (Ur (WatchOneI wat1), Clauses ls bs d i)
 
 elemWatchLitIdx :: Index -> WatchedLitIndices -> Bool
 elemWatchLitIdx l (WatchOneI l1) = l == l1
