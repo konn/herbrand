@@ -624,6 +624,7 @@ pushClause = \Clause {..} -> S.do
               (fromIntegral lbd >= ema')
   S.pure ()
 
+-- TODO: re-implement decay as the increasing (and uniform decay) on increment factor ala MiniSAT
 decayVarPriosM :: forall s. (Reifies s CDCLOptions) => S.State (VSIDSState s) ()
 {-# INLINE decayVarPriosM #-}
 decayVarPriosM = S.modify \(VSIDSState ls qs spec exc) ->
@@ -633,8 +634,6 @@ decayVarPriosM = S.modify \(VSIDSState ls qs spec exc) ->
       | exc -> VSIDSState (decayVars highLBDDecay ls) (decayVars highLBDDecay qs) spec exc
       | otherwise -> VSIDSState (decayVars lowLBDDecay ls) (decayVars lowLBDDecay qs) spec exc
 
--- Adaptive {..} -> VSIDSState (decayVars alpha ls) (decayVars alpha qs) spec
-
 decayVars :: Double -> VarQueue -> VarQueue
 {-# INLINE decayVars #-}
 decayVars = \alpha -> PSQ.unsafeMapMonotonic \_ (Down p) v -> (Down $ p * alpha, v)
@@ -643,7 +642,7 @@ findUnsatVar :: S.State (VSIDSState s) (Ur (Maybe VarId))
 findUnsatVar = S.state \(VSIDSState unsat sat lbdEma exc) ->
   PSQ.minView unsat & \case
     Just (k, p, (), unsat) ->
-      ( Ur $ Just $ fromIntegral k
+      ( Ur (Just $ fromIntegral k)
       , VSIDSState unsat (PSQ.unsafeInsertNew k p () sat) lbdEma exc
       )
     Nothing -> (Ur Nothing, VSIDSState unsat sat lbdEma exc)
@@ -820,7 +819,7 @@ toCDCLState (CNF cls) lin =
       !watches0 = force $ V.toList $ V.update (V.replicate numVars mempty) (V.fromList $ Map.toList upds)
    in case () of
         _
-          | truth -> lin `lseq` Left (Ur $ Satisfiable ())
+          | truth -> lin `lseq` Left (Ur (Satisfiable ()))
           | contradicting -> lin `lseq` Left (Ur Unsat)
         _ ->
           besides lin (`LUV.fromListL` [0]) PL.& \(steps, lin) ->
