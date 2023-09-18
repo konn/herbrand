@@ -216,6 +216,7 @@ solverLoop = fix $ \go mlit -> S.do
               move (cid, l) & \(Ur (cid, l)) -> S.do
                 backjump cid l -- Conflict found. Let's Backjump!
             NoMorePropagation -> S.do
+              reduceLearntClause
               -- Decide indefinite variable
               -- FIXME: Perhaps we can choose the variable from unsatisified clause?
               -- FIXME: Use heuristics for variable selection.
@@ -232,6 +233,7 @@ solverLoop = fix $ \go mlit -> S.do
 backjump :: (Reifies s CDCLOptions) => ClauseId -> Lit -> S.State (CDCLState s) FinalState
 backjump confCls lit = S.do
   S.zoom vsidsStateL decayVarPriosM
+  S.zoom clausesL decayClauseActivity
   Ur confLits <- S.zoom clausesL $ foldClauseLits L.set confCls
   mLearnt <- findUIP1 lit confLits
   case mLearnt of
@@ -317,8 +319,10 @@ findUIP1 !lit !curCls
             Indefinite -> error $ "Literal " P.<> show lit P.<> " was chosen as resolver, but indefinite!"
             Definite {..} -> S.do
               Ur cls' <- case antecedent of
-                Just ante -> S.zoom clausesL $ foldClauseLits L.set ante
-                Nothing -> S.pure $ Ur Set.empty
+                Just ante -> S.zoom clausesL S.do
+                  bumpClauseActivity ante
+                  foldClauseLits L.set ante
+                Nothing -> S.pure (Ur Set.empty)
               activateResolved (reflect $ Proxy @s) & \case
                 True -> S.zoom vsidsStateL $ incrementVarM lit
                 False -> S.pure ()

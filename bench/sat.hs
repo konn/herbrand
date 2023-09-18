@@ -62,97 +62,190 @@ cdclSolvers =
   [
     ( "CDCL (α = 0.75)"
     , CDCL.CDCLOptions
-        { decayFactor = 0.75
+        { variableDecayFactor = 0.75
         , activateResolved = False
         , restartStrategy = NoRestart
+        , clauseDecayFactor = Nothing
         }
     )
   ,
     ( "CDCL (α = 0.75, mVISDS)"
     , CDCL.defaultOptions
-        { decayFactor = 0.75
+        { variableDecayFactor = 0.75
         , activateResolved = True
         , restartStrategy = NoRestart
+        , clauseDecayFactor = Nothing
+        }
+    )
+  ,
+    ( "CDCL (α = 0.75, mVISDS, Clause Decay 0.999)"
+    , CDCL.defaultOptions
+        { variableDecayFactor = 0.75
+        , activateResolved = True
+        , restartStrategy = NoRestart
+        , clauseDecayFactor = Just 0.999
         }
     )
   ,
     ( "CDCL (α = 0.75, mVISDS, ExpRestart(100, 2))"
     , CDCL.defaultOptions
-        { decayFactor = 0.75
+        { variableDecayFactor = 0.75
         , activateResolved = True
         , restartStrategy = defaultExponentialRestart
+        , clauseDecayFactor = Nothing
+        }
+    )
+  ,
+    ( "CDCL (α = 0.75, mVISDS, ExpRestart(100, 2), Clause Decay 0.999)"
+    , CDCL.defaultOptions
+        { variableDecayFactor = 0.75
+        , activateResolved = True
+        , restartStrategy = defaultExponentialRestart
+        , clauseDecayFactor = Just 0.999
         }
     )
   ,
     ( "CDCL (α = 0.75, mVISDS, LubyRestart(100, 2))"
     , CDCLOptions
-        { decayFactor = 0.75
+        { variableDecayFactor = 0.75
         , activateResolved = True
         , restartStrategy = defaultLubyRestart
+        , clauseDecayFactor = Nothing
+        }
+    )
+  ,
+    ( "CDCL (α = 0.75, mVISDS, LubyRestart(100, 2), Clause Decay 0.999)"
+    , CDCLOptions
+        { variableDecayFactor = 0.75
+        , activateResolved = True
+        , restartStrategy = defaultLubyRestart
+        , clauseDecayFactor = Just 0.999
         }
     )
   ,
     ( "CDCL (α = 0.95)"
     , CDCLOptions
-        { decayFactor = 0.95
+        { variableDecayFactor = 0.95
         , activateResolved = False
         , restartStrategy = NoRestart
+        , clauseDecayFactor = Nothing
         }
     )
   ,
     ( "CDCL (α = 0.95, mVISDS)"
     , CDCLOptions
-        { decayFactor = 0.95
+        { variableDecayFactor = 0.95
         , activateResolved = True
         , restartStrategy = NoRestart
+        , clauseDecayFactor = Nothing
+        }
+    )
+  ,
+    ( "CDCL (α = 0.95, mVISDS, Clause Decay 0.999)"
+    , CDCLOptions
+        { variableDecayFactor = 0.95
+        , activateResolved = True
+        , restartStrategy = NoRestart
+        , clauseDecayFactor = Just 0.999
         }
     )
   ,
     ( "CDCL (α = 0.95, mVISDS, ExpRestart(100, 2))"
     , CDCLOptions
-        { decayFactor = 0.95
+        { variableDecayFactor = 0.95
         , activateResolved = True
         , restartStrategy = defaultExponentialRestart
+        , clauseDecayFactor = Nothing
+        }
+    )
+  ,
+    ( "CDCL (α = 0.95, mVISDS, ExpRestart(100, 2), Clause Decay 0.999)"
+    , CDCLOptions
+        { variableDecayFactor = 0.95
+        , activateResolved = True
+        , restartStrategy = defaultExponentialRestart
+        , clauseDecayFactor = Just 0.999
         }
     )
   ,
     ( "CDCL (α = 0.95, mVISDS, LubyRestart(100, 2))"
     , CDCLOptions
-        { decayFactor = 0.95
+        { variableDecayFactor = 0.95
         , activateResolved = True
         , restartStrategy = defaultLubyRestart
+        , clauseDecayFactor = Nothing
+        }
+    )
+  ,
+    ( "CDCL (α = 0.95, mVISDS, LubyRestart(100, 2), Clause Decay 0.999)"
+    , CDCLOptions
+        { variableDecayFactor = 0.95
+        , activateResolved = True
+        , restartStrategy = defaultLubyRestart
+        , clauseDecayFactor = Just 0.999
         }
     )
   ,
     ( "CDCL (adaptive)"
     , CDCLOptions
-        { decayFactor = defaultAdaptiveFactor
+        { variableDecayFactor = defaultAdaptiveFactor
         , activateResolved = False
         , restartStrategy = NoRestart
+        , clauseDecayFactor = Nothing
         }
     )
   ,
     ( "CDCL (adaptive, mVSIDS)"
     , CDCLOptions
-        { decayFactor = defaultAdaptiveFactor
+        { variableDecayFactor = defaultAdaptiveFactor
         , activateResolved = True
         , restartStrategy = NoRestart
+        , clauseDecayFactor = Nothing
+        }
+    )
+  ,
+    ( "CDCL (adaptive, mVSIDS, Clause Decay 0.999)"
+    , CDCLOptions
+        { variableDecayFactor = defaultAdaptiveFactor
+        , activateResolved = True
+        , restartStrategy = NoRestart
+        , clauseDecayFactor = Just 0.999
         }
     )
   ,
     ( "CDCL (adaptive, mVISDS, ExpRestart(100, 2))"
     , CDCL.defaultOptions
-        { decayFactor = defaultAdaptiveFactor
+        { variableDecayFactor = defaultAdaptiveFactor
         , activateResolved = True
         , restartStrategy = defaultExponentialRestart
+        , clauseDecayFactor = Nothing
+        }
+    )
+  ,
+    ( "CDCL (adaptive, mVISDS, ExpRestart(100, 2), Clause Decay 0.999)"
+    , CDCL.defaultOptions
+        { variableDecayFactor = defaultAdaptiveFactor
+        , activateResolved = True
+        , restartStrategy = defaultExponentialRestart
+        , clauseDecayFactor = Just 0.999
         }
     )
   ,
     ( "CDCL (adaptive, mVISDS, LubyRestart(100, 2))"
     , CDCLOptions
-        { decayFactor = defaultAdaptiveFactor
+        { variableDecayFactor = defaultAdaptiveFactor
         , activateResolved = True
         , restartStrategy = defaultLubyRestart
+        , clauseDecayFactor = Nothing
+        }
+    )
+  ,
+    ( "CDCL (adaptive, mVISDS, LubyRestart(100, 2), Clause Decay)"
+    , CDCLOptions
+        { variableDecayFactor = defaultAdaptiveFactor
+        , activateResolved = True
+        , restartStrategy = defaultLubyRestart
+        , clauseDecayFactor = Just 0.999
         }
     )
   ]
