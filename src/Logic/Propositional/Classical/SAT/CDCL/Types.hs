@@ -624,6 +624,7 @@ pushClause = \Clause {..} -> S.do
               (fromIntegral lbd >= ema')
   S.pure ()
 
+-- TODO: re-implement decay as the increasing (and uniform decay) on increment factor ala MiniSAT
 decayVarPriosM :: forall s. (Reifies s CDCLOptions) => S.State (VSIDSState s) ()
 {-# INLINE decayVarPriosM #-}
 decayVarPriosM = S.modify \(VSIDSState ls qs spec exc) ->
@@ -632,8 +633,6 @@ decayVarPriosM = S.modify \(VSIDSState ls qs spec exc) ->
     Adaptive {..}
       | exc -> VSIDSState (decayVars highLBDDecay ls) (decayVars highLBDDecay qs) spec exc
       | otherwise -> VSIDSState (decayVars lowLBDDecay ls) (decayVars lowLBDDecay qs) spec exc
-
--- Adaptive {..} -> VSIDSState (decayVars alpha ls) (decayVars alpha qs) spec
 
 decayVars :: Double -> VarQueue -> VarQueue
 {-# INLINE decayVars #-}
