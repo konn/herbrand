@@ -661,6 +661,7 @@ incrementVarM lit = S.modify \(VSIDSState unsats sats lbdEma exc l) ->
         $ VSIDSState uns' sat' lbdEma exc l
 
 adjustVarActivities :: Maybe (Max Double) -> VSIDSState s -> VSIDSState s
+{-# INLINE adjustVarActivities #-}
 adjustVarActivities (Just (Max p)) | p >= 1e100 =
   \(VSIDSState uns sat lbdEma exc l) ->
     VSIDSState (multiplyVarActs 1e-100 uns) (multiplyVarActs 1e-100 sat) lbdEma exc (l * 1e-100)
