@@ -5,7 +5,7 @@ on:
 jobs:
   profiling: 
     env:
-      ghc: 9.4.5
+      ghc: 9.4.7
       cabal: 3.10.1.0
     name: Profiling
     runs-on: ubuntu-latest

@@ -12,7 +12,7 @@ on:
 jobs:
   build:
     env:
-      ghc: 9.4.5
+      ghc: 9.4.7
       cabal: 3.10.1.0
     name: Build
     runs-on: ubuntu-latest
@@ -99,7 +99,7 @@ jobs:
     name: Test
     needs: [build]
     env:
-      ghc: 9.4.5
+      ghc: 9.4.7
       cabal: 3.10.1.0
     runs-on: ubuntu-latest
     steps:
@@ -149,7 +149,7 @@ jobs:
     name: Benchrmark
     needs: [build]
     env:
-      ghc: 9.4.5
+      ghc: 9.4.7
       cabal: 3.10.1.0
       csv-path: bench-results/${{matrix.bench}}.csv
       svg-path: bench-results/${{matrix.bench}}.svg
