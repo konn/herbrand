@@ -3026,7 +3026,7 @@ constraints: abstract-deque ==0.3,
 source-repository-package
   type: git
   location: https://github.com/konn/linear-extra.git
-  tag: 3172a3d153f12b3779da36854968f418eaa619d3
+  tag: 86d85e3db8ab40f4fde881fad7736651880f2979
   subdir:
     linear-witness
     linear-array-extra
