@@ -47,7 +47,6 @@ import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Except (runExceptT, throwE)
 import Control.Monad.Trans.Maybe (runMaybeT)
 import Control.Optics.Linear qualified as LinOpt
-import Data.Alloc.Linearly.Token (besides, linearly)
 import Data.Array.Mutable.Linear qualified as LA
 import Data.Array.Mutable.Linear.Unboxed qualified as LUA
 import Data.Bifunctor qualified as Bi
@@ -79,6 +78,7 @@ import Data.Vector.Mutable.Linear.Unboxed qualified as LUV
 import Data.Vector.Unboxed qualified as U
 import GHC.Generics qualified as GHC
 import GHC.Stack
+import Linear.Witness.Token (besides, linearly)
 import Logic.Propositional.Classical.SAT.CDCL.Types
 import Logic.Propositional.Classical.SAT.Types
 import Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
@@ -99,7 +99,7 @@ solveWith :: (LHM.Keyed a) => CDCLOptions -> CNF a -> SatResult (Model a)
 {-# INLINE [1] solveWith #-}
 {-# ANN solveWith "HLint: ignore Avoid lambda" #-}
 solveWith opts cnf = reify opts \(_ :: Proxy s) -> unur $ LHM.empty 128 \dic ->
-  besides dic (`LHM.emptyL` 128) & \(rev, dic) ->
+  besides dic (LHM.emptyL 128) & \(rev, dic) ->
     S.runState
       (runUrT (traverse (\v -> liftUrT (renameCNF v)) cnf))
       ((rev, Ur 0), dic)
@@ -783,9 +783,9 @@ evalClause :: ClauseId -> S.State (CDCLState s) (Maybe Bool)
 {- HLINT ignore evalClause "Avoid lambda" -}
 evalClause cid = S.do
   Ur lvl <- getSatisfiedLevel cid
-  lvl >= 0 & \case
-    True -> S.pure $ Just True
-    False -> S.do
+  if lvl >= 0
+    then S.pure $ Just True
+    else S.do
       Ur lits <- S.zoom clausesL $ getClauseLits cid
       S.zoom valuationL
         $ D.fmap unur

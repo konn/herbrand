@@ -78,6 +78,7 @@ library
     , linear-array-extra
     , linear-base
     , linear-generics
+    , linear-witness
     , parallel
     , psqueues
     , random

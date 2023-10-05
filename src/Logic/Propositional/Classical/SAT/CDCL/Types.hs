@@ -118,8 +118,6 @@ import Control.Functor.Linear.State.Extra qualified as S
 import Control.Lens (Lens', Prism', foldring, lens, prism', (.~))
 import Control.Monad (guard)
 import Control.Optics.Linear qualified as LinLens
-import Data.Alloc.Linearly.Token
-import Data.Alloc.Linearly.Token.Unsafe (HasLinearWitness)
 import Data.Array.Mutable.Linear.Extra qualified as LA
 import Data.Array.Mutable.Linear.Unboxed qualified as LUA
 import Data.Array.Polarized.Push.Extra qualified as Push
@@ -160,6 +158,8 @@ import Data.Vector.Unboxed.Deriving (derivingUnbox)
 import GHC.Generics (Generic)
 import Generics.Linear qualified as L
 import Generics.Linear.TH (deriveGeneric)
+import Linear.Witness.Token
+import Linear.Witness.Token.Unsafe (HasLinearWitness)
 import Logic.Propositional.Classical.SAT.Types (SatResult (..))
 import Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
 import Math.NumberTheory.Logarithms (wordLog2')
@@ -838,10 +838,10 @@ toCDCLState (CNF cls) lin =
           | truth -> lin `lseq` Left (Ur (Satisfiable ()))
           | contradicting -> lin `lseq` Left (Ur Unsat)
         _ ->
-          besides lin (`LUV.fromListL` [0]) PL.& \(steps, lin) ->
+          besides lin (LUV.fromListL [0]) PL.& \(steps, lin) ->
             besides lin (toClauses cls'') PL.& \(clauses, lin) ->
-              besides lin (`LA.fromListL` watches0) & \(watcheds, lin) ->
-                besides lin (\lin -> LUA.allocL lin (maybe 0 ((+ 1) . fromEnum) maxVar) Indefinite) PL.& \(vals, lin) ->
+              besides lin (LA.fromListL watches0) & \(watcheds, lin) ->
+                besides lin (LUA.allocL (maybe 0 ((+ 1) . fromEnum) maxVar) Indefinite) PL.& \(vals, lin) ->
                   Right
                     PL.$ CDCLState
                       numOrigCls
@@ -849,7 +849,7 @@ toCDCLState (CNF cls) lin =
                       clauses
                       watcheds
                       vals
-                      (LSet.fromListL lin [ClauseId 0 .. ClauseId (numOrigCls - 1)])
+                      (LSet.fromListL [ClauseId 0 .. ClauseId (numOrigCls - 1)] lin)
                       vsidsS
                       rs
 
@@ -865,8 +865,8 @@ toClauses cs l =
       cs
       & \(Ur lits, bs) ->
         Clauses
-          (LV.fromListL l (DL.toList lits))
-          (LUV.fromVectorL l' (Push.alloc bs))
+          (LV.fromListL (DL.toList lits) l)
+          (LUV.fromVectorL (Push.alloc bs) l')
 
 buildClause ::
   Pair Int (Map.Map Int IntSet) ->
@@ -1065,10 +1065,9 @@ deriving via L.Generically WatchedLitIndices instance PL.Movable WatchedLitIndic
 getWatchedLitIndices :: ClauseId -> S.State Clauses (Ur WatchedLitIndices)
 getWatchedLitIndices cid = S.state \(Clauses ls bs) ->
   LUV.unsafeGet (unClauseId cid) bs & \(Ur ClauseBody {..}, bs) ->
-    wat2 >= 0 & \case
-      True -> (Ur (WatchTheseI wat1 wat2), Clauses ls bs)
-      False ->
-        (Ur (WatchOneI wat1), Clauses ls bs)
+    if wat2 >= 0
+      then (Ur (WatchTheseI wat1 wat2), Clauses ls bs)
+      else (Ur (WatchOneI wat1), Clauses ls bs)
 
 elemWatchLitIdx :: Index -> WatchedLitIndices -> Bool
 elemWatchLitIdx l (WatchOneI l1) = l == l1
@@ -1102,9 +1101,9 @@ tryRestart = case restartStrategy $ reflect @s Proxy of
             lbd
             p
             i
-        steps0 <- S.state \s -> besides s (`LUV.fromListL` [0])
+        steps0 <- S.state \s -> besides s (LUV.fromListL [0])
         stepsL S..= steps0
         Ur numCls <- getNumClauses
-        unsats0 <- S.state \s -> besides s (`LSet.fromListL` [0 .. fromIntegral $ numCls - 1])
+        unsats0 <- S.state \s -> besides s (LSet.fromListL [0 .. fromIntegral $ numCls - 1])
         unsatisfiedsL S..= unsats0
       else restartStateL S..= RestartState count' thresh c
