@@ -40,7 +40,6 @@ module Data.Matrix.Mutable.Linear.Unboxed (
 ) where
 
 import qualified Control.Functor.Linear as C
-import Data.Alloc.Linearly.Token (Linearly, besides)
 import qualified Data.Array.Polarized as PV
 import qualified Data.Array.Polarized.Pull.Extra as Pull
 import qualified Data.Array.Polarized.Push.Extra as Push
@@ -49,6 +48,7 @@ import qualified Data.Unrestricted.Linear as Ur
 import qualified Data.Vector.Mutable.Linear.Unboxed as LUV
 import qualified Data.Vector.Unboxed as U
 import GHC.Stack (HasCallStack)
+import Linear.Witness.Token (Linearly, besides)
 import Prelude.Linear
 import qualified Prelude as P
 
@@ -73,27 +73,29 @@ instance (U.Unbox a) => Dupable (Matrix a) where
 emptyL :: (U.Unbox a) => Linearly %1 -> Matrix a
 {-# INLINE emptyL #-}
 emptyL l =
-  besides l (\l -> LUV.constantL l 1 0) & \(offsets, l) ->
+  besides l (LUV.constantL 1 0) & \(offsets, l) ->
     LUV.emptyL l & Matrix offsets
 
-fromRowL :: (U.Unbox a) => Linearly %1 -> U.Vector a %1 -> Matrix a
+fromRowL :: (U.Unbox a) => U.Vector a %1 -> Linearly %1 -> Matrix a
 {-# INLINE fromRowL #-}
-fromRowL l uv =
-  besides l (`LUV.fromVectorL` uv) & \(payload, l) ->
+fromRowL uv l =
+  besides l (LUV.fromVectorL uv) & \(payload, l) ->
     LUV.size payload & \(Ur sz, payload) ->
-      LUV.fromListL l [0, sz] & \offsets -> Matrix offsets payload
+      LUV.fromListL [0, sz] l & \offsets -> Matrix offsets payload
 
-fromRowsL :: (U.Unbox a) => Linearly %1 -> [U.Vector a] -> Matrix a
+fromRowsL :: (U.Unbox a) => [U.Vector a] -> Linearly %1 -> Matrix a
 {-# INLINE fromRowsL #-}
-fromRowsL l rows =
+fromRowsL rows l =
   besides
     l
-    (`LUV.fromListL` List.scanl' (flip $ (P.+) P.. U.length) 0 rows)
+    (LUV.fromListL (List.scanl' (flip $ (P.+) P.. U.length) 0 rows))
     & \(offs, l) ->
       Matrix offs
-        $ LUV.fromVectorL l
-        $ Push.alloc
-        $ foldMap' (PV.transfer . Pull.fromVector) rows
+        $ LUV.fromVectorL
+          ( Push.alloc
+              $ foldMap' (PV.transfer . Pull.fromVector) rows
+          )
+          l
 
 numRows :: Matrix a %1 -> (Ur Int, Matrix a)
 {-# INLINE numRows #-}
