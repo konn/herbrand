@@ -77,10 +77,13 @@ library:
   dependencies:
   - bitvec
   - linear-array-extra
-  - linear-witness
   - linear-base
   - linear-generics
+  - linear-memory
+  - linear-witness
   - vector-th-unbox
+  - derive-storable
+  - derive-storable-plugin
 
 internal-libraries:
   herbrand-bench:

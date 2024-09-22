@@ -48,7 +48,7 @@ import qualified Data.Unrestricted.Linear as Ur
 import qualified Data.Vector.Mutable.Linear.Unboxed as LUV
 import qualified Data.Vector.Unboxed as U
 import GHC.Stack (HasCallStack)
-import Linear.Witness.Token (Linearly, besides)
+import Linear.Token.Linearly (Linearly, besides)
 import Prelude.Linear
 import qualified Prelude as P
 

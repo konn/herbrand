@@ -64,6 +64,8 @@ library
     , containers
     , data-fix
     , deepseq
+    , derive-storable
+    , derive-storable-plugin
     , distributive
     , dlist
     , filtrable
@@ -78,6 +80,7 @@ library
     , linear-array-extra
     , linear-base
     , linear-generics
+    , linear-memory
     , linear-witness
     , parallel
     , psqueues
