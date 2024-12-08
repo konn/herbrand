@@ -2,9 +2,10 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE OverloadedLists #-}
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeApplications #-}
 
-module Logic.Propositional.Classical.SAT.CDCLSpec (test_solve, test_solveVarId, test_sudoku) where
+module Logic.Propositional.Classical.SAT.CDCLSpec (test_solve, test_solveVarId, test_sudoku, test_solve_file) where
 
 import qualified Control.Foldl as L
 import Control.Lens (both, folded, maximumOf, view, (%~), _3)
@@ -27,9 +28,12 @@ import Logic.Propositional.Classical.SAT.BruteForce
 import Logic.Propositional.Classical.SAT.CDCL
 import Logic.Propositional.Classical.SAT.Format.DIMACS
 import Logic.Propositional.Classical.SAT.Types (Model (..), SatResult (..), eval)
+import qualified Logic.Propositional.Classical.SAT.Types as Model
 import Logic.Propositional.Classical.Syntax.TestUtils
 import Logic.Propositional.Syntax.General
 import Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
+import System.FilePath (takeFileName, (</>))
+import System.FilePattern.Directory (getDirectoryFiles)
 import qualified Test.Falsify.Generator as F
 import Test.Falsify.Predicate ((.$))
 import qualified Test.Falsify.Predicate as P
@@ -60,6 +64,31 @@ cdclOptions =
         ++ [("Adaptive Decay (default)", defaultAdaptiveFactor)]
   ]
 
+test_solve_file :: IO TestTree
+test_solve_file = do
+  uf20_91 <-
+    mapM
+      ( \fp ->
+          (takeFileName fp,)
+            <$> decodeCNFFile ("data/satlib/uf20-91-full" </> fp)
+      )
+      =<< getDirectoryFiles "data/satlib/uf20-91-full" ["*.cnf"]
+
+  pure $
+    testGroup
+      "solveWith (fixedInput)"
+      [ testGroup
+        optName
+        [ testCase name do
+          case solveWith opt cnf of
+            Satisfiable inst -> do
+              Model.eval inst (toFormula @Full cnf) @?= Just True
+            Unsat -> assertFailure "Must be satisfiable, but got Unsat!"
+        | (name, cnf) <- uf20_91
+        ]
+      | (optName, opt) <- cdclOptions
+      ]
+
 test_solve :: TestTree
 test_solve =
   testGroup
@@ -74,15 +103,15 @@ test_solve =
               let ans = solveWith opt cnf
               case classifyFormula $ toFormula @Full cnf of
                 Inconsistent ->
-                  assert
-                    $ P.eq
-                    .$ ("expected", Unsat)
-                    .$ ("answer", ans)
+                  assert $
+                    P.eq
+                      .$ ("expected", Unsat)
+                      .$ ("answer", ans)
                 f ->
-                  assert
-                    $ P.satisfies
+                  assert $
+                    P.satisfies
                       ("Satisfiable (" <> show f <> ")", \case Satisfiable {} -> True; _ -> False)
-                    .$ ("answer", ans)
+                      .$ ("answer", ans)
           , testProperty "Gives a correct model" $ do
               cnf <- gen $ cnfGen 10 10 ((0, 10) `withOrigin` 5)
               collectCNF cnf
@@ -92,15 +121,15 @@ test_solve =
                 Satisfiable m -> do
                   info $ "Given model: " <> show m
                   complete <-
-                    gen
-                      $ F.elem
-                      $ fromMaybe (NE.singleton m)
-                      $ NE.nonEmpty
-                      $ completedModels (L.fold L.hashSet cnf) m
-                  assert
-                    $ P.eq
-                    .$ ("expected", Just True)
-                    .$ ("answer", eval complete $ toFormula @Full cnf)
+                    gen $
+                      F.elem $
+                        fromMaybe (NE.singleton m) $
+                          NE.nonEmpty $
+                            completedModels (L.fold L.hashSet cnf) m
+                  assert $
+                    P.eq
+                      .$ ("expected", Just True)
+                      .$ ("answer", eval complete $ toFormula @Full cnf)
           ]
       , testGroup
           "solveWith . fromWithFree . fromFormulaFast"
@@ -154,15 +183,15 @@ test_solveVarId =
                   let ans = solveVarIdWith opt cnf
                   case classifyFormula $ toFormula @Full cnf of
                     Inconsistent ->
-                      assert
-                        $ P.eq
-                        .$ ("expected", Unsat)
-                        .$ ("answer", ans)
+                      assert $
+                        P.eq
+                          .$ ("expected", Unsat)
+                          .$ ("answer", ans)
                     _ ->
-                      assert
-                        $ P.satisfies
+                      assert $
+                        P.satisfies
                           ("Satisfiable", \case Satisfiable {} -> True; _ -> False)
-                        .$ ("answer", ans)
+                          .$ ("answer", ans)
               , testGroup
                   "regressions"
                   [ testCase (show cnf) do
@@ -170,8 +199,8 @@ test_solveVarId =
                     case classifyFormula $ toFormula @Full cnf of
                       Inconsistent -> ans @?= Unsat
                       _ ->
-                        assertBool ("Satisfiable expected, but got: " <> show ans)
-                          $ is #_Satisfiable ans
+                        assertBool ("Satisfiable expected, but got: " <> show ans) $
+                          is #_Satisfiable ans
                   | cnf <- regressionCNFs
                   ]
               ]
@@ -186,15 +215,15 @@ test_solveVarId =
                     Satisfiable m -> do
                       info $ "Given model: " <> show m
                       complete <-
-                        gen
-                          $ F.elem
-                          $ fromMaybe (NE.singleton m)
-                          $ NE.nonEmpty
-                          $ completedModels (L.fold L.hashSet cnf) m
-                      assert
-                        $ P.eq
-                        .$ ("expected", Just True)
-                        .$ ("answer", eval complete $ toFormula @Full cnf)
+                        gen $
+                          F.elem $
+                            fromMaybe (NE.singleton m) $
+                              NE.nonEmpty $
+                                completedModels (L.fold L.hashSet cnf) m
+                      assert $
+                        P.eq
+                          .$ ("expected", Just True)
+                          .$ ("answer", eval complete $ toFormula @Full cnf)
               , testGroup
                   "regressions"
                   [ testCase (show cnf) do
@@ -203,8 +232,8 @@ test_solveVarId =
                       Satisfiable m -> do
                         let models = completedModels (L.fold L.hashSet cnf) m
                             modVals =
-                              filter ((/= Just True) . snd)
-                                $ map ((,) <$> id <*> flip eval (toFormula @Full cnf)) models
+                              filter ((/= Just True) . snd) $
+                                map ((,) <$> id <*> flip eval (toFormula @Full cnf)) models
                         assertBool
                           ( unlines
                               [ "       expected: Just True"
@@ -225,9 +254,9 @@ test_solveVarId =
 completedModels :: (Hashable w) => HashSet w -> Model w -> [Model w]
 completedModels vars m =
   let missings = HS.toList $ vars `HS.difference` L.fold L.hashSet m
-   in map ((m <>) . uncurry Model . (both %~ L.fold L.hashSet))
-        $ getAp
-        $ foldMap' (\w -> Ap [(DL.singleton w, mempty), (mempty, DL.singleton w)]) missings
+   in map ((m <>) . uncurry Model . (both %~ L.fold L.hashSet)) $
+        getAp $
+          foldMap' (\w -> Ap [(DL.singleton w, mempty), (mempty, DL.singleton w)]) missings
 
 regressionCNFs :: [CNF VarId]
 regressionCNFs =

@@ -246,11 +246,12 @@ backjump confCls lit = S.do
               then S.pure ()
               else S.do
                 Ur satAt <- getSatisfiedLevel $ ClauseId i
-                satAt > decLvl & \case
-                  True -> S.do
-                    setSatisfiedLevel (ClauseId i) (-1)
-                    unsatisfiedsL S.%= LSet.insert (ClauseId i)
-                  False -> S.pure ()
+                satAt
+                  > decLvl & \case
+                    True -> S.do
+                      setSatisfiedLevel (ClauseId i) (-1)
+                      unsatisfiedsL S.%= LSet.insert (ClauseId i)
+                    False -> S.pure ()
                 self (i + 1)
         )
         0
@@ -608,7 +609,6 @@ propLit trueLit cid = S.do
       let !l1 = getLit1 wlits
       if litVar l1 == litVar trueLit
         then -- Have the same variable as watched var #1
-
           if l1 == trueLit
             then S.pure $ Just $ Satisfied Nothing -- Satisfied.
             else S.do
@@ -629,7 +629,6 @@ propLit trueLit cid = S.do
                         -- Unsatifiable! pick the oldest variable as conflicting lit.
                         Just D.<$> S.zoom valuationL (reportLastAddedAsConflict wlits)
         else -- Otherwise it must be watched var #2
-
           let !l2 =
                 P.fromMaybe (error $ "Impossible: propagated literal matched neither of lits! (prop, watcheds) = " <> show (trueLit, wlits))
                   $ getLit2 wlits

@@ -199,6 +199,9 @@ tests:
     - falsify
     - tasty-hunit
     - tasty-quickcheck
+    - filepattern
+    - filepath
+    - directory
 
 benchmarks:
   herbrand-cnf-bench:
