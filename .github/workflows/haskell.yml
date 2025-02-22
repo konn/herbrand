@@ -84,7 +84,7 @@ jobs:
       continue-on-error: true
       run: ./ci/collect-bins.sh artifacts
     - name: Upload Aritracts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         path: artifacts.tar.zst
         name: artifacts
@@ -108,7 +108,7 @@ jobs:
           ref: ${{github.event.pull_request.head.sha || github.sha}}
       - name: Download artifacts
         id: download
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
       - name: Decompress
         run: tar xaf artifacts/artifacts.tar.zst
       - name: Run Tests
@@ -170,7 +170,7 @@ jobs:
       run: git switch -c ${{env.branch}}
     - name: Download artifacts
       id: download
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
     - name: Decompress
       run: tar xaf artifacts/artifacts.tar.zst
     - name: Run Benchmark
@@ -186,13 +186,13 @@ jobs:
           })
     - name: Upload CSV
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         path: ${{env.csv-path}}
         name: ${{matrix.bench}}.csv
     - name: Upload SVG
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         path: ${{env.svg-path}}
         name: ${{matrix.bench}}.svg
@@ -234,7 +234,7 @@ jobs:
         "${{matrix.bench}}-report"
     - name: Upload Report
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         path: ${{env.report-tarball}}
         name: ${{matrix.bench}}-report
@@ -275,7 +275,7 @@ jobs:
         token: ${{secrets.GITHUB_TOKEN}}
     - name: Download artifacts
       id: download
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         path: workspace/downloads
     - name: Extract bench results and generate
