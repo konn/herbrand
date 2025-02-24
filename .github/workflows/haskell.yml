@@ -39,19 +39,19 @@ jobs:
           })
 
     - name: Setup Haskell
-      uses: haskell/actions/setup@v2
+      uses: haskell-actions/setup@v2
       with:
         enable-stack: false
         cabal-version: ${{env.cabal}}
         ghc-version: ${{env.ghc}}
     - name: Restore ~/.cabal/store
-      uses: actions/cache/restore@v3
+      uses: actions/cache/restore@v4
       with:
         path: ~/.cabal/store
         key: ${{steps.cache-keys.outputs.store}}
         restore-keys: ${{steps.cache-keys.outputs.store-restore}}
     - name: Restore dist-newstyle
-      uses: actions/cache/restore@v3
+      uses: actions/cache/restore@v4
       with:
         path: dist-newstyle
         key: ${{steps.cache-keys.outputs.dist}}
@@ -67,7 +67,7 @@ jobs:
       run: | 
         cabal build --only-dependencies
     - name: Save ~/.cabal/store Cache
-      uses: actions/cache/save@v3
+      uses: actions/cache/save@v4
       with:
         path: ~/.cabal/store
         key: ${{steps.cache-keys.outputs.store}}
@@ -75,7 +75,7 @@ jobs:
       run: | 
         cabal build
     - name: Save dist-newstyle Cache
-      uses: actions/cache/save@v3
+      uses: actions/cache/save@v4
       with:
         path: dist-newstyle
         key: ${{steps.cache-keys.outputs.dist}}
