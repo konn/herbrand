@@ -77,7 +77,7 @@ jobs:
         tar czvf cdcl-profs.tar.gz cdcl-profs
 
     - name: Upload Aritracts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         path: cdcl-profs.tar.gz
         name: cdcl-prof
