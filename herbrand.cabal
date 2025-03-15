@@ -1,6 +1,6 @@
 cabal-version: 2.0
 
--- This file has been generated from package.yaml by hpack version 0.35.2.
+-- This file has been generated from package.yaml by hpack version 0.36.0.
 --
 -- see: https://github.com/sol/hpack
 
@@ -32,6 +32,7 @@ library
   exposed-modules:
       Control.Foldl.Linear
       Control.Functor.Linear.State.Extra
+      Control.Qualified.DataFlow
       Data.HashMap.Mutable.Linear.Extra
       Data.Matrix.Mutable.Linear.Unboxed
       Data.Monoid.Linear.Orphans

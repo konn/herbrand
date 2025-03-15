@@ -115,17 +115,20 @@ import Control.DeepSeq (NFData, force)
 import Control.Foldl qualified as Foldl
 import Control.Foldl qualified as L
 import Control.Functor.Linear qualified as C
+import Control.Functor.Linear qualified as CL
 import Control.Functor.Linear.State.Extra qualified as S
 import Control.Lens (Lens', Prism', foldring, lens, prism', (.~))
 import Control.Monad (guard)
 import Control.Optics.Linear qualified as LinLens
 import Data.Array.Mutable.Linear.Extra qualified as LA
 import Data.Array.Mutable.Linear.Storable qualified as LSA
+import Data.Array.Mutable.Linear.Storable.Borrowable qualified as LSV
 import Data.Array.Mutable.Linear.Unboxed qualified as LUA
 import Data.Bifunctor.Linear qualified as BiL
 import Data.Bit (Bit (..))
 import Data.Bits (popCount, xor, (.&.), (.|.))
 import Data.Coerce (coerce)
+import Data.Functor.Linear qualified as DF
 import Data.Generics.Labels ()
 import Data.Hashable (Hashable)
 import Data.IntPSQ qualified as PSQ
@@ -801,53 +804,54 @@ toCDCLState ::
   Pool %1 ->
   Either (Ur (SatResult ())) (CDCLState s)
 toCDCLState (CNF cls) pool =
-  linearWitness pool & \(pool, lin) ->
-    let restartOpt = restartStrategy $ reflect @s Proxy
-        (cls', truth, contradicting, maxVar) =
-          L.fold
-            ( (,,,)
-                <$> L.handles
-                  #_CNFClause
-                  (L.premap (L.fold L.nub . map encodeLit) L.nub)
-                <*> Foldl.null
-                <*> Foldl.any null
-                <*> Foldl.handles Foldl.folded Foldl.maximum
-            )
-            cls
-        numVars = maybe 0 ((+ 1) . fromEnum) maxVar
-        rs = RestartState 0 (fromMaybe 0 $ getInitRestart restartOpt) 0
-        vsidsS =
-          VSIDSState
-            (PSQ.fromList [(vid, 0, ()) | vid <- [0 .. (numVars - 1)]])
-            PSQ.empty
-            0
-            True
-            1.0
-        (numOrigCls :!: upds, cls'') = mapAccumL buildClause (0 :!: Map.empty) cls'
-        !watches0 = force $ V.toList $ V.update (V.replicate numVars mempty) (V.fromList $ Map.toList upds)
-     in case () of
-          _
-            | truth -> pool `lseq` lin `lseq` Left (Ur (Satisfiable ()))
-            | contradicting -> pool `lseq` lin `lseq` Left (Ur Unsat)
-          _ ->
+  let restartOpt = restartStrategy $ reflect @s Proxy
+      (cls', truth, contradicting, maxVar) =
+        L.fold
+          ( (,,,)
+              <$> L.handles
+                #_CNFClause
+                (L.premap (L.fold L.nub . map encodeLit) L.nub)
+              <*> Foldl.null
+              <*> Foldl.any null
+              <*> Foldl.handles Foldl.folded Foldl.maximum
+          )
+          cls
+      numVars = maybe 0 ((+ 1) . fromEnum) maxVar
+      rs = RestartState 0 (fromMaybe 0 $ getInitRestart restartOpt) 0
+      vsidsS =
+        VSIDSState
+          (PSQ.fromList [(vid, 0, ()) | vid <- [0 .. (numVars - 1)]])
+          PSQ.empty
+          0
+          True
+          1.0
+      (numOrigCls :!: upds, cls'') = mapAccumL buildClause (0 :!: Map.empty) cls'
+      !watches0 = force $ V.toList $ V.update (V.replicate numVars mempty) (V.fromList $ Map.toList upds)
+   in case () of
+        _
+          | truth -> pool `lseq` Left (Ur (Satisfiable ()))
+          | contradicting -> pool `lseq` Left (Ur Unsat)
+        _ ->
+          linearWitness pool & \(pool, lin) ->
             besides lin (LUV.fromListL [0]) PL.& \(steps, lin) ->
-              besides lin (toClauses cls'') PL.& \(clauses, lin) ->
-                besides lin (LA.fromListL watches0) & \(watcheds, lin) ->
-                  besides lin (LUA.allocL (maybe 0 ((+ 1) . fromEnum) maxVar) Indefinite) PL.& \(vals, lin) ->
-                    Right
-                      PL.$ CDCLState
-                        numOrigCls
-                        steps
-                        clauses
-                        watcheds
-                        vals
-                        (LSet.fromListL [ClauseId 0 .. ClauseId (numOrigCls - 1)] lin)
-                        vsidsS
-                        rs
-                        pool
+              PL.dup pool PL.& \(pool, pool') ->
+                toClauses cls'' pool' PL.& \clauses ->
+                  besides lin (LA.fromListL watches0) & \(watcheds, lin) ->
+                    besides lin (LUA.allocL (maybe 0 ((+ 1) . fromEnum) maxVar) Indefinite) PL.& \(vals, lin) ->
+                      Right
+                        PL.$ CDCLState
+                          numOrigCls
+                          steps
+                          clauses
+                          watcheds
+                          vals
+                          (LSet.fromListL [ClauseId 0 .. ClauseId (numOrigCls - 1)] lin)
+                          vsidsS
+                          rs
+                          pool
 
-toClauses :: [Clause] -> Linearly %1 -> Clauses
-toClauses = LSV.fromListL
+toClauses :: [Clause] %1 -> Pool %1 -> Clauses
+toClauses = CL.runReader PL.. DF.traverse (\c -> RC.alloc c C.<$> CL.ask)
 
 buildClause ::
   Pair Int (Map.Map Int IntSet) ->
@@ -959,14 +963,15 @@ deriving via L.Generically AssertionResult instance L.Movable AssertionResult
 
   1.  We cannot use 'watchVarL' here because `LV.modify_` consumes
       the first argument non-linearly!
-  2.  Use of Unsafe.toLienar is safe here because vid = Int is freely dupable.
 -}
 setWatchVar :: Weak Clause %1 -> WatchVar %1 -> Index %1 -> Weak Clause
 {-# INLINE setWatchVar #-}
-setWatchVar cid W1 = Unsafe.toLinear \vid ->
-  RC.modify_ (#watched1 .~ vid) cid
-setWatchVar cid W2 = Unsafe.toLinear \vid ->
-  RC.modify_ (#watched2 .~ vid) cid
+setWatchVar cid W1 vid =
+  PL.move vid & \(Ur vid) ->
+    RC.modify_ (#watched1 .~ vid) cid
+setWatchVar cid W2 vid =
+  PL.move vid & \(Ur vid) ->
+    RC.modify_ (#watched2 .~ vid) cid
 
 setSatisfiedLevel :: Weak Clause %1 -> DecideLevel -> Weak Clause
 {-# INLINE setSatisfiedLevel #-}

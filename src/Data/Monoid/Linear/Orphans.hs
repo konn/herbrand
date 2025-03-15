@@ -15,12 +15,6 @@ import Control.Applicative (liftA2)
 import Data.Unrestricted.Linear qualified as Ur
 import Prelude.Linear qualified as PL
 
-instance (Semigroup a) => PL.Semigroup (Ur.Ur a) where
-  (<>) = Ur.lift2 (<>)
-
-instance (Monoid a) => PL.Monoid (Ur.Ur a) where
-  mempty = Ur.Ur mempty
-
 instance (Semigroup a) => Semigroup (Ur.Ur a) where
   (<>) = liftA2 (<>)
 
