@@ -15,7 +15,11 @@ main :: IO ()
 main = do
   !huges <- evaluate . force =<< findCnfsIn "data/sat/huge"
   !sudoku <- evaluate . force =<< findCnfsIn "data/sudoku"
-  !satlib <- evaluate . force =<< findCnfsIn "data/satlib"
+  !satlib <-
+    evaluate
+      . force
+      . filterFileTreeRoots (`elem` satlibBenchmarkRoots)
+      =<< findCnfsIn "data/satlib"
   performGC
   defaultMain
     [ bgroup
@@ -25,6 +29,14 @@ main = do
         , withCnfs "SATLIB" satlib cdclBenches
         ]
     ]
+
+satlibBenchmarkRoots :: [String]
+satlibBenchmarkRoots =
+  [ "Bejing"
+  , "flat200-479"
+  , "uf100-430"
+  , "uf20-91"
+  ]
 
 cdclBenches :: IO (CNF Word, Formula Full Word) -> [Benchmark]
 cdclBenches fml =
