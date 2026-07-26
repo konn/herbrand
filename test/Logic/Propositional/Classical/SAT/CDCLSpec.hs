@@ -200,6 +200,20 @@ test_solveVarId =
                 Unsat -> assertFailure "watch-suffix restoration witness must be satisfiable"
                 Satisfiable {} -> pure ()
           ]
+      , testCase "solves sparse formulas by iterative pure-literal elimination" $ do
+          case solveVarIdWith defaultOptions sparsePureLiteralCNF of
+            Unsat -> assertFailure "sparse pure-literal witness must be satisfiable"
+            Satisfiable model ->
+              eval model (toFormula @Full sparsePureLiteralCNF) @?= Just True
+          let genericCNF =
+                fmap (fromIntegral . fromEnum) sparsePureLiteralCNF ::
+                  CNF Word
+          case solveWith defaultOptions genericCNF of
+            Unsat -> assertFailure "generic pure-literal witness must be satisfiable"
+            Satisfiable model ->
+              eval model (toFormula @Full genericCNF) @?= Just True
+      , testCase "falls back after partial pure-literal elimination" $
+          solveVarIdWith defaultOptions sparsePureLiteralFallbackCNF @?= Unsat
       ]
         <> instrumentationTests
         <> [ testGroup
@@ -341,6 +355,18 @@ instrumentationTests =
         Satisfiable {} -> pure ()
       assertBool "the restoration witness must encounter a conflict" $
         conflictCount stats > 0
+  , testCase "bypasses CDCL state for sparse pure-literal formulas" $ do
+      let (result, stats) = solveVarIdWithStats defaultOptions sparsePureLiteralCNF
+      case result of
+        Unsat -> assertFailure "sparse pure-literal witness must be satisfiable"
+        Satisfiable model ->
+          eval model (toFormula @Full sparsePureLiteralCNF) @?= Just True
+      assignmentCount stats @?= 0
+  , testCase "uses CDCL after partial pure-literal elimination stalls" $ do
+      let (result, stats) =
+            solveVarIdWithStats defaultOptions sparsePureLiteralFallbackCNF
+      result @?= Unsat
+      seedScanCount stats @?= 1
   ]
 #else
 instrumentationTests = []
@@ -404,6 +430,21 @@ watchSuffixRestoreCNF =
     , [Positive 0, Positive 7]
     , [Positive 0, Positive 8]
     , [Positive 0, Positive 9]
+    ]
+
+sparsePureLiteralCNF :: CNF VarId
+sparsePureLiteralCNF =
+  CNF
+    [ CNFClause $ Negative 0 : [Negative i | i <- [1 .. 8]]
+    , CNFClause [Positive i | i <- [1 .. 8]]
+    ]
+
+sparsePureLiteralFallbackCNF :: CNF VarId
+sparsePureLiteralFallbackCNF =
+  CNF
+    [ CNFClause [Positive i | i <- [1 .. 30]]
+    , CNFClause [Positive 0]
+    , CNFClause [Negative 0]
     ]
 
 exhaustiveSmallCNFs :: [CNF VarId]

@@ -94,22 +94,87 @@ solve = solveWith defaultOptions
 solveWith :: (LHM.Keyed a) => CDCLOptions -> CNF a -> SatResult (Model a)
 {-# INLINE [1] solveWith #-}
 {-# ANN solveWith "HLint: ignore Avoid lambda" #-}
-solveWith opts cnf = reify opts \(_ :: Proxy s) -> unur $ LHM.empty 128 \dic ->
-  besides dic (LHM.emptyL 128) & \(rev, dic) ->
-    S.runState
-      (runUrT (traverse (\v -> liftUrT (renameCNF v)) cnf))
-      ((rev, Ur 0), dic)
-      & \(Ur cnf, ((dic, Ur _), rev)) ->
-        dic `lseq`
-          besides rev (toCDCLState @s cnf)
-            & \case
-              (Left (Ur resl), rev) ->
-                rev `lseq` Ur (P.mempty P.<$ resl)
-              (Right state, rev) ->
-                solveState state & \case
-                  (Ur Unsat) -> rev `lseq` Ur Unsat
-                  (Ur (Satisfiable m)) ->
-                    Satisfiable D.<$> S.evalState (unrenameModel m) rev
+solveWith opts cnf =
+  case solveSparseByPureLiterals cnf of
+    Just model -> Satisfiable model
+    Nothing -> reify opts \(_ :: Proxy s) -> unur $ LHM.empty 128 \dic ->
+      besides dic (LHM.emptyL 128) & \(rev, dic) ->
+        S.runState
+          (runUrT (traverse (\v -> liftUrT (renameCNF v)) cnf))
+          ((rev, Ur 0), dic)
+          & \(Ur cnf, ((dic, Ur _), rev)) ->
+            dic `lseq`
+              besides rev (toCDCLState @s cnf)
+                & \case
+                  (Left (Ur resl), rev) ->
+                    rev `lseq` Ur (P.mempty P.<$ resl)
+                  (Right state, rev) ->
+                    solveState state & \case
+                      (Ur Unsat) -> rev `lseq` Ur Unsat
+                      (Ur (Satisfiable m)) ->
+                        Satisfiable D.<$> S.evalState (unrenameModel m) rev
+
+solveSparseByPureLiterals :: (Hashable a) => CNF a -> Maybe (Model a)
+{-# INLINE solveSparseByPureLiterals #-}
+solveSparseByPureLiterals (CNF clauses)
+  | P.not $ hasWideFirstClause clauses = Nothing
+  | P.not $ hasAtMost 64 clauses = Nothing
+  | otherwise =
+      let !clauseCount = P.length clauses
+          !literalCount =
+            Foldable.foldl'
+              (\count (CNFClause clause) -> count P.+ P.length clause)
+              0
+              clauses
+       in if literalCount P.< 8 P.* clauseCount
+            then Nothing
+            else go clauses P.mempty
+  where
+    hasAtMost :: Int -> [b] -> Bool
+    hasAtMost _ [] = True
+    hasAtMost 0 _ = False
+    hasAtMost count (_ : rest) = hasAtMost (count P.- 1) rest
+
+    hasWideFirstClause [] = True
+    hasWideFirstClause (CNFClause clause : _) = hasAtLeast 8 clause
+
+    hasAtLeast :: Int -> [b] -> Bool
+    hasAtLeast 0 _ = True
+    hasAtLeast _ [] = False
+    hasAtLeast count (_ : rest) = hasAtLeast (count P.- 1) rest
+
+    go [] model = Just model
+    go active model =
+      let (!positiveVars, !negativeVars) =
+            Foldable.foldl' collectClause (HS.empty, HS.empty) active
+          !purePositive = positiveVars `HS.difference` negativeVars
+          !pureNegative = negativeVars `HS.difference` positiveVars
+          !pureModel =
+            Model
+              { positive = purePositive
+              , negative = pureNegative
+              }
+       in if HS.null purePositive P.&& HS.null pureNegative
+            then Nothing
+            else
+              go
+                (P.filter (P.not P.. isCovered purePositive pureNegative) active)
+                (model P.<> pureModel)
+
+    collectClause (!positiveVars, !negativeVars) (CNFClause clause) =
+      Foldable.foldl' collectLit (positiveVars, negativeVars) clause
+
+    collectLit (!positiveVars, !negativeVars) = \case
+      Positive var -> (HS.insert var positiveVars, negativeVars)
+      Negative var -> (positiveVars, HS.insert var negativeVars)
+
+    isCovered purePositive pureNegative (CNFClause clause) =
+      P.any
+        ( \case
+            Positive var -> HS.member var purePositive
+            Negative var -> HS.member var pureNegative
+        )
+        clause
 
 unrenameModel ::
   (Hashable a) =>
@@ -166,18 +231,24 @@ solveVarId = solveVarIdWith defaultOptions
 
 solveVarIdWith :: CDCLOptions -> CNF VarId -> SatResult (Model VarId)
 {-# INLINE solveVarIdWith #-}
-solveVarIdWith opts cnf = reify opts \(_ :: Proxy s) ->
-  unur PL.$ linearly \l ->
-    toCDCLState @s cnf l PL.& \case
-      Left (Ur resl) -> Ur (P.mempty P.<$ resl)
-      Right stt -> solveState stt
+solveVarIdWith opts cnf =
+  case solveSparseByPureLiterals cnf of
+    Just model -> Satisfiable model
+    Nothing -> reify opts \(_ :: Proxy s) ->
+      unur PL.$ linearly \l ->
+        toCDCLState @s cnf l PL.& \case
+          Left (Ur resl) -> Ur (P.mempty P.<$ resl)
+          Right stt -> solveState stt
 
 solveVarIdWithStats :: CDCLOptions -> CNF VarId -> (SatResult (Model VarId), SolverStats)
-solveVarIdWithStats opts cnf = reify opts \(_ :: Proxy s) ->
-  unur PL.$ linearly \l ->
-    toCDCLState @s cnf l PL.& \case
-      Left (Ur resl) -> Ur (P.mempty P.<$ resl, zeroSolverStats)
-      Right state -> solveStateWithStats state
+solveVarIdWithStats opts cnf =
+  case solveSparseByPureLiterals cnf of
+    Just model -> (Satisfiable model, zeroSolverStats)
+    Nothing -> reify opts \(_ :: Proxy s) ->
+      unur PL.$ linearly \l ->
+        toCDCLState @s cnf l PL.& \case
+          Left (Ur resl) -> Ur (P.mempty P.<$ resl, zeroSolverStats)
+          Right state -> solveStateWithStats state
 
 solveStateWithStats ::
   (Reifies s CDCLOptions) =>
