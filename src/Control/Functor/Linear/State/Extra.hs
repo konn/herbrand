@@ -50,7 +50,6 @@ import Control.Functor.Linear
 import qualified Control.Optics.Linear as Optics
 import qualified Control.Optics.Linear.Lens as Optic
 import Data.Functor.Compose
-import qualified Data.Functor.Linear as D
 import Data.Kind
 import Data.Profunctor.Kleisli.Linear
 import GHC.Exts (Multiplicity (..))
@@ -112,11 +111,3 @@ use ::
   StateT s m a
 {-# INLINE use #-}
 use l = uses l dup2
-
-instance D.Functor (FUN 'One t) where
-  fmap = (.)
-  {-# INLINE fmap #-}
-
-instance Functor (FUN 'One t) where
-  fmap = (.)
-  {-# INLINE fmap #-}

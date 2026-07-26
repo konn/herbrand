@@ -20,7 +20,7 @@ module Report (
   generateSingleReport,
 ) where
 
-import Chart hiding (abs, (<.>))
+import Chart hiding (abs)
 import Control.Applicative (optional)
 import Control.DeepSeq
 import Control.Exception
@@ -66,50 +66,50 @@ data SingleReportOpts = SingleReportOpts
 singleReportOptsP :: Opt.Parser SingleReportOpts
 singleReportOptsP = do
   repo <-
-    Opt.strOption
-      $ Opt.long "repo"
-      <> Opt.metavar "OWNER/REPO"
-      <> Opt.help "Repository full name"
+    Opt.strOption $
+      Opt.long "repo"
+        <> Opt.metavar "OWNER/REPO"
+        <> Opt.help "Repository full name"
   input <-
-    Opt.strOption
-      $ Opt.long "input"
-      <> Opt.short 'i'
-      <> Opt.metavar "FILE"
-      <> Opt.help "Input CSV file"
+    Opt.strOption $
+      Opt.long "input"
+        <> Opt.short 'i'
+        <> Opt.metavar "FILE"
+        <> Opt.help "Input CSV file"
   output <-
-    Opt.strOption
-      $ Opt.long "output"
-      <> Opt.short 'o'
-      <> Opt.metavar "DIR"
-      <> Opt.help "Output directory"
+    Opt.strOption $
+      Opt.long "output"
+        <> Opt.short 'o'
+        <> Opt.metavar "DIR"
+        <> Opt.help "Output directory"
   sufficesToStrip <-
-    optional
-      $ Opt.option Opt.auto
-      $ Opt.long "strip-suffices"
-      <> Opt.short 's'
-      <> Opt.metavar "NUM"
-      <> Opt.help "Number of prefix to drop."
+    optional $
+      Opt.option Opt.auto $
+        Opt.long "strip-suffices"
+          <> Opt.short 's'
+          <> Opt.metavar "NUM"
+          <> Opt.help "Number of prefix to drop."
   reportName <-
-    optional
-      $ Opt.strOption
-      $ Opt.long "report-name"
-      <> Opt.short 'R'
-      <> Opt.metavar "TITLE"
-      <> Opt.help "Optional Report Name"
+    optional $
+      Opt.strOption $
+        Opt.long "report-name"
+          <> Opt.short 'R'
+          <> Opt.metavar "TITLE"
+          <> Opt.help "Optional Report Name"
   gitInspect <- Opt.switch $ Opt.long "git" <> Opt.help "Inspects git metadata and includes in the report"
   baseline <-
-    Opt.optional
-      $ Opt.strOption
-      $ Opt.long "baseline"
-      <> Opt.short 'B'
-      <> Opt.metavar "FILE"
-      <> Opt.help "Optional path to the baseline CSV to compare with"
+    Opt.optional $
+      Opt.strOption $
+        Opt.long "baseline"
+          <> Opt.short 'B'
+          <> Opt.metavar "FILE"
+          <> Opt.help "Optional path to the baseline CSV to compare with"
   baselineDescr <-
-    Opt.optional
-      $ Opt.strOption
-      $ Opt.long "baseline-desc"
-      <> Opt.metavar "FILE"
-      <> Opt.help "Description for the baseline"
+    Opt.optional $
+      Opt.strOption $
+        Opt.long "baseline-desc"
+          <> Opt.metavar "FILE"
+          <> Opt.help "Description for the baseline"
   pull <- Opt.optional pullReqOptsP
   pure SingleReportOpts {..}
 
@@ -128,19 +128,19 @@ generateSingleReport SingleReportOpts {..} = do
     let mbase = (baseDesc,) <$> (Map.lookup k =<< mbases)
     !plots <- evaluate $ mkPlots colorMap k mbase bg
     !mWinner <-
-      evaluate
-        $ force
-        $ fromJust
-        $ ifoldMap
-          ( \i BenchCase {..} ->
-              Just
-                Winner
-                  { timeWinner = Min $ Arg mean i
-                  , allocWinner = Min $ Arg (fromMaybe 0 alloc) i
-                  , copiedWinner = Min $ Arg (fromMaybe 0 copied) i
-                  }
-          )
-          bg
+      evaluate $
+        force $
+          fromJust $
+            ifoldMap
+              ( \i BenchCase {..} ->
+                  Just
+                    Winner
+                      { timeWinner = Min $ Arg mean i
+                      , allocWinner = Min $ Arg (fromMaybe 0 alloc) i
+                      , copiedWinner = Min $ Arg (fromMaybe 0 copied) i
+                      }
+              )
+              bg
     paths <- iforM plots \crit chart -> do
       let typeStr = case crit of
             Time -> "time"
@@ -163,17 +163,17 @@ generateSingleReport SingleReportOpts {..} = do
           =<< getCurrentDirectory
       else pure Nothing
   let reportHtml = output </> "index.html"
-  print
-    $ L.fold
-      ( L.premap snd
-          $ (,,)
-          <$> L.premap timeWinner winnerCountL
-          <*> L.premap allocWinner winnerCountL
-          <*> L.premap copiedWinner winnerCountL
+  print $
+    L.fold
+      ( L.premap snd $
+          (,,)
+            <$> L.premap timeWinner winnerCountL
+            <*> L.premap allocWinner winnerCountL
+            <*> L.premap copiedWinner winnerCountL
       )
       svgs
-  Lucid.renderToFile reportHtml
-    $ buildReport repo reportName mGit (baseDesc <$ baseline) pull svgs
+  Lucid.renderToFile reportHtml $
+    buildReport repo reportName mGit (baseDesc <$ baseline) pull svgs
   hPutStrLn stderr $ "Report Written to: " <> reportHtml
 
 pruneSuffices :: Maybe Int -> Benchs -> Benchs
@@ -188,8 +188,8 @@ buildColorMap =
   Map.fromList
     . flip zip (cycle paletteR)
     . L.fold
-      ( L.premap Map.keysSet
-          $ L.handles folded L.list
+      ( L.premap Map.keysSet $
+          L.handles folded L.list
       )
 
 buildReport ::
@@ -207,11 +207,11 @@ buildReport repo mReportName mGit mbase pull benchs = doctypehtml_ do
           Just txt -> "Benchmark Result for " <> txt
       (timeRank, allocRank, copiedRank) =
         L.fold
-          ( L.premap snd
-              $ (,,)
-              <$> L.premap timeWinner winnerCountL
-              <*> L.premap allocWinner winnerCountL
-              <*> L.premap copiedWinner winnerCountL
+          ( L.premap snd $
+              (,,)
+                <$> L.premap timeWinner winnerCountL
+                <*> L.premap allocWinner winnerCountL
+                <*> L.premap copiedWinner winnerCountL
           )
           benchs
   head_ do
@@ -230,38 +230,38 @@ buildReport repo mReportName mGit mbase pull benchs = doctypehtml_ do
             DLNE.toNonEmpty
               <$> foldMap
                 ( \ginfo ->
-                    Just
-                      $ DLNE.fromList
+                    Just $
+                      DLNE.fromList
                         [
                           ( "Branch"
-                          , a_ [href_ $ "https://github.com/" <> repo <> "/tree/" <> T.pack (giBranch ginfo)]
-                              $ toHtml
-                              $ giBranch ginfo
+                          , a_ [href_ $ "https://github.com/" <> repo <> "/tree/" <> T.pack (giBranch ginfo)] $
+                              toHtml $
+                                giBranch ginfo
                           )
                         ,
                           ( "Commit"
-                          , a_ [href_ $ "https://github.com/" <> repo <> "/tree/" <> T.pack (giHash ginfo)]
-                              $ toHtml
-                              $ giHash ginfo
+                          , a_ [href_ $ "https://github.com/" <> repo <> "/tree/" <> T.pack (giHash ginfo)] $
+                              toHtml $
+                                giHash ginfo
                           )
                         , ("Commit Message", toHtml $ giCommitMessage ginfo)
                         ]
                 )
                 mGit
-              <> foldMap (\base -> Just $ DLNE.singleton ("Baseline", toHtml base)) mbase
-              <> foldMap
-                ( \PullRequest {..} ->
-                    Just
-                      $ DLNE.singleton
-                        ( "Pull Request"
-                        , a_ [href_ $ "https://github.com/" <> repo <> "/pull/" <> T.pack (show pullNumber)]
-                            $ "#"
-                            <> toHtml (show pullNumber)
-                            <> ": "
-                            <> toHtml pullTitle
-                        )
-                )
-                pull
+                <> foldMap (\base -> Just $ DLNE.singleton ("Baseline", toHtml base)) mbase
+                <> foldMap
+                  ( \PullRequest {..} ->
+                      Just $
+                        DLNE.singleton
+                          ( "Pull Request"
+                          , a_ [href_ $ "https://github.com/" <> repo <> "/pull/" <> T.pack (show pullNumber)] $
+                              "#"
+                                <> toHtml (show pullNumber)
+                                <> ": "
+                                <> toHtml pullTitle
+                          )
+                  )
+                  pull
       case metas of
         Nothing -> p_ "N/A"
         Just m -> table_ $ tbody_ $ forM_ m $ \(lab, col) ->
@@ -302,7 +302,7 @@ buildReport repo mReportName mGit mbase pull benchs = doctypehtml_ do
       iforM_ plots \tag v -> do
         let chartTitle = T.pack $ show tag
         h4_ $ toHtml chartTitle
-        p_
-          $ figure_
-          $ a_ [href_ (T.pack v)]
-          $ img_ [width_ "100%", src_ (T.pack v), alt_ "Bar chart"]
+        p_ $
+          figure_ $
+            a_ [href_ (T.pack v)] $
+              img_ [width_ "100%", src_ (T.pack v), alt_ "Bar chart"]

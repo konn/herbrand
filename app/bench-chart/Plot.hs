@@ -17,8 +17,7 @@
 
 module Plot (mkPlots, Criteria (..), Criterion (..)) where
 
-import Chart hiding (abs, (<.>))
-import Control.Applicative (Applicative (..))
+import Chart hiding (abs)
 import Control.Arrow ((&&&))
 import Control.Lens hiding ((<.>))
 import Data.Align (alignWith)
@@ -182,18 +181,18 @@ makeBarChart ChartDef {..} caseName colMap bg0 =
             . to \(Rect x0 x1 _ y1) ->
               (Point ((x0 + x1) / 2) y1, x1 - x0)
       xAxis =
-        defaultAxisOptions
-          & #ticks . #ltick .~ Nothing
-          & #ticks . #style
+        defaultXAxisOptions
+          & #ticks . #lineTick .~ Nothing
+          & #ticks . #tick
             .~ TickPlaced
               (zip (map (_x . fst) barXYes) $ DL.toList labels)
-      yAxis = defaultAxisOptions & #place .~ PlaceLeft
+      yAxis = defaultYAxisOptions
       barOpts =
         defaultBarOptions
           & #displayValues .~ False
           & #barRectStyles .~ DL.toList rectStyles
           & #barLegendOptions . #place .~ PlaceAbsolute (Point 1.0 (-0.5))
-          & #barLegendOptions . #overallScale .~ 0.175
+          & #barLegendOptions . #scaleChartsBy .~ 0.175
       theBar = barChart barOpts theBars
       errs =
         foldMap
@@ -215,15 +214,15 @@ makeBarChart ChartDef {..} caseName colMap bg0 =
           )
           devs
       yAxisLabel =
-        defaultTitle (chartTitle <> " [" <> T.pack (showPrefix chartRadix targetSI) <> chartUnit <> "]")
+        defaultTitleOptions (chartTitle <> " [" <> T.pack (showPrefix chartRadix targetSI) <> chartUnit <> "]")
           & #place .~ PlaceLeft
-          & #anchor .~ AnchorMiddle
+          & #anchoring .~ 0
           & #style . #size %~ (/ 2)
       title = chartTitle <> ": " <> caseName
      in
       theBar
-        & #hudOptions . #chartAspect .~ FixedAspect ((1 + sqrt 5) / 2)
-        & #hudOptions . #axes .~ [(5, xAxis), (5, yAxis)]
-        & #hudOptions . #titles .~ [(6, defaultTitle title), (11, yAxisLabel)]
-        & #hudOptions . #frames .~ [(11, defaultFrameOptions & #buffer .~ 0.2)]
-        & #charts <>~ named "errors" errs
+        & #markupOptions . #chartAspect .~ FixedAspect ((1 + sqrt 5) / 2)
+        & #hudOptions . #axes .~ [Priority 5 xAxis, Priority 5 yAxis]
+        & #hudOptions . #titles .~ [Priority 6 (defaultTitleOptions title), Priority 11 yAxisLabel]
+        & #hudOptions . #frames .~ [Priority 11 (defaultFrameOptions & #buffer .~ 0.2)]
+        & #chartTree <>~ named "errors" errs

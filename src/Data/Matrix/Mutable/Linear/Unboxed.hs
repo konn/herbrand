@@ -48,7 +48,7 @@ import qualified Data.Unrestricted.Linear as Ur
 import qualified Data.Vector.Mutable.Linear.Unboxed as LUV
 import qualified Data.Vector.Unboxed as U
 import GHC.Stack (HasCallStack)
-import Linear.Witness.Token (Linearly, besides)
+import Linear.Token.Linearly (Linearly, besides)
 import Prelude.Linear
 import qualified Prelude as P
 
@@ -90,10 +90,10 @@ fromRowsL rows l =
     l
     (LUV.fromListL (List.scanl' (flip $ (P.+) P.. U.length) 0 rows))
     & \(offs, l) ->
-      Matrix offs
-        $ LUV.fromVectorL
-          ( Push.alloc
-              $ foldMap' (PV.transfer . Pull.fromVector) rows
+      Matrix offs $
+        LUV.fromVectorL
+          ( Push.alloc $
+              foldMap' (PV.transfer . Pull.fromVector) rows
           )
           l
 
@@ -207,18 +207,18 @@ getEntry i j mat =
   numRows mat & \(Ur rowCount, Matrix offs ents) ->
     i >= rowCount & \case
       True ->
-        offs
-          `lseq` ents
-          `lseq` error ("getEntry: row index out of bound: " <> show (i, rowCount))
+        offs `lseq`
+          ents `lseq`
+            error ("getEntry: row index out of bound: " <> show (i, rowCount))
       False ->
         LUV.unsafeGet i offs & \(Ur off, offs) ->
           LUV.unsafeGet (i + 1) offs & \(Ur end, offs) ->
             let len = end - off
              in j >= len & \case
                   True ->
-                    offs
-                      `lseq` ents
-                      `lseq` error ("getEntry: column index out of bound: " <> show (j, len))
+                    offs `lseq`
+                      ents `lseq`
+                        error ("getEntry: column index out of bound: " <> show (j, len))
                   False -> unsafeGetEntry i j (Matrix offs ents)
 
 -- | shrinkToFit

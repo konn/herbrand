@@ -158,8 +158,8 @@ import Data.Vector.Unboxed.Deriving (derivingUnbox)
 import GHC.Generics (Generic)
 import Generics.Linear qualified as L
 import Generics.Linear.TH (deriveGeneric)
-import Linear.Witness.Token
-import Linear.Witness.Token.Unsafe (HasLinearWitness)
+import Linear.Token.Linearly
+import Linear.Token.Linearly.Unsafe (HasLinearWitness)
 import Logic.Propositional.Classical.SAT.Types (SatResult (..))
 import Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
 import Math.NumberTheory.Logarithms (wordLog2')
@@ -529,8 +529,8 @@ calcLBDL :: L.FoldM (UrT (S.State Valuation)) Lit Int
 calcLBDL =
   L.premapM
     ( \l -> do
-        UrT
-          $ S.state
+        UrT $
+          S.state
             ( BiL.first (Ur.lift getDecideLevel)
                 PL.. LUA.unsafeGet (fromIntegral $ unVarId $ litVar l)
             )
@@ -620,8 +620,8 @@ pushClause = \Clause {..} -> S.do
             (sats' :!: mq2) = insertsQ l sats lits
             !mq = mq1 <> mq2
             !ema' = ema * lbdEmaDecayFactor + fromIntegral lbd * (1 - lbdEmaDecayFactor)
-         in adjustVarActivities mq
-              $ VSIDSState unsats' sats' ema' (fromIntegral lbd >= ema') l
+         in adjustVarActivities mq $
+              VSIDSState unsats' sats' ema' (fromIntegral lbd >= ema') l
   where
     insertsQ !l !q0 =
       U.foldr'
@@ -657,8 +657,8 @@ incrementVarM :: Lit -> S.State (VSIDSState s) ()
 incrementVarM lit = S.modify \(VSIDSState unsats sats lbdEma exc l) ->
   let (mq, uns') = incrementVar l lit unsats
       (mq', sat') = incrementVar l lit sats
-   in adjustVarActivities ((Max <$> mq) <> (Max <$> mq'))
-        $ VSIDSState uns' sat' lbdEma exc l
+   in adjustVarActivities ((Max <$> mq) <> (Max <$> mq')) $
+        VSIDSState uns' sat' lbdEma exc l
 
 adjustVarActivities :: Maybe (Max Double) -> VSIDSState s -> VSIDSState s
 {-# INLINE adjustVarActivities #-}
@@ -794,14 +794,14 @@ clausesAndValsL = LinLens.lens \(CDCLState norig ss cs ws vs vids varQ rs) ->
 
 extractValuation :: CDCLState s %1 -> Valuation
 extractValuation (CDCLState numOrig steps clauses watches vals vids varQs rs) =
-  numOrig
-    `lseq` steps
-    `lseq` clauses
-    `lseq` watches
-    `lseq` vids
-    `lseq` varQs
-    `lseq` rs
-    `lseq` vals
+  numOrig `lseq`
+    steps `lseq`
+      clauses `lseq`
+        watches `lseq`
+          vids `lseq`
+            varQs `lseq`
+              rs `lseq`
+                vals
 
 toCDCLState ::
   forall s.
@@ -842,8 +842,8 @@ toCDCLState (CNF cls) lin =
             besides lin (toClauses cls'') PL.& \(clauses, lin) ->
               besides lin (LA.fromListL watches0) & \(watcheds, lin) ->
                 besides lin (LUA.allocL (maybe 0 ((+ 1) . fromEnum) maxVar) Indefinite) PL.& \(vals, lin) ->
-                  Right
-                    PL.$ CDCLState
+                  Right PL.$
+                    CDCLState
                       numOrigCls
                       steps
                       clauses
@@ -881,16 +881,16 @@ buildClause (i :!: watches) [x] =
 buildClause (i :!: watches) xs =
   ( i
       + 1
-      :!: Map.insertWith
-        IS.union
-        (fromEnum $ litVar $ head xs)
-        (IS.singleton i)
-        ( Map.insertWith
-            IS.union
-            (fromEnum $ litVar $ xs !! 1)
-            (IS.singleton i)
-            watches
-        )
+        :!: Map.insertWith
+          IS.union
+          (fromEnum $ litVar $ head xs)
+          (IS.singleton i)
+          ( Map.insertWith
+              IS.union
+              (fromEnum $ litVar $ xs !! 1)
+              (IS.singleton i)
+              watches
+          )
   , Clause {lits = U.fromList xs, satisfiedAt = -1, watched1 = 0, watched2 = 1}
   )
 

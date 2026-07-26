@@ -78,7 +78,7 @@ import Data.Vector.Mutable.Linear.Unboxed qualified as LUV
 import Data.Vector.Unboxed qualified as U
 import GHC.Generics qualified as GHC
 import GHC.Stack
-import Linear.Witness.Token (besides, linearly)
+import Linear.Token.Linearly (besides, linearly)
 import Logic.Propositional.Classical.SAT.CDCL.Types
 import Logic.Propositional.Classical.SAT.Types
 import Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
@@ -104,16 +104,16 @@ solveWith opts cnf = reify opts \(_ :: Proxy s) -> unur $ LHM.empty 128 \dic ->
       (runUrT (traverse (\v -> liftUrT (renameCNF v)) cnf))
       ((rev, Ur 0), dic)
       & \(Ur cnf, ((dic, Ur _), rev)) ->
-        dic
-          `lseq` besides rev (toCDCLState @s cnf)
-          & \case
-            (Left (Ur resl), rev) ->
-              rev `lseq` Ur (P.mempty P.<$ resl)
-            (Right state, rev) ->
-              solveState state & \case
-                (Ur Unsat) -> rev `lseq` Ur Unsat
-                (Ur (Satisfiable m)) ->
-                  Satisfiable D.<$> S.evalState (unrenameModel m) rev
+        dic `lseq`
+          besides rev (toCDCLState @s cnf)
+            & \case
+              (Left (Ur resl), rev) ->
+                rev `lseq` Ur (P.mempty P.<$ resl)
+              (Right state, rev) ->
+                solveState state & \case
+                  (Ur Unsat) -> rev `lseq` Ur Unsat
+                  (Ur (Satisfiable m)) ->
+                    Satisfiable D.<$> S.evalState (unrenameModel m) rev
 
 unrenameModel ::
   (Hashable a) =>
@@ -134,19 +134,19 @@ backHS vs =
     $ runUrT
     $ traverse
       ( \v ->
-          UrT
-            $ S.state
-            $ \dic ->
-              BiL.first
-                ( D.fmap
-                    ( fromMaybe
-                        ( error
-                            $ "unrenameModel: variable out of bound: "
-                            P.<> show v
-                        )
-                    )
-                )
-                $ LHM.lookup v dic
+          UrT $
+            S.state $
+              \dic ->
+                BiL.first
+                  ( D.fmap
+                      ( fromMaybe
+                          ( error $
+                              "unrenameModel: variable out of bound: "
+                                P.<> show v
+                          )
+                      )
+                  )
+                  $ LHM.lookup v dic
       )
     $ HS.toList vs
 
@@ -246,11 +246,13 @@ backjump confCls lit = S.do
               then S.pure ()
               else S.do
                 Ur satAt <- getSatisfiedLevel $ ClauseId i
-                satAt > decLvl & \case
-                  True -> S.do
-                    setSatisfiedLevel (ClauseId i) (-1)
-                    unsatisfiedsL S.%= LSet.insert (ClauseId i)
-                  False -> S.pure ()
+                satAt
+                  > decLvl
+                  & \case
+                    True -> S.do
+                      setSatisfiedLevel (ClauseId i) (-1)
+                      unsatisfiedsL S.%= LSet.insert (ClauseId i)
+                    False -> S.pure ()
                 self (i + 1)
         )
         0
@@ -287,10 +289,10 @@ backjump confCls lit = S.do
             vals
 
       S.zoom vsidsStateL $ Ur.evalUrT $ P.forM_ unsats' \v ->
-        liftUrT
-          $ S.state
-          $ ((),)
-          PL.. moveToUnsatQueue v
+        liftUrT $
+          S.state $
+            ((),)
+              PL.. moveToUnsatQueue v
       C.void $ assertLit reason truth
       tryRestart
       solverLoop $ Just (truth, reason)
@@ -512,24 +514,24 @@ propagateUnit ml = S.do
       -- FIXME: Use heuristics for variable selection.
       Ur cands <- S.uses unsatisfiedsL $ BiL.first LSet.toList PL.. dup2
       Ur mresl <-
-        runUrT
-          $ runEarly
-          $ Foldable.traverse_
-            ( \ !i -> Early do
-                w <- UrT $ S.zoom clausesL $ getWatchedLits i
-                resl <- liftUrT $ findUnit i w
-                case resl of
-                  Nothing -> pure St.Nothing
-                  Just (WatchChangedFromTo w old new newIdx) -> S.do
-                    St.Nothing <$ liftUrT (updateWatchLit i w old new newIdx)
-                  Just (Satisfied m) -> S.do
-                    St.Nothing <$ liftUrT (setSatisfied m i)
-                  Just (Conflict ml) -> S.do
-                    pure $ St.Just $ Left (i, ml)
-                  Just (Unit l) -> S.do
-                    pure $ St.Just $ Right (l, i)
-            )
-            cands
+        runUrT $
+          runEarly $
+            Foldable.traverse_
+              ( \ !i -> Early do
+                  w <- UrT $ S.zoom clausesL $ getWatchedLits i
+                  resl <- liftUrT $ findUnit i w
+                  case resl of
+                    Nothing -> pure St.Nothing
+                    Just (WatchChangedFromTo w old new newIdx) -> S.do
+                      St.Nothing <$ liftUrT (updateWatchLit i w old new newIdx)
+                    Just (Satisfied m) -> S.do
+                      St.Nothing <$ liftUrT (setSatisfied m i)
+                    Just (Conflict ml) -> S.do
+                      pure $ St.Just $ Left (i, ml)
+                    Just (Unit l) -> S.do
+                      pure $ St.Just $ Right (l, i)
+              )
+              cands
       case mresl of
         St.Nothing -> S.pure NoMorePropagation
         St.Just (Left (i, ml)) -> S.pure $ ConflictFound i ml
@@ -608,7 +610,6 @@ propLit trueLit cid = S.do
       let !l1 = getLit1 wlits
       if litVar l1 == litVar trueLit
         then -- Have the same variable as watched var #1
-
           if l1 == trueLit
             then S.pure $ Just $ Satisfied Nothing -- Satisfied.
             else S.do
@@ -629,10 +630,9 @@ propLit trueLit cid = S.do
                         -- Unsatifiable! pick the oldest variable as conflicting lit.
                         Just D.<$> S.zoom valuationL (reportLastAddedAsConflict wlits)
         else -- Otherwise it must be watched var #2
-
           let !l2 =
-                P.fromMaybe (error $ "Impossible: propagated literal matched neither of lits! (prop, watcheds) = " <> show (trueLit, wlits))
-                  $ getLit2 wlits
+                P.fromMaybe (error $ "Impossible: propagated literal matched neither of lits! (prop, watcheds) = " <> show (trueLit, wlits)) $
+                  getLit2 wlits
            in if l2 == trueLit
                 then S.pure $ Just $ Satisfied Nothing -- Satisfied
                 else S.do
@@ -704,9 +704,9 @@ reportLastAddedAsConflict (WatchOne l1) = S.pure $ Conflict l1
 reportLastAddedAsConflict (WatchThese l1 l2) = S.do
   Ur v1 <- S.state $ LUA.unsafeGet (fromVarId $ litVar l1)
   Ur v2 <- S.state $ LUA.unsafeGet (fromVarId $ litVar l2)
-  S.pure
-    $ Conflict
-    $ if introduced v1 > introduced v2 then l1 else l2
+  S.pure $
+    Conflict $
+      if introduced v1 > introduced v2 then l1 else l2
 
 introduced :: Variable -> Pair DecideLevel Step
 introduced Indefinite = -1 :!: -1
@@ -736,31 +736,31 @@ findNextAvailable w cid = S.do
 
   Ur lits <- S.zoom clausesL $ getClauseLits cid
   Ur (mSat :!: mUndet) <-
-    S.zoom valuationL
-      $ runUrT
-      $ fmap (P.either P.id P.id)
-      $ runExceptT
-      $ U.ifoldM'
-        -- Loop invariant: both mSat and mUndet must be Nothing
-        ( \(mSat :!: mUndet) !i !l -> do
-            if i `elemWatchLitIdx` widx
-              then pure (mSat :!: mUndet)
-              else do
-                !v <- lift $ liftUrT (evalLit l)
-                let (!mSat', !mUndet') =
-                      Bi.bimap
-                        (mSat <|>:)
-                        (mUndet <|>:)
-                        case v of
-                          Nothing -> (St.Nothing, St.Just i)
-                          Just False -> (St.Nothing, St.Nothing)
-                          Just True -> (St.Just i, St.Nothing)
-                if St.isJust mSat' && St.isJust mUndet'
-                  then throwE (mSat' :!: mUndet')
-                  else pure (mSat' :!: mUndet')
-        )
-        (St.Nothing :!: St.Nothing)
-        lits
+    S.zoom valuationL $
+      runUrT $
+        fmap (P.either P.id P.id) $
+          runExceptT $
+            U.ifoldM'
+              -- Loop invariant: both mSat and mUndet must be Nothing
+              ( \(mSat :!: mUndet) !i !l -> do
+                  if i `elemWatchLitIdx` widx
+                    then pure (mSat :!: mUndet)
+                    else do
+                      !v <- lift $ liftUrT (evalLit l)
+                      let (!mSat', !mUndet') =
+                            Bi.bimap
+                              (mSat <|>:)
+                              (mUndet <|>:)
+                              case v of
+                                Nothing -> (St.Nothing, St.Just i)
+                                Just False -> (St.Nothing, St.Nothing)
+                                Just True -> (St.Just i, St.Nothing)
+                      if St.isJust mSat' && St.isJust mUndet'
+                        then throwE (mSat' :!: mUndet')
+                        else pure (mSat' :!: mUndet')
+              )
+              (St.Nothing :!: St.Nothing)
+              lits
 
   case mSat of
     St.Just i -> S.do
@@ -787,17 +787,17 @@ evalClause cid = S.do
     then S.pure $ Just True
     else S.do
       Ur lits <- S.zoom clausesL $ getClauseLits cid
-      S.zoom valuationL
-        $ D.fmap unur
-        $ runUrT
-        $ fmap (P.fromMaybe (Just True))
-        $ runMaybeT
-        $ U.foldM'
-          ( \ !anyNothing !l ->
-              lift (liftUrT $ evalLit l) >>= \case
-                Nothing -> pure Nothing
-                Just False -> pure anyNothing
-                Just True -> empty
-          )
-          (Just False)
-          lits
+      S.zoom valuationL $
+        D.fmap unur $
+          runUrT $
+            fmap (P.fromMaybe (Just True)) $
+              runMaybeT $
+                U.foldM'
+                  ( \ !anyNothing !l ->
+                      lift (liftUrT $ evalLit l) >>= \case
+                        Nothing -> pure Nothing
+                        Just False -> pure anyNothing
+                        Just True -> empty
+                  )
+                  (Just False)
+                  lits
