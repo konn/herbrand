@@ -10,152 +10,124 @@ on:
         description: Comparison baseline for benchmark
 
 jobs:
+  ci-enumerate:
+    name: Enumerate GHC Versions
+    runs-on: ubuntu-latest
+    outputs:
+      plan: ${{steps.list-ci.outputs.plan}}
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: ${{github.event.pull_request.head.sha || github.sha}}
+    - name: Enumerate CI plans
+      id: list-ci
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const script = require('./ci/scripts/enumerate-ci.js')
+          await script({github, context, core, glob, io, require})
+
   build:
+    name: Build and Test (${{matrix.plan.name}})
+    needs: [ci-enumerate]
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        plan: ${{fromJSON(needs.ci-enumerate.outputs.plan)}}
     env:
-      ghc: 9.4.7
-      cabal: 3.10.1.0
-    name: Build
+      cabal-version: 3.16.1.0
+      cabal: cabal --project-file=${{matrix.plan.path}}
+      ghc: ${{matrix.plan.ghc}}
+      project-file: ${{matrix.plan.path}}
+      plan: ${{matrix.plan.name}}
+      artifact-name: artifact-${{matrix.plan.name}}
     runs-on: ubuntu-latest
     outputs:
       benchmarks: ${{steps.list-bins.outputs.benchs}}
       tests: ${{steps.list-bins.outputs.tests}}
+      artifact: artifact-${{matrix.plan.name}}
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
       with:
         ref: ${{github.event.pull_request.head.sha || github.sha}}
     - name: Calculate hash keys
-      uses: actions/github-script@v6
+      uses: actions/github-script@v7
       id: cache-keys
       with:
         script: |
-          const script = require('./ci/generate-cache-key.js')
-          await script({
-            core, glob, os: "${{runner.os}}", ghc: "${{env.ghc}}",
-            projects: [
-              "cabal.project",
-              "cabal.project.local",
-              "cabal.project.freeze"
-            ]
-          })
+          const script = require('./ci/scripts/calc-cache-keys.js')
+          await script({ os: "ubuntu", plan: ${{toJSON(env.plan)}}, path: ${{toJSON(env.project-file)}}, core, glob })
 
     - name: Setup Haskell
-      uses: haskell/actions/setup@v2
+      uses: haskell-actions/setup@v2
       with:
         enable-stack: false
-        cabal-version: ${{env.cabal}}
+        cabal-version: ${{env.cabal-version}}
         ghc-version: ${{env.ghc}}
     - name: Restore ~/.cabal/store
-      uses: actions/cache/restore@v3
+      uses: actions/cache/restore@v4
       with:
         path: ~/.cabal/store
         key: ${{steps.cache-keys.outputs.store}}
         restore-keys: ${{steps.cache-keys.outputs.store-restore}}
     - name: Restore dist-newstyle
-      uses: actions/cache/restore@v3
+      uses: actions/cache/restore@v4
       with:
         path: dist-newstyle
         key: ${{steps.cache-keys.outputs.dist}}
         restore-keys: ${{steps.cache-keys.outputs.dist-restore}}
     - name: cabal configure
-      run: >
-        cabal v2-configure
-        --enable-tests --enable-benchmarks --enable-optimisation=2
-        --constraint="herbrand +bench-chart"
-        
-        cabal update
+      run: |
+        ${{env.cabal}} v2-configure --enable-tests --enable-benchmarks --enable-optimisation=2 --constraint="herbrand +bench-chart"
+        ${{env.cabal}} update
     - name: Build Dependencies
-      run: | 
-        cabal build --only-dependencies
+      run: |
+        ${{env.cabal}} build --only-dependencies all
     - name: Save ~/.cabal/store Cache
-      uses: actions/cache/save@v3
+      uses: actions/cache/save@v4
       with:
         path: ~/.cabal/store
         key: ${{steps.cache-keys.outputs.store}}
     - name: Build All
-      run: | 
-        cabal build
+      run: |
+        ${{env.cabal}} build all
     - name: Save dist-newstyle Cache
-      uses: actions/cache/save@v3
+      uses: actions/cache/save@v4
       with:
         path: dist-newstyle
         key: ${{steps.cache-keys.outputs.dist}}
 
     - name: Collect binaries
       continue-on-error: true
-      run: ./ci/collect-bins.sh artifacts
+      run: ./ci/scripts/collect-bins.sh "${{env.artifact-name}}"
     - name: Upload Aritracts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
-        path: artifacts.tar.zst
-        name: artifacts
+        path: ${{env.artifact-name}}.tar.zst
+        name: ${{env.artifact-name}}
+        retention-days: 1
     - name: List Binaries
       id: list-bins
       shell: bash
       run: |
-        echo "benchs=$(jq -cMnR '[inputs]' <artifacts/benchs.list)" >>"${GITHUB_OUTPUT}"
-        echo "tests=$(jq -cMnR '[inputs]' <artifacts/tests.list)" >>"${GITHUB_OUTPUT}"
-
-  test:
-    name: Test
-    needs: [build]
-    env:
-      ghc: 9.4.7
-      cabal: 3.10.1.0
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-        with:
-          ref: ${{github.event.pull_request.head.sha || github.sha}}
-      - name: Download artifacts
-        id: download
-        uses: actions/download-artifact@v3
-      - name: Decompress
-        run: tar xaf artifacts/artifacts.tar.zst
-      - name: Run Tests
-        shell: bash
-        run: |
-          set -euo pipefail
-          TOTAL=0
-          SUCCESS=0
-          FAIL=0
-          while read -r TEST; do
-            TOTAL=$((TOTAL + 1))
-            echo "--------"
-            echo "Running: ${TEST}"
-            set +e
-            ./artifacts/tests/"${TEST}"
-            RESL=$?
-            set -e
-            if [ ${RESL} -eq 0 ]; then
-              SUCCESS=$((SUCCESS + 1))
-              echo "Result: Successed"
-            else
-              FAIL=$((FAIL + 1))
-              echo 'Result: FAILED!'
-            fi
-          done <./artifacts/tests.list
-
-          echo ""
-          echo "----"
-
-          if [ "${FAIL}" -eq 0 ]; then
-            echo "All ${TOTAL} tests passed."
-          else
-            echo "${FAIL} out of ${TOTAL} tests FAILED"'!'
-            exit 1
-          fi
+        echo "benchs=$(jq -cMnR '[inputs]' <"${{env.artifact-name}}"/benchs.list)" >>"${GITHUB_OUTPUT}"
+        echo "tests=$(jq -cMnR '[inputs]' <"${{env.artifact-name}}"/tests.list)" >>"${GITHUB_OUTPUT}"
+    - name: Run Tests
+      run: ${{env.cabal}} test
       
   bench:
     name: Benchrmark
-    needs: [build]
+    needs: [ci-enumerate, build]
     env:
-      ghc: 9.4.7
-      cabal: 3.10.1.0
+      ghc: 9.12.4
+      cabal: 3.16.1.0
       csv-path: bench-results/${{matrix.bench}}.csv
       svg-path: bench-results/${{matrix.bench}}.svg
       report-dir: bench-results/${{matrix.bench}}-report
       report-tarball: bench-results/${{matrix.bench}}-report.tar.gz
       branch: ${{ github.head_ref || github.ref_name }}
+      artifact: artifact-ghc-9.12.4
     continue-on-error: true
     strategy:
       fail-fast: false
@@ -163,22 +135,24 @@ jobs:
         bench: ${{fromJSON(needs.build.outputs.benchmarks)}}
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
       with:
         ref: ${{github.event.pull_request.head.sha || github.sha}}
     - name: Modify Branch Name
       run: git switch -c ${{env.branch}}
     - name: Download artifacts
       id: download
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{env.artifact}}
     - name: Decompress
-      run: tar xaf artifacts/artifacts.tar.zst
+      run: tar xaf "${{steps.download.outputs.download-path}}/${{env.artifact}}.tar.zst"
     - name: Run Benchmark
-      uses: actions/github-script@v6
+      uses: actions/github-script@v7
       id: benchmark
       with:
         script: |
-          const script = require('./ci/compare-with-main.js')
+          const script = require('./ci/scripts/compare-with-main.js')
           await script({
             core, glob, io, exec, context, github, fetch,
             bench_name: "${{matrix.bench}}",
@@ -186,13 +160,13 @@ jobs:
           })
     - name: Upload CSV
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         path: ${{env.csv-path}}
         name: ${{matrix.bench}}.csv
     - name: Upload SVG
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         path: ${{env.svg-path}}
         name: ${{matrix.bench}}.svg
@@ -223,7 +197,7 @@ jobs:
           ARGS+=(--pull-base-branch "${PULL_BASE_BRANCH}")
           ARGS+=(--pull-base-commit "${PULL_BASE_COMMIT}")
         fi
-        ./artifacts/exes/bench-chart "${ARGS[@]}"
+        ./${{env.artifact}}/exes/bench-chart "${ARGS[@]}"
 
     - name: Compress Report
       if: always()
@@ -234,7 +208,7 @@ jobs:
         "${{matrix.bench}}-report"
     - name: Upload Report
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         path: ${{env.report-tarball}}
         name: ${{matrix.bench}}-report
@@ -275,7 +249,7 @@ jobs:
         token: ${{secrets.GITHUB_TOKEN}}
     - name: Download artifacts
       id: download
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         path: workspace/downloads
     - name: Extract bench results and generate
@@ -285,8 +259,8 @@ jobs:
         set -euxo pipefail
         DL_DIR="${{steps.download.outputs.download-path}}"
         WORKDIR=workspace
-        tar xaf "${DL_DIR}/artifacts/artifacts.tar.zst" --directory="${WORKDIR}"
-        ARTIFACT_DIRS=${WORKDIR}/artifacts
+        tar xaf "${DL_DIR}/artifact-ghc-9.12.4/artifact-ghc-9.12.4.tar.zst" --directory="${WORKDIR}"
+        ARTIFACT_DIRS=${WORKDIR}/artifact-ghc-9.12.4
         REPORT_DIR=${WORKDIR}/reports
         cat "${ARTIFACT_DIRS}/benchs.list" | while read -r BENCH; do
           DEST=${REPORT_DIR}/${BENCH}

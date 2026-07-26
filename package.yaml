@@ -5,6 +5,7 @@ license:             BSD3
 author:              "Hiromi ISHII"
 maintainer:          "konn.jinro_at_gmail.com"
 copyright:           "2023 (c) Hiromi ISHII"
+tested-with: GHC == 9.12.4 || == 9.14.1
 
 extra-source-files:
 - README.md
@@ -80,7 +81,10 @@ library:
   - linear-witness
   - linear-base
   - linear-generics
+  - linear-memory
   - vector-th-unbox
+  - derive-storable
+  - derive-storable-plugin
 
 internal-libraries:
   herbrand-bench:
