@@ -7,9 +7,9 @@ import Control.Exception (evaluate)
 import Herbrand.Bench
 import Logic.Propositional.Classical.SAT.CDCL (CDCLOptions (..), RestartStrategy (..), defaultAdaptiveFactor, defaultExponentialRestart, defaultLubyRestart)
 import qualified Logic.Propositional.Classical.SAT.CDCL as CDCL
-import qualified Logic.Propositional.Classical.SAT.DPLL as DPLL
 import qualified Logic.Propositional.Classical.SAT.Tableaux as Tableaux
 import Logic.Propositional.Syntax.General
+import Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive (CNF)
 import System.Mem (performGC)
 
 main :: IO ()
@@ -22,38 +22,23 @@ main = do
     [ bgroup
         "solve"
         [ withCnfs "huge" huges $ \fml ->
-            [ allowFailureBecause "O(n^2)"
-                $ timeout 30
-                $ bench "tableaux"
-                $ nfAppIO (fmap $ Tableaux.solve . snd) fml
-            , bench "DPLL" $ nfAppIO (fmap $ DPLL.solve . fst) fml
+            [ allowFailureBecause "O(n^2)" $
+                timeout 30 $
+                  bench "tableaux" $
+                    nfAppIO (fmap $ Tableaux.solve . snd) fml
             ]
-              ++ cdclBenches fml
-        , withCnfs "Sudoku" sudoku $ \fml ->
-            allowFailureBecause
-              "Large input"
-              ( timeout 180
-                  $ bench "DPLL"
-                  $ nfAppIO (fmap $ DPLL.solve . fst) fml
-              )
-              : cdclBenches fml
-        , withCnfs "SATLIB" satlib $ \fml ->
-            allowFailureBecause
-              "Large input"
-              ( timeout 180
-                  $ bench "DPLL"
-                  $ nfAppIO (fmap $ DPLL.solve . fst) fml
-              )
-              : cdclBenches fml
+              <> cdclBenches fml
+        , withCnfs "Sudoku" sudoku cdclBenches
+        , withCnfs "SATLIB" satlib cdclBenches
         ]
     ]
 
-cdclBenches :: IO (DPLL.CNF Word, Formula Full Word) -> [Benchmark]
+cdclBenches :: IO (CNF Word, Formula Full Word) -> [Benchmark]
 cdclBenches fml =
-  [ allowFailureBecause "Large input"
-    $ timeout 100
-    $ bench lab
-    $ nfAppIO (fmap $ CDCL.solveWith opt . fst) fml
+  [ allowFailureBecause "Large input" $
+      timeout 100 $
+        bench lab $
+          nfAppIO (fmap $ CDCL.solveWith opt . fst) fml
   | (lab, opt) <- cdclSolvers
   ]
 
