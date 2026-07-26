@@ -13,7 +13,8 @@ source-repository-package
 
 with-compiler: ghc-9.14.1
 allow-newer:
-  chart-svg:time
+  chart-svg:time,
+  tdigest:base
 
 constraints:
   abstract-deque ==0.3,
