@@ -93,15 +93,7 @@ module.exports = async ({
       // FIXME: Checkout data directory for completeness
       await exec.exec(
         `${base_art_dir}/artifact-ghc-9.12.4/benchs/${bench_name}`,
-        [
-          "-j1",
-          "--pattern",
-          "CDCL",
-          "--csv",
-          base_csv_path,
-          "--svg",
-          base_svg_path,
-        ],
+        ["-j1", "--csv", base_csv_path, "--svg", base_svg_path],
         { ignoreReturnCode: true }
       );
       core.setOutput("baseline-csv", base_csv_path);
@@ -121,7 +113,7 @@ module.exports = async ({
     }
   }
 
-  const bench_args = ["-j1", "--pattern", "CDCL"];
+  const bench_args = ["-j1"];
   const exe = `./artifact-ghc-9.12.4/benchs/${bench_name}`;
   if (base_csv_path !== undefined) {
     exec.exec("head", ["-n", 5, base_csv_path]);
