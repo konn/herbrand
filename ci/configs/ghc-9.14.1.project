@@ -5,9 +5,15 @@
 -- To only use tested packages, uncomment the following line:
 -- remote-repo: stackage-nightly-2026-07-24:http://www.stackage.org/nightly-2026-07-24
 import: ../../cabal.project
+
+source-repository-package
+  type: git
+  location: https://github.com/sheaf/ghc-tcplugins-extra.git
+  tag: 6842eb467dde87cf6249828011f4c9d717f7f2b0
+
 with-compiler: ghc-9.14.1
 allow-newer:
-  ghc-tcplugins-extra:ghc
+  chart-svg:time
 
 constraints:
   abstract-deque ==0.3,
