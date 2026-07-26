@@ -1,5 +1,6 @@
 {-# LANGUAGE GHC2021 #-}
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DerivingVia #-}
@@ -33,11 +34,14 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   defaultRestartStrategy,
   defaultExponentialRestart,
   defaultLubyRestart,
+  luby,
   AssertionResult (..),
   Valuation,
   Clauses,
   WatchMap,
   stepsL,
+  trailL,
+  qheadL,
   pushClause,
   getClauseLits,
   getNumClauses,
@@ -107,7 +111,21 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   watchLitOf,
   getWatchedLitIndices,
   elemWatchLitIdx,
+  RestartResult (..),
   tryRestart,
+  bumpSeedScan,
+  bumpPostDrainScan,
+  bumpAssignment,
+  bumpTrailAppend,
+  bumpDuplicateEnqueue,
+  bumpPropagationEvent,
+  bumpWatchVisit,
+  bumpWatchMove,
+  bumpDecision,
+  bumpConflict,
+  SolverStats (..),
+  solverStatsL,
+  zeroSolverStats,
 ) where
 
 import Control.DeepSeq (NFData, force)
@@ -173,11 +191,61 @@ type RestartAt = Word
 
 type RestartCount = Word
 
+data SolverStats = SolverStats
+  { seedScanCount :: {-# UNPACK #-} !Int
+  , postDrainScanCount :: {-# UNPACK #-} !Int
+  , assignmentCount :: {-# UNPACK #-} !Int
+  , trailAppendCount :: {-# UNPACK #-} !Int
+  , duplicateEnqueueCount :: {-# UNPACK #-} !Int
+  , propagationEventCount :: {-# UNPACK #-} !Int
+  , watchVisitCount :: {-# UNPACK #-} !Int
+  , watchMoveCount :: {-# UNPACK #-} !Int
+  , decisionCount :: {-# UNPACK #-} !Int
+  , conflictCount :: {-# UNPACK #-} !Int
+  , observedRestartCount :: {-# UNPACK #-} !Int
+  }
+  deriving (Show, Eq, Ord, Generic)
+
+deriveGeneric ''SolverStats
+
+deriving via L.AsMovable SolverStats instance PL.Consumable SolverStats
+
+deriving via L.AsMovable SolverStats instance PL.Dupable SolverStats
+
+deriving via L.Generically SolverStats instance PL.Movable SolverStats
+
+zeroSolverStats :: SolverStats
+zeroSolverStats = SolverStats 0 0 0 0 0 0 0 0 0 0 0
+
+#ifdef HERBRAND_CDCL_INSTRUMENTED
+data Instrumentation = Instrumentation !SolverStats
+  deriving (Show, Eq, Ord, Generic)
+#else
+data Instrumentation = Instrumentation
+  deriving (Show, Eq, Ord, Generic)
+#endif
+
+deriveGeneric ''Instrumentation
+
+deriving via L.AsMovable Instrumentation instance PL.Consumable Instrumentation
+
+deriving via L.AsMovable Instrumentation instance PL.Dupable Instrumentation
+
+deriving via L.Generically Instrumentation instance PL.Movable Instrumentation
+
+zeroInstrumentation :: Instrumentation
+#ifdef HERBRAND_CDCL_INSTRUMENTED
+zeroInstrumentation = Instrumentation zeroSolverStats
+#else
+zeroInstrumentation = Instrumentation
+#endif
+
 data RestartState where
   RestartState ::
     {-# UNPACK #-} !RunCount ->
     {-# UNPACK #-} !RestartAt ->
     {-# UNPACK #-} !RestartCount ->
+    {-# UNPACK #-} !Instrumentation %1 ->
     RestartState
   deriving (Show, Eq, Ord, Generic)
 
@@ -187,6 +255,17 @@ deriving via L.AsMovable RestartState instance PL.Dupable RestartState
 
 instance PL.Movable RestartState where
   move = Unsafe.toLinear Ur
+
+data RestartResult = Continued | Restarted
+  deriving (Show, Eq, Ord, Generic)
+
+deriveGeneric ''RestartResult
+
+deriving via L.AsMovable RestartResult instance PL.Consumable RestartResult
+
+deriving via L.AsMovable RestartResult instance PL.Dupable RestartResult
+
+deriving via L.Generically RestartResult instance PL.Movable RestartResult
 
 defaultDecayFactor :: VariableSelection
 defaultDecayFactor = 0.95
@@ -234,10 +313,10 @@ data RestartStrategy
 nextRestartState :: RestartStrategy -> RestartState %1 -> RestartState
 nextRestartState = \case
   NoRestart -> PL.id
-  ExponentialRestart {..} -> \(RestartState _ thresh c) ->
-    RestartState 0 (thresh * increaseFactor) (c + 1)
-  LubyRestart {..} -> \(RestartState _ _ c) ->
-    RestartState 0 (initialRestart * luby c) (c + 1)
+  ExponentialRestart {..} -> \(RestartState _ thresh c instrumentation) ->
+    RestartState 0 (thresh * increaseFactor) (c + 1) instrumentation
+  LubyRestart {..} -> \(RestartState _ _ c instrumentation) ->
+    RestartState 0 (initialRestart * luby (c + 1)) (c + 1) instrumentation
 
 luby :: Word -> Word
 luby = go
@@ -267,9 +346,8 @@ defaultExponentialRestart =
 
 defaultLubyRestart :: RestartStrategy
 defaultLubyRestart =
-  ExponentialRestart
+  LubyRestart
     { initialRestart = 100
-    , increaseFactor = 2
     }
 
 data CDCLOptions = CDCLOptions
@@ -567,6 +645,10 @@ data CDCLState s where
     {-# UNPACK #-} !Int %1 ->
     -- | Level-wise maximum steps
     {-# UNPACK #-} !(LUV.Vector Step) %1 ->
+    -- | Assigned literals in propagation order
+    {-# UNPACK #-} !(LUV.Vector Lit) %1 ->
+    -- | Index of the next trail literal to propagate
+    {-# UNPACK #-} !Int %1 ->
     -- | Clauses
     {-# UNPACK #-} !Clauses %1 ->
     -- | Watches
@@ -584,12 +666,8 @@ data CDCLState s where
 
 clausesL :: LinLens.Lens' (CDCLState s) Clauses
 {-# INLINE clausesL #-}
-clausesL = LinLens.lens \(CDCLState numOrig ss cs ws vs vids varQ rs) ->
-  (cs, \cs -> CDCLState numOrig ss cs ws vs vids varQ rs)
-
-clauseBodiesL :: LinLens.Lens' Clauses (LUV.Vector ClauseBody)
-clauseBodiesL = LinLens.lens \(Clauses lits bodies) ->
-  (bodies, \bodies -> Clauses lits bodies)
+clausesL = LinLens.lens \(CDCLState numOrig ss trail qhead cs ws vs vids varQ rs) ->
+  (cs, \cs -> CDCLState numOrig ss trail qhead cs ws vs vids varQ rs)
 
 pushClause :: forall s. (Reifies s CDCLOptions) => Clause -> S.State (CDCLState s) ()
 {-# INLINE pushClause #-}
@@ -746,26 +824,36 @@ getNumClauses =
 
 stepsL :: LinLens.Lens' (CDCLState s) (LUV.Vector Step)
 {-# INLINE stepsL #-}
-stepsL = LinLens.lens \(CDCLState numOrig ss cs ws vs vids varQ rs) ->
-  (ss, \ss -> CDCLState numOrig ss cs ws vs vids varQ rs)
+stepsL = LinLens.lens \(CDCLState numOrig ss trail qhead cs ws vs vids varQ rs) ->
+  (ss, \ss -> CDCLState numOrig ss trail qhead cs ws vs vids varQ rs)
+
+trailL :: LinLens.Lens' (CDCLState s) (LUV.Vector Lit)
+{-# INLINE trailL #-}
+trailL = LinLens.lens \(CDCLState numOrig ss trail qhead cs ws vs vids varQ rs) ->
+  (trail, \trail -> CDCLState numOrig ss trail qhead cs ws vs vids varQ rs)
+
+qheadL :: LinLens.Lens' (CDCLState s) Int
+{-# INLINE qheadL #-}
+qheadL = LinLens.lens \(CDCLState numOrig ss trail qhead cs ws vs vids varQ rs) ->
+  (qhead, \qhead -> CDCLState numOrig ss trail qhead cs ws vs vids varQ rs)
 
 numInitialClausesL :: LinLens.Lens' (CDCLState s) Int
-numInitialClausesL = LinLens.lens \(CDCLState numOrig ss cs ws vs vids varQ rs) ->
-  (numOrig, \numOrig -> CDCLState numOrig ss cs ws vs vids varQ rs)
+numInitialClausesL = LinLens.lens \(CDCLState numOrig ss trail qhead cs ws vs vids varQ rs) ->
+  (numOrig, \numOrig -> CDCLState numOrig ss trail qhead cs ws vs vids varQ rs)
 
 watchesL :: LinLens.Lens' (CDCLState s) WatchMap
 {-# INLINE watchesL #-}
-watchesL = LinLens.lens \(CDCLState numOrig ss cs ws vs vids varQ rs) ->
-  (ws, \ws -> CDCLState numOrig ss cs ws vs vids varQ rs)
+watchesL = LinLens.lens \(CDCLState numOrig ss trail qhead cs ws vs vids varQ rs) ->
+  (ws, \ws -> CDCLState numOrig ss trail qhead cs ws vs vids varQ rs)
 
 valuationL :: LinLens.Lens' (CDCLState s) Valuation
 {-# INLINE valuationL #-}
-valuationL = LinLens.lens \(CDCLState norig ss cs ws vs vids varQ rs) ->
-  (vs, \vs -> CDCLState norig ss cs ws vs vids varQ rs)
+valuationL = LinLens.lens \(CDCLState norig ss trail qhead cs ws vs vids varQ rs) ->
+  (vs, \vs -> CDCLState norig ss trail qhead cs ws vs vids varQ rs)
 
 vsidsStateL :: LinLens.Lens' (CDCLState s) (VSIDSState s)
-vsidsStateL = LinLens.lens \(CDCLState norig ss cs ws vs vids varQ rs) ->
-  (varQ, \varQ -> CDCLState norig ss cs ws vs vids varQ rs)
+vsidsStateL = LinLens.lens \(CDCLState norig ss trail qhead cs ws vs vids varQ rs) ->
+  (varQ, \varQ -> CDCLState norig ss trail qhead cs ws vs vids varQ rs)
 
 unsatVarQL :: LinLens.Lens' (CDCLState s) (Ur VarQueue)
 unsatVarQL =
@@ -779,29 +867,31 @@ satVarQL =
 
 unsatisfiedsL :: LinLens.Lens' (CDCLState s) (LSet.Set ClauseId)
 {-# INLINE unsatisfiedsL #-}
-unsatisfiedsL = LinLens.lens \(CDCLState norig ss cs ws vs vids varQ rs) ->
-  (vids, \vids -> CDCLState norig ss cs ws vs vids varQ rs)
+unsatisfiedsL = LinLens.lens \(CDCLState norig ss trail qhead cs ws vs vids varQ rs) ->
+  (vids, \vids -> CDCLState norig ss trail qhead cs ws vs vids varQ rs)
 
 clausesValsAndUnsatsL :: LinLens.Lens' (CDCLState s) (Clauses, Valuation, LSet.Set ClauseId)
 {-# INLINE clausesValsAndUnsatsL #-}
-clausesValsAndUnsatsL = LinLens.lens \(CDCLState norig ss cs ws vs vids varQ rs) ->
-  ((cs, vs, vids), \(cs, vs, vids) -> CDCLState norig ss cs ws vs vids varQ rs)
+clausesValsAndUnsatsL = LinLens.lens \(CDCLState norig ss trail qhead cs ws vs vids varQ rs) ->
+  ((cs, vs, vids), \(cs, vs, vids) -> CDCLState norig ss trail qhead cs ws vs vids varQ rs)
 
 clausesAndValsL :: LinLens.Lens' (CDCLState s) (Clauses, Valuation)
 {-# INLINE clausesAndValsL #-}
-clausesAndValsL = LinLens.lens \(CDCLState norig ss cs ws vs vids varQ rs) ->
-  ((cs, vs), \(cs, vs) -> CDCLState norig ss cs ws vs vids varQ rs)
+clausesAndValsL = LinLens.lens \(CDCLState norig ss trail qhead cs ws vs vids varQ rs) ->
+  ((cs, vs), \(cs, vs) -> CDCLState norig ss trail qhead cs ws vs vids varQ rs)
 
 extractValuation :: CDCLState s %1 -> Valuation
-extractValuation (CDCLState numOrig steps clauses watches vals vids varQs rs) =
+extractValuation (CDCLState numOrig steps trail qhead clauses watches vals vids varQs rs) =
   numOrig `lseq`
     steps `lseq`
-      clauses `lseq`
-        watches `lseq`
-          vids `lseq`
-            varQs `lseq`
-              rs `lseq`
-                vals
+      trail `lseq`
+        qhead `lseq`
+          clauses `lseq`
+            watches `lseq`
+              vids `lseq`
+                varQs `lseq`
+                  rs `lseq`
+                    vals
 
 toCDCLState ::
   forall s.
@@ -823,7 +913,12 @@ toCDCLState (CNF cls) lin =
           )
           cls
       numVars = maybe 0 ((+ 1) . fromEnum) maxVar
-      rs = RestartState 0 (fromMaybe 0 $ getInitRestart restartOpt) 0
+      rs =
+        RestartState
+          0
+          (fromMaybe 0 $ getInitRestart restartOpt)
+          0
+          zeroInstrumentation
       vsidsS =
         VSIDSState
           (PSQ.fromList [(vid, 0, ()) | vid <- [0 .. (numVars - 1)]])
@@ -838,20 +933,25 @@ toCDCLState (CNF cls) lin =
           | truth -> lin `lseq` Left (Ur (Satisfiable ()))
           | contradicting -> lin `lseq` Left (Ur Unsat)
         _ ->
-          besides lin (LUV.fromListL [0]) PL.& \(steps, lin) ->
-            besides lin (toClauses cls'') PL.& \(clauses, lin) ->
-              besides lin (LA.fromListL watches0) & \(watcheds, lin) ->
-                besides lin (LUA.allocL (maybe 0 ((+ 1) . fromEnum) maxVar) Indefinite) PL.& \(vals, lin) ->
-                  Right PL.$
-                    CDCLState
-                      numOrigCls
-                      steps
-                      clauses
-                      watcheds
-                      vals
-                      (LSet.fromListL [ClauseId 0 .. ClauseId (numOrigCls - 1)] lin)
-                      vsidsS
-                      rs
+          besides lin (LUV.constantL (numVars + 1) 0) PL.& \(steps0, lin) ->
+            let steps = LUV.slice 0 1 steps0
+             in besides lin (LUV.constantL numVars (PosL 0)) PL.& \(trail0, lin) ->
+                  let trail = LUV.slice 0 0 trail0
+                   in besides lin (toClauses cls'') PL.& \(clauses, lin) ->
+                        besides lin (LA.fromListL watches0) & \(watcheds, lin) ->
+                          besides lin (LUA.allocL (maybe 0 ((+ 1) . fromEnum) maxVar) Indefinite) PL.& \(vals, lin) ->
+                            Right PL.$
+                              CDCLState
+                                numOrigCls
+                                steps
+                                trail
+                                0
+                                clauses
+                                watcheds
+                                vals
+                                (LSet.fromListL [ClauseId 0 .. ClauseId (numOrigCls - 1)] lin)
+                                vsidsS
+                                rs
 
 toClauses :: [Clause] -> Linearly %1 -> Clauses
 toClauses cs l =
@@ -963,7 +1063,10 @@ watchVarL :: WatchVar -> Lens' Clause Index
 watchVarL W1 = #watched1
 watchVarL W2 = #watched2
 
-data AssertionResult = Asserted | ContradictingAssertion
+data AssertionResult
+  = NewlyAsserted
+  | AlreadyAsserted
+  | ContradictingAssertion
   deriving (Show)
 
 deriveGeneric ''AssertionResult
@@ -1075,35 +1178,81 @@ elemWatchLitIdx l (WatchTheseI l1 l2) = l == l1 || l == l2
 
 restartStateL :: LinLens.Lens' (CDCLState s) RestartState
 {- HLINT ignore restartStateL "Avoid lambda" -}
-restartStateL = LinLens.lens \(CDCLState numOrig ss cs ws vs vids varQ rs) ->
-  (rs, \rs -> CDCLState numOrig ss cs ws vs vids varQ rs)
+restartStateL = LinLens.lens \(CDCLState numOrig ss trail qhead cs ws vs vids varQ rs) ->
+  (rs, \rs -> CDCLState numOrig ss trail qhead cs ws vs vids varQ rs)
 
-tryRestart :: forall s. (Reifies s CDCLOptions) => S.State (CDCLState s) ()
+#ifdef HERBRAND_CDCL_INSTRUMENTED
+solverStatsL :: LinLens.Lens' (CDCLState s) SolverStats
+solverStatsL =
+  restartStateL LinLens..> LinLens.lens \(RestartState count threshold restarts (Instrumentation stats)) ->
+    (stats, \stats -> RestartState count threshold restarts (Instrumentation stats))
+#else
+solverStatsL :: LinLens.Lens' (CDCLState s) SolverStats
+solverStatsL =
+  restartStateL LinLens..> LinLens.lens \(RestartState count threshold restarts instrumentation) ->
+    ( zeroSolverStats
+    , \stats ->
+        stats `lseq`
+          RestartState count threshold restarts instrumentation
+    )
+#endif
+
+#ifdef HERBRAND_CDCL_INSTRUMENTED
+bumpStats :: (SolverStats %1 -> SolverStats) %1 -> S.State (CDCLState s) ()
+{-# INLINE bumpStats #-}
+bumpStats update = solverStatsL S.%= update
+
+-- SolverStats contains only unrestricted Int fields, so changing the
+-- multiplicity of these instrumentation-only updates is safe.
+bumpSeedScan, bumpPostDrainScan, bumpAssignment, bumpTrailAppend, bumpDuplicateEnqueue :: S.State (CDCLState s) ()
+bumpSeedScan = bumpStats PL.$ Unsafe.toLinear \stats -> stats {seedScanCount = seedScanCount stats + 1}
+bumpPostDrainScan = bumpStats PL.$ Unsafe.toLinear \stats -> stats {postDrainScanCount = postDrainScanCount stats + 1}
+bumpAssignment = bumpStats PL.$ Unsafe.toLinear \stats -> stats {assignmentCount = assignmentCount stats + 1}
+bumpTrailAppend = bumpStats PL.$ Unsafe.toLinear \stats -> stats {trailAppendCount = trailAppendCount stats + 1}
+bumpDuplicateEnqueue = bumpStats PL.$ Unsafe.toLinear \stats -> stats {duplicateEnqueueCount = duplicateEnqueueCount stats + 1}
+
+bumpPropagationEvent, bumpWatchVisit, bumpWatchMove, bumpDecision, bumpConflict :: S.State (CDCLState s) ()
+bumpPropagationEvent = bumpStats PL.$ Unsafe.toLinear \stats -> stats {propagationEventCount = propagationEventCount stats + 1}
+bumpWatchVisit = bumpStats PL.$ Unsafe.toLinear \stats -> stats {watchVisitCount = watchVisitCount stats + 1}
+bumpWatchMove = bumpStats PL.$ Unsafe.toLinear \stats -> stats {watchMoveCount = watchMoveCount stats + 1}
+bumpDecision = bumpStats PL.$ Unsafe.toLinear \stats -> stats {decisionCount = decisionCount stats + 1}
+bumpConflict = bumpStats PL.$ Unsafe.toLinear \stats -> stats {conflictCount = conflictCount stats + 1}
+
+bumpRestart :: S.State (CDCLState s) ()
+bumpRestart = bumpStats PL.$ Unsafe.toLinear \stats -> stats {observedRestartCount = observedRestartCount stats + 1}
+#else
+bumpSeedScan, bumpPostDrainScan, bumpAssignment, bumpTrailAppend, bumpDuplicateEnqueue :: S.State (CDCLState s) ()
+bumpSeedScan = S.pure ()
+bumpPostDrainScan = S.pure ()
+bumpAssignment = S.pure ()
+bumpTrailAppend = S.pure ()
+bumpDuplicateEnqueue = S.pure ()
+
+bumpPropagationEvent, bumpWatchVisit, bumpWatchMove, bumpDecision, bumpConflict :: S.State (CDCLState s) ()
+bumpPropagationEvent = S.pure ()
+bumpWatchVisit = S.pure ()
+bumpWatchMove = S.pure ()
+bumpDecision = S.pure ()
+bumpConflict = S.pure ()
+
+bumpRestart :: S.State (CDCLState s) ()
+bumpRestart = S.pure ()
+#endif
+
+tryRestart :: forall s. (Reifies s CDCLOptions) => S.State (CDCLState s) RestartResult
 {-# INLINE tryRestart #-}
 tryRestart = case restartStrategy $ reflect @s Proxy of
-  NoRestart -> S.pure ()
+  NoRestart -> S.pure Continued
   strat -> S.do
-    RestartState count thresh c <- S.use restartStateL
-    let count' = count + 1
-    if thresh <= count'
-      then S.do
-        valuationL S.%= LUA.map (const Indefinite)
-        restartStateL S.%= nextRestartState strat
-        (clausesL LinLens..> clauseBodiesL) S.%= PL.flip LUV.map \cf -> cf {satAt = -1}
-        vsidsStateL S.%= \(VSIDSState unsats sats lbd p i) ->
-          VSIDSState
-            ( Unsafe.toLinear
-                (PSQ.fold' (\l p () x -> PSQ.insert l p () x))
-                unsats
-                sats
-            )
-            PSQ.empty
-            lbd
-            p
-            i
-        steps0 <- S.state \s -> besides s (LUV.fromListL [0])
-        stepsL S..= steps0
-        Ur numCls <- getNumClauses
-        unsats0 <- S.state \s -> besides s (LSet.fromListL [0 .. fromIntegral $ numCls - 1])
-        unsatisfiedsL S..= unsats0
-      else restartStateL S..= RestartState count' thresh c
+    RestartState count thresh c instrumentation <- S.use restartStateL
+    instrumentation `lseq`
+      let count' = count + 1
+       in if thresh <= count'
+            then S.do
+              bumpRestart
+              restartStateL S.%= nextRestartState strat
+              S.pure Restarted
+            else S.do
+              restartStateL S.%= \(RestartState _ _ _ instrumentation) ->
+                RestartState count' thresh c instrumentation
+              S.pure Continued

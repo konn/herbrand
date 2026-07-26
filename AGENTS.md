@@ -22,6 +22,10 @@ Use Cabal’s nix-style workflow; `cabal.project` defines the build plan.
 
 Build and test one component at a time. Do not use Stack or invoke GHC directly.
 
+### Benchmark concurrency rule
+
+Benchmark executables must remain single-threaded unless the benchmark explicitly measures a multithreaded implementation. Do not add GHC's `-threaded` flag to a benchmark component and do not pass the RTS `-N` flag; either changes the runtime being measured and invalidates comparisons. Record any intentional parallel configuration as a separate benchmark.
+
 ## Coding Style & Naming Conventions
 
 Format Haskell with Fourmolu using `fourmolu.yaml` (two-space indentation), and Cabal files with `cabal-gild`. Preserve linear ownership and prefer explicit strictness in solver hot paths. Always use `(<>)`, including for list and string concatenation; never use `(++)`.
