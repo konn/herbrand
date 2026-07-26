@@ -355,6 +355,50 @@ instrumentationTests =
         Satisfiable {} -> pure ()
       assertBool "the restoration witness must encounter a conflict" $
         conflictCount stats > 0
+  , testCaseSteps "reports trail-suffix backtrack counters" \step -> do
+      let (result, stats) =
+            solveVarIdWithStats defaultOptions watchSuffixRestoreCNF
+          (rootResult, rootStats) =
+            solveVarIdWithStats defaultOptions restartWitnessCNF
+          (restartResult, restartStats) =
+            solveVarIdWithStats
+              defaultOptions {restartStrategy = ExponentialRestart 1 2}
+              restartWitnessCNF
+      step $ "empty-root witness: " <> show stats
+      step $ "root-prefix witness: " <> show rootStats
+      step $ "restart witness: " <> show restartStats
+      case result of
+        Unsat -> assertFailure "backtrack witness must be satisfiable"
+        Satisfiable {} -> pure ()
+      case rootResult of
+        Unsat -> assertFailure "root-prefix witness must be satisfiable"
+        Satisfiable {} -> pure ()
+      case restartResult of
+        Unsat -> assertFailure "restart witness must be satisfiable"
+        Satisfiable {} -> pure ()
+      assertBool "the witness must backtrack" $ backtrackCallCount stats > 0
+      assertBool "the witness must undo assignments" $ backtrackClearedCount stats > 0
+      backtrackBoundaryReadCount stats @?= 0
+      assertBool "each backtrack may inspect at most one retained boundary literal" $
+        backtrackTrailReadCount stats
+          <= backtrackClearedCount stats + backtrackCallCount stats
+      backtrackValuationReadCount stats @?= backtrackTrailReadCount stats
+      backtrackValuationWriteCount stats @?= backtrackClearedCount stats
+      backtrackQueueRestoreCount stats @?= backtrackClearedCount stats
+      backtrackBoundaryProbeCount stats
+        @?= backtrackTrailReadCount stats - backtrackClearedCount stats
+      ordinaryBacktrackCount stats @?= backtrackCallCount stats
+      restartBacktrackCount stats @?= 0
+      assertBool "the root-prefix witness must inspect a retained boundary" $
+        backtrackBoundaryProbeCount rootStats > 0
+      assertBool "the threshold-1 witness must perform a restart rollback" $
+        restartBacktrackCount restartStats > 0
+      ordinaryBacktrackCount restartStats + restartBacktrackCount restartStats
+        @?= backtrackCallCount restartStats
+      backtrackValuationWriteCount restartStats
+        @?= backtrackClearedCount restartStats
+      backtrackQueueRestoreCount restartStats
+        @?= backtrackClearedCount restartStats
   , testCase "bypasses CDCL state for sparse pure-literal formulas" $ do
       let (result, stats) = solveVarIdWithStats defaultOptions sparsePureLiteralCNF
       case result of

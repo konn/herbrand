@@ -309,24 +309,24 @@ backjump confCls lit = S.do
           S.pure $ Ur reason
         Nothing -> S.pure $ Ur confCls
 
-      backtrackTrail decLvl
+      backtrackTrail False decLvl
       restart <- tryRestart
       case restart of
         Continued -> solverLoop $ Just (truth, reason)
         Restarted -> S.do
-          backtrackTrail 0
+          backtrackTrail True 0
           qheadL S..= 0
           solverLoop Nothing
 
-backtrackTrail :: DecideLevel -> S.State (CDCLState s) ()
-backtrackTrail target = S.do
+backtrackTrail :: Bool -> DecideLevel -> S.State (CDCLState s) ()
+backtrackTrail isRestart target = S.do
   stepsL S.%= LUV.slice 0 (unDecideLevel target + 1)
   Ur len <- S.uses trailL LUV.size
-  Ur cutoff <-
+  Ur (cutoff, visits, undos) <-
     fix
-      ( \go !i ->
+      ( \go !i !visits !undos ->
           if i < 0
-            then S.pure $ Ur 0
+            then S.pure $ Ur (0, visits, undos)
             else S.do
               Ur lit <- S.uses trailL $ LUV.unsafeGet i
               Ur var <- S.uses valuationL $ LUA.unsafeGet $ fromVarId $ litVar lit
@@ -334,12 +334,15 @@ backtrackTrail target = S.do
                 then S.do
                   valuationL S.%= LUA.unsafeSet (fromVarId $ litVar lit) Indefinite
                   vsidsStateL S.%= moveToUnsatQueue (litVar lit)
-                  go $ i - 1
-                else S.pure $ Ur (i + 1)
+                  go (i - 1) (visits + 1) (undos + 1)
+                else S.pure $ Ur (i + 1, visits + 1, undos)
       )
       (len - 1)
+      0
+      0
   trailL S.%= LUV.slice 0 cutoff
   qheadL S..= cutoff
+  recordBacktrack isRestart 0 visits undos visits (visits - undos)
 
 findUIP1 ::
   forall s.

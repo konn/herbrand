@@ -134,6 +134,7 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   bumpLiteralInspections,
   bumpDecision,
   bumpConflict,
+  recordBacktrack,
   SolverStats (..),
   solverStatsL,
   zeroSolverStats,
@@ -211,6 +212,18 @@ data SolverStats = SolverStats
   , literalInspectionCount :: {-# UNPACK #-} !Int
   , decisionCount :: {-# UNPACK #-} !Int
   , conflictCount :: {-# UNPACK #-} !Int
+  , backtrackCallCount :: {-# UNPACK #-} !Int
+  , backtrackBoundaryReadCount :: {-# UNPACK #-} !Int
+  , backtrackTrailReadCount :: {-# UNPACK #-} !Int
+  , backtrackClearedCount :: {-# UNPACK #-} !Int
+  , backtrackValuationReadCount :: {-# UNPACK #-} !Int
+  , backtrackValuationWriteCount :: {-# UNPACK #-} !Int
+  , backtrackQueueRestoreCount :: {-# UNPACK #-} !Int
+  , backtrackBoundaryProbeCount :: {-# UNPACK #-} !Int
+  , backtrackNoOpCount :: {-# UNPACK #-} !Int
+  , backtrackMaxSuffix :: {-# UNPACK #-} !Int
+  , ordinaryBacktrackCount :: {-# UNPACK #-} !Int
+  , restartBacktrackCount :: {-# UNPACK #-} !Int
   , observedRestartCount :: {-# UNPACK #-} !Int
   }
   deriving (Show, Eq, Ord, Generic)
@@ -224,7 +237,33 @@ deriving via L.AsMovable SolverStats instance PL.Dupable SolverStats
 deriving via L.Generically SolverStats instance PL.Movable SolverStats
 
 zeroSolverStats :: SolverStats
-zeroSolverStats = SolverStats 0 0 0 0 0 0 0 0 0 0 0 0
+zeroSolverStats =
+  SolverStats
+    { seedScanCount = 0
+    , postDrainScanCount = 0
+    , assignmentCount = 0
+    , trailAppendCount = 0
+    , duplicateEnqueueCount = 0
+    , propagationEventCount = 0
+    , watchVisitCount = 0
+    , watchMoveCount = 0
+    , literalInspectionCount = 0
+    , decisionCount = 0
+    , conflictCount = 0
+    , backtrackCallCount = 0
+    , backtrackBoundaryReadCount = 0
+    , backtrackTrailReadCount = 0
+    , backtrackClearedCount = 0
+    , backtrackValuationReadCount = 0
+    , backtrackValuationWriteCount = 0
+    , backtrackQueueRestoreCount = 0
+    , backtrackBoundaryProbeCount = 0
+    , backtrackNoOpCount = 0
+    , backtrackMaxSuffix = 0
+    , ordinaryBacktrackCount = 0
+    , restartBacktrackCount = 0
+    , observedRestartCount = 0
+    }
 
 #ifdef HERBRAND_CDCL_INSTRUMENTED
 data Instrumentation = Instrumentation !SolverStats
@@ -1391,6 +1430,31 @@ bumpLiteralInspections count =
     Unsafe.toLinear \stats ->
       stats {literalInspectionCount = literalInspectionCount stats + count}
 
+recordBacktrack :: Bool -> Int -> Int -> Int -> Int -> Int -> S.State (CDCLState s) ()
+recordBacktrack isRestart boundaryReads trailReads clears valuationReads boundaryProbes =
+  bumpStats PL.$
+    Unsafe.toLinear \stats ->
+      stats
+        { backtrackCallCount = backtrackCallCount stats + 1
+        , backtrackBoundaryReadCount =
+            backtrackBoundaryReadCount stats + boundaryReads
+        , backtrackTrailReadCount = backtrackTrailReadCount stats + trailReads
+        , backtrackClearedCount = backtrackClearedCount stats + clears
+        , backtrackValuationReadCount =
+            backtrackValuationReadCount stats + valuationReads
+        , backtrackValuationWriteCount = backtrackValuationWriteCount stats + clears
+        , backtrackQueueRestoreCount = backtrackQueueRestoreCount stats + clears
+        , backtrackBoundaryProbeCount =
+            backtrackBoundaryProbeCount stats + boundaryProbes
+        , backtrackNoOpCount =
+            backtrackNoOpCount stats + if clears == 0 then 1 else 0
+        , backtrackMaxSuffix = max (backtrackMaxSuffix stats) clears
+        , ordinaryBacktrackCount =
+            ordinaryBacktrackCount stats + if isRestart then 0 else 1
+        , restartBacktrackCount =
+            restartBacktrackCount stats + if isRestart then 1 else 0
+        }
+
 bumpRestart :: S.State (CDCLState s) ()
 bumpRestart = bumpStats PL.$ Unsafe.toLinear \stats -> stats {observedRestartCount = observedRestartCount stats + 1}
 #else
@@ -1410,6 +1474,9 @@ bumpConflict = S.pure ()
 
 bumpLiteralInspections :: Int -> S.State (CDCLState s) ()
 bumpLiteralInspections _ = S.pure ()
+
+recordBacktrack :: Bool -> Int -> Int -> Int -> Int -> Int -> S.State (CDCLState s) ()
+recordBacktrack _ _ _ _ _ _ = S.pure ()
 
 bumpRestart :: S.State (CDCLState s) ()
 bumpRestart = S.pure ()
