@@ -11,6 +11,15 @@ module.exports = async ({
 }) => {
   const fs = require("fs");
 
+  // Keep older binaries from rediscovering fixtures added for the test suite.
+  const benchmarkPatterns = {
+    "herbrand-sat-bench":
+      "($0 ~ /CDCL/) && ($0 !~ /uf20-91-full/) && " +
+      "(($0 ~ /huge/) || ($0 ~ /Sudoku/) || ($0 ~ /Bejing/) || " +
+      "($0 ~ /flat200-479/) || ($0 ~ /uf100-430/) || ($0 ~ /uf20-91/))",
+  };
+  const benchmarkPattern = benchmarkPatterns[bench_name];
+
   let target_repo;
   let target_branch;
   let target_sha;
@@ -90,10 +99,19 @@ module.exports = async ({
       base_csv_path = `${base_csv_dir}/${bench_name}.csv`;
       const base_svg_path = `${base_csv_dir}/${bench_name}.svg`;
       core.info("Running the original benchmark first...");
-      // FIXME: Checkout data directory for completeness
+      const base_args = [
+        "-j1",
+        "--csv",
+        base_csv_path,
+        "--svg",
+        base_svg_path,
+      ];
+      if (benchmarkPattern !== undefined) {
+        base_args.push("--pattern", benchmarkPattern);
+      }
       await exec.exec(
         `${base_art_dir}/artifact-ghc-9.12.4/benchs/${bench_name}`,
-        ["-j1", "--csv", base_csv_path, "--svg", base_svg_path],
+        base_args,
         { ignoreReturnCode: true }
       );
       core.setOutput("baseline-csv", base_csv_path);
@@ -115,6 +133,9 @@ module.exports = async ({
 
   const bench_args = ["-j1"];
   const exe = `./artifact-ghc-9.12.4/benchs/${bench_name}`;
+  if (benchmarkPattern !== undefined) {
+    bench_args.push("--pattern", benchmarkPattern);
+  }
   if (base_csv_path !== undefined) {
     exec.exec("head", ["-n", 5, base_csv_path]);
     core.info(`Taking benchmark comparing with ${base_csv_path}`);

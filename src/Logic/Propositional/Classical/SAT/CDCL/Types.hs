@@ -38,6 +38,8 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   Valuation,
   Clauses,
   WatchMap,
+  AnalysisScratch (..),
+  analysisKernelL,
   levelStartsL,
   trailL,
   qheadL,
@@ -183,6 +185,7 @@ import Data.Vector.Mutable.Linear.Unboxed qualified as LUV
 import Data.Vector.Unboxed qualified as U
 import Data.Vector.Unboxed.Deriving (derivingUnbox)
 import Data.Vector.Unboxed.Mutable qualified as UM
+import Data.Word (Word64)
 import GHC.Generics (Generic)
 import Generics.Linear qualified as L
 import Generics.Linear.TH (deriveGeneric)
@@ -226,6 +229,24 @@ data SolverStats = SolverStats
   , ordinaryBacktrackCount :: {-# UNPACK #-} !Int
   , restartBacktrackCount :: {-# UNPACK #-} !Int
   , observedRestartCount :: {-# UNPACK #-} !Int
+  , analysisCount :: {-# UNPACK #-} !Int
+  , analysisRootConflictCount :: {-# UNPACK #-} !Int
+  , analysisConflictClauseVisitCount :: {-# UNPACK #-} !Int
+  , analysisReasonClauseVisitCount :: {-# UNPACK #-} !Int
+  , analysisConflictLiteralVisitCount :: {-# UNPACK #-} !Int
+  , analysisReasonLiteralVisitCount :: {-# UNPACK #-} !Int
+  , analysisTrailReadCount :: {-# UNPACK #-} !Int
+  , analysisPivotCount :: {-# UNPACK #-} !Int
+  , analysisMarkCount :: {-# UNPACK #-} !Int
+  , analysisDuplicateMarkCount :: {-# UNPACK #-} !Int
+  , analysisLearnedLiteralCount :: {-# UNPACK #-} !Int
+  , analysisEpochClearCount :: {-# UNPACK #-} !Int
+  , analysisSortComparisonCount :: {-# UNPACK #-} !Int
+  , analysisSortSwapCount :: {-# UNPACK #-} !Int
+  , analysisLastTargetLevel :: {-# UNPACK #-} !Int
+  , analysisLastPivotTrace :: ![Literal Word]
+  , analysisLastLearnedClause :: ![Literal Word]
+  , analysisLearnedTrace :: ![([Literal Word], Int, [Literal Word])]
   }
   deriving (Show, Eq, Ord, Generic)
 
@@ -264,6 +285,24 @@ zeroSolverStats =
     , ordinaryBacktrackCount = 0
     , restartBacktrackCount = 0
     , observedRestartCount = 0
+    , analysisCount = 0
+    , analysisRootConflictCount = 0
+    , analysisConflictClauseVisitCount = 0
+    , analysisReasonClauseVisitCount = 0
+    , analysisConflictLiteralVisitCount = 0
+    , analysisReasonLiteralVisitCount = 0
+    , analysisTrailReadCount = 0
+    , analysisPivotCount = 0
+    , analysisMarkCount = 0
+    , analysisDuplicateMarkCount = 0
+    , analysisLearnedLiteralCount = 0
+    , analysisEpochClearCount = 0
+    , analysisSortComparisonCount = 0
+    , analysisSortSwapCount = 0
+    , analysisLastTargetLevel = -1
+    , analysisLastPivotTrace = []
+    , analysisLastLearnedClause = []
+    , analysisLearnedTrace = []
     }
 
 #ifdef HERBRAND_CDCL_INSTRUMENTED
@@ -287,6 +326,15 @@ zeroInstrumentation :: Instrumentation
 zeroInstrumentation = Instrumentation zeroSolverStats
 #else
 zeroInstrumentation = Instrumentation
+#endif
+
+initialAnalysisEpoch, initialAnalysisStamp :: Word64
+#ifdef HERBRAND_CDCL_INSTRUMENTED
+initialAnalysisEpoch = maxBound
+initialAnalysisStamp = 1
+#else
+initialAnalysisEpoch = 0
+initialAnalysisStamp = 0
 #endif
 
 data RestartState where
@@ -550,6 +598,18 @@ data Clause = Clause
   deriving anyclass (NFData)
 
 type Valuation = LUA.UArray Variable
+
+data AnalysisScratch where
+  AnalysisScratch ::
+    {-# UNPACK #-} !Word64 ->
+    {-# UNPACK #-} !(LUA.UArray Word64) %1 ->
+    {-# UNPACK #-} !(LUA.UArray Lit) %1 ->
+    AnalysisScratch
+  deriving anyclass (HasLinearWitness)
+
+instance PL.Consumable AnalysisScratch where
+  consume (AnalysisScratch epoch stamps scratch) =
+    epoch `lseq` stamps `lseq` scratch `lseq` ()
 
 data WatchVar = W1 | W2 deriving (Show, Eq, Ord, Generic)
 
@@ -824,6 +884,8 @@ data CDCLState s where
     {-# UNPACK #-} !(LUV.Vector Lit) %1 ->
     -- | Index of the next trail literal to propagate
     {-# UNPACK #-} !Int %1 ->
+    -- | Reusable first-UIP generation stamps and literal scratch
+    {-# UNPACK #-} !AnalysisScratch %1 ->
     -- | Clauses
     {-# UNPACK #-} !Clauses %1 ->
     -- | Watches
@@ -841,8 +903,8 @@ data CDCLState s where
 
 clausesL :: LinLens.Lens' (CDCLState s) Clauses
 {-# INLINE clausesL #-}
-clausesL = LinLens.lens \(CDCLState numOrig ss trail qhead cs ws vs vids varQ rs) ->
-  (cs, \cs -> CDCLState numOrig ss trail qhead cs ws vs vids varQ rs)
+clausesL = LinLens.lens \(CDCLState numOrig ss trail qhead as cs ws vs vids varQ rs) ->
+  (cs, \cs -> CDCLState numOrig ss trail qhead as cs ws vs vids varQ rs)
 
 pushClause :: forall s. (Reifies s CDCLOptions) => Clause -> S.State (CDCLState s) ()
 {-# INLINE pushClause #-}
@@ -1014,18 +1076,30 @@ getNumClauses =
 
 levelStartsL :: LinLens.Lens' (CDCLState s) (LUV.Vector Step)
 {-# INLINE levelStartsL #-}
-levelStartsL = LinLens.lens \(CDCLState numOrig ss trail qhead cs ws vs vids varQ rs) ->
-  (ss, \ss -> CDCLState numOrig ss trail qhead cs ws vs vids varQ rs)
+levelStartsL = LinLens.lens \(CDCLState numOrig ss trail qhead as cs ws vs vids varQ rs) ->
+  (ss, \ss -> CDCLState numOrig ss trail qhead as cs ws vs vids varQ rs)
 
 trailL :: LinLens.Lens' (CDCLState s) (LUV.Vector Lit)
 {-# INLINE trailL #-}
-trailL = LinLens.lens \(CDCLState numOrig ss trail qhead cs ws vs vids varQ rs) ->
-  (trail, \trail -> CDCLState numOrig ss trail qhead cs ws vs vids varQ rs)
+trailL = LinLens.lens \(CDCLState numOrig ss trail qhead as cs ws vs vids varQ rs) ->
+  (trail, \trail -> CDCLState numOrig ss trail qhead as cs ws vs vids varQ rs)
+
+analysisKernelL ::
+  LinLens.Lens'
+    (CDCLState s)
+    (AnalysisScratch, LUV.Vector Lit, Clauses, Valuation, VSIDSState s)
+{-# INLINE analysisKernelL #-}
+analysisKernelL =
+  LinLens.lens \(CDCLState numOrig ss trail qhead analysis cs ws vals vids varQ rs) ->
+    ( (analysis, trail, cs, vals, varQ)
+    , \(analysis, trail, cs, vals, varQ) ->
+        CDCLState numOrig ss trail qhead analysis cs ws vals vids varQ rs
+    )
 
 qheadL :: LinLens.Lens' (CDCLState s) Int
 {-# INLINE qheadL #-}
-qheadL = LinLens.lens \(CDCLState numOrig ss trail qhead cs ws vs vids varQ rs) ->
-  (qhead, \qhead -> CDCLState numOrig ss trail qhead cs ws vs vids varQ rs)
+qheadL = LinLens.lens \(CDCLState numOrig ss trail qhead as cs ws vs vids varQ rs) ->
+  (qhead, \qhead -> CDCLState numOrig ss trail qhead as cs ws vs vids varQ rs)
 
 trailValuationVSIDSL ::
   LinLens.Lens'
@@ -1033,10 +1107,10 @@ trailValuationVSIDSL ::
     (LUV.Vector Lit, Valuation, VSIDSState s)
 {-# INLINE trailValuationVSIDSL #-}
 trailValuationVSIDSL =
-  LinLens.lens \(CDCLState numOrig ss trail qhead cs ws vals vids varQ rs) ->
+  LinLens.lens \(CDCLState numOrig ss trail qhead as cs ws vals vids varQ rs) ->
     ( (trail, vals, varQ)
     , \(trail, vals, varQ) ->
-        CDCLState numOrig ss trail qhead cs ws vals vids varQ rs
+        CDCLState numOrig ss trail qhead as cs ws vals vids varQ rs
     )
 
 clearTrailSuffix :: Int -> S.State (CDCLState s) (Ur Int)
@@ -1068,22 +1142,22 @@ clearTrailSuffix cutoff =
         varQ
 
 numInitialClausesL :: LinLens.Lens' (CDCLState s) Int
-numInitialClausesL = LinLens.lens \(CDCLState numOrig ss trail qhead cs ws vs vids varQ rs) ->
-  (numOrig, \numOrig -> CDCLState numOrig ss trail qhead cs ws vs vids varQ rs)
+numInitialClausesL = LinLens.lens \(CDCLState numOrig ss trail qhead as cs ws vs vids varQ rs) ->
+  (numOrig, \numOrig -> CDCLState numOrig ss trail qhead as cs ws vs vids varQ rs)
 
 watchesL :: LinLens.Lens' (CDCLState s) WatchMap
 {-# INLINE watchesL #-}
-watchesL = LinLens.lens \(CDCLState numOrig ss trail qhead cs ws vs vids varQ rs) ->
-  (ws, \ws -> CDCLState numOrig ss trail qhead cs ws vs vids varQ rs)
+watchesL = LinLens.lens \(CDCLState numOrig ss trail qhead as cs ws vs vids varQ rs) ->
+  (ws, \ws -> CDCLState numOrig ss trail qhead as cs ws vs vids varQ rs)
 
 valuationL :: LinLens.Lens' (CDCLState s) Valuation
 {-# INLINE valuationL #-}
-valuationL = LinLens.lens \(CDCLState norig ss trail qhead cs ws vs vids varQ rs) ->
-  (vs, \vs -> CDCLState norig ss trail qhead cs ws vs vids varQ rs)
+valuationL = LinLens.lens \(CDCLState norig ss trail qhead as cs ws vs vids varQ rs) ->
+  (vs, \vs -> CDCLState norig ss trail qhead as cs ws vs vids varQ rs)
 
 vsidsStateL :: LinLens.Lens' (CDCLState s) (VSIDSState s)
-vsidsStateL = LinLens.lens \(CDCLState norig ss trail qhead cs ws vs vids varQ rs) ->
-  (varQ, \varQ -> CDCLState norig ss trail qhead cs ws vs vids varQ rs)
+vsidsStateL = LinLens.lens \(CDCLState norig ss trail qhead as cs ws vs vids varQ rs) ->
+  (varQ, \varQ -> CDCLState norig ss trail qhead as cs ws vs vids varQ rs)
 
 unsatVarQL :: LinLens.Lens' (CDCLState s) (Ur VarQueue)
 unsatVarQL =
@@ -1097,31 +1171,32 @@ satVarQL =
 
 unsatisfiedsL :: LinLens.Lens' (CDCLState s) (LSet.Set ClauseId)
 {-# INLINE unsatisfiedsL #-}
-unsatisfiedsL = LinLens.lens \(CDCLState norig ss trail qhead cs ws vs vids varQ rs) ->
-  (vids, \vids -> CDCLState norig ss trail qhead cs ws vs vids varQ rs)
+unsatisfiedsL = LinLens.lens \(CDCLState norig ss trail qhead as cs ws vs vids varQ rs) ->
+  (vids, \vids -> CDCLState norig ss trail qhead as cs ws vs vids varQ rs)
 
 clausesValsAndUnsatsL :: LinLens.Lens' (CDCLState s) (Clauses, Valuation, LSet.Set ClauseId)
 {-# INLINE clausesValsAndUnsatsL #-}
-clausesValsAndUnsatsL = LinLens.lens \(CDCLState norig ss trail qhead cs ws vs vids varQ rs) ->
-  ((cs, vs, vids), \(cs, vs, vids) -> CDCLState norig ss trail qhead cs ws vs vids varQ rs)
+clausesValsAndUnsatsL = LinLens.lens \(CDCLState norig ss trail qhead as cs ws vs vids varQ rs) ->
+  ((cs, vs, vids), \(cs, vs, vids) -> CDCLState norig ss trail qhead as cs ws vs vids varQ rs)
 
 clausesAndValsL :: LinLens.Lens' (CDCLState s) (Clauses, Valuation)
 {-# INLINE clausesAndValsL #-}
-clausesAndValsL = LinLens.lens \(CDCLState norig ss trail qhead cs ws vs vids varQ rs) ->
-  ((cs, vs), \(cs, vs) -> CDCLState norig ss trail qhead cs ws vs vids varQ rs)
+clausesAndValsL = LinLens.lens \(CDCLState norig ss trail qhead as cs ws vs vids varQ rs) ->
+  ((cs, vs), \(cs, vs) -> CDCLState norig ss trail qhead as cs ws vs vids varQ rs)
 
 extractValuation :: CDCLState s %1 -> Valuation
-extractValuation (CDCLState numOrig levelStarts trail qhead clauses watches vals vids varQs rs) =
+extractValuation (CDCLState numOrig levelStarts trail qhead analysis clauses watches vals vids varQs rs) =
   numOrig `lseq`
     levelStarts `lseq`
       trail `lseq`
         qhead `lseq`
-          clauses `lseq`
-            watches `lseq`
-              vids `lseq`
-                varQs `lseq`
-                  rs `lseq`
-                    vals
+          analysis `lseq`
+            clauses `lseq`
+              watches `lseq`
+                vids `lseq`
+                  varQs `lseq`
+                    rs `lseq`
+                      vals
 
 toCDCLState ::
   forall s.
@@ -1167,21 +1242,29 @@ toCDCLState (CNF cls) lin =
             let levelStarts = LUV.slice 0 1 levelStarts0
              in besides lin (LUV.constantL numVars (PosL 0)) PL.& \(trail0, lin) ->
                   let trail = LUV.slice 0 0 trail0
-                   in besides lin (toClauses cls'') PL.& \(clauses, lin) ->
-                        besides lin (toWatchMap watchHeads watchTails watchNexts) & \(watcheds, lin) ->
-                          besides lin (LUA.allocL (maybe 0 ((+ 1) . fromEnum) maxVar) Indefinite) PL.& \(vals, lin) ->
-                            Right PL.$
-                              CDCLState
-                                numOrigCls
-                                levelStarts
-                                trail
-                                0
-                                clauses
-                                watcheds
-                                vals
-                                (LSet.fromListL [ClauseId 0 .. ClauseId (numOrigCls - 1)] lin)
-                                vsidsS
-                                rs
+                   in besides lin (LUA.allocL numVars initialAnalysisStamp) PL.& \(analysisStamps, lin) ->
+                        besides lin (LUA.allocL numVars (PosL 0)) PL.& \(analysisLits, lin) ->
+                          let analysis =
+                                AnalysisScratch
+                                  initialAnalysisEpoch
+                                  analysisStamps
+                                  analysisLits
+                           in besides lin (toClauses cls'') PL.& \(clauses, lin) ->
+                                besides lin (toWatchMap watchHeads watchTails watchNexts) & \(watcheds, lin) ->
+                                  besides lin (LUA.allocL numVars Indefinite) PL.& \(vals, lin) ->
+                                    Right PL.$
+                                      CDCLState
+                                        numOrigCls
+                                        levelStarts
+                                        trail
+                                        0
+                                        analysis
+                                        clauses
+                                        watcheds
+                                        vals
+                                        (LSet.fromListL [ClauseId 0 .. ClauseId (numOrigCls - 1)] lin)
+                                        vsidsS
+                                        rs
 
 toClauses :: [Clause] -> Linearly %1 -> Clauses
 toClauses cs l =
@@ -1256,7 +1339,7 @@ deriving via L.Generically (CDCLState s) instance PL.Consumable (CDCLState s)
 
 data UnitResult
   = Unit {-# UNPACK #-} !Lit
-  | Conflict {-# UNPACK #-} !Lit
+  | Conflict
   | -- | Optional 'Pair' records possible old watched literal and new literal.
     Satisfied !(Maybe (Pair (Pair WatchVar Lit) (Pair Lit Index)))
   | WatchChangedFromTo !WatchVar {-# UNPACK #-} !Lit {-# UNPACK #-} !Lit {-# UNPACK #-} !Index
@@ -1293,7 +1376,7 @@ deriving via L.AsMovable AssignmentState instance L.Dupable AssignmentState
 deriving via L.Generically AssignmentState instance L.Movable AssignmentState
 
 data PropResult
-  = ConflictFound {-# UNPACK #-} !ClauseId !Lit
+  = ConflictFound {-# UNPACK #-} !ClauseId
   | NoMorePropagation
   deriving (Show, Eq, Ord, Generic)
 
@@ -1421,8 +1504,8 @@ elemWatchLitIdx l (WatchTheseI l1 l2) = l == l1 || l == l2
 
 restartStateL :: LinLens.Lens' (CDCLState s) RestartState
 {- HLINT ignore restartStateL "Avoid lambda" -}
-restartStateL = LinLens.lens \(CDCLState numOrig ss trail qhead cs ws vs vids varQ rs) ->
-  (rs, \rs -> CDCLState numOrig ss trail qhead cs ws vs vids varQ rs)
+restartStateL = LinLens.lens \(CDCLState numOrig ss trail qhead as cs ws vs vids varQ rs) ->
+  (rs, \rs -> CDCLState numOrig ss trail qhead as cs ws vs vids varQ rs)
 
 #ifdef HERBRAND_CDCL_INSTRUMENTED
 solverStatsL :: LinLens.Lens' (CDCLState s) SolverStats
@@ -1445,8 +1528,8 @@ bumpStats :: (SolverStats %1 -> SolverStats) %1 -> S.State (CDCLState s) ()
 {-# INLINE bumpStats #-}
 bumpStats update = solverStatsL S.%= update
 
--- SolverStats contains only unrestricted Int fields, so changing the
--- multiplicity of these instrumentation-only updates is safe.
+-- SolverStats contains only unrestricted fields, so changing the multiplicity
+-- of these instrumentation-only updates is safe.
 bumpSeedScan, bumpPostDrainScan, bumpAssignment, bumpTrailAppend, bumpDuplicateEnqueue :: S.State (CDCLState s) ()
 bumpSeedScan = bumpStats PL.$ Unsafe.toLinear \stats -> stats {seedScanCount = seedScanCount stats + 1}
 bumpPostDrainScan = bumpStats PL.$ Unsafe.toLinear \stats -> stats {postDrainScanCount = postDrainScanCount stats + 1}

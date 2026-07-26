@@ -20,6 +20,9 @@ import Data.HashSet (HashSet)
 import qualified Data.HashSet as HS
 import Data.Hashable (Hashable)
 import Data.List (intercalate)
+#ifdef HERBRAND_CDCL_INSTRUMENTED
+import Data.List (sort)
+#endif
 import qualified Data.List.NonEmpty as NE
 import Data.Maybe (fromMaybe)
 import Data.Monoid (Ap (..))
@@ -334,7 +337,59 @@ test_solveVarId =
 instrumentationTests :: [TestTree]
 #ifdef HERBRAND_CDCL_INSTRUMENTED
 instrumentationTests =
-  [ testCase "instrumented root propagation preserves trail and scan invariants" do
+  [ testCase "sorts only the requested linear literal prefix" do
+      let cases :: [(Int, [Literal Word])]
+          cases =
+            [
+              ( 0
+              , []
+              )
+            ,
+              ( 0
+              , [Negative 99, Positive 2]
+              )
+            ,
+              ( 1
+              , [Negative 4, Positive 77]
+              )
+            ,
+              ( 5
+              , [Negative 2, Positive 3, Negative 1, Positive 0, Negative 0]
+              )
+            ,
+              ( 3
+              , [Negative 2, Positive 3, Negative 1, Positive 88, Negative 77]
+              )
+            ]
+      mapM_
+        ( \(prefixLength, input) ->
+            sortLitPrefixForTest prefixLength input
+              @?= sort (take prefixLength input) <> drop prefixLength input
+        )
+        cases
+      let initial =
+            [Negative 99, Positive 88, Negative 77, Positive 66, Negative 55]
+          rewrites =
+            [ [Negative 2, Positive 3, Negative 1]
+            , [Positive 5]
+            , [Negative 4, Positive 1, Positive 0, Negative 3, Negative 0]
+            ]
+          firstSnapshot = sort (rewrites !! 0) <> drop 3 initial
+          secondSnapshot = sort (rewrites !! 1) <> drop 1 firstSnapshot
+          thirdSnapshot = sort (rewrites !! 2)
+          reuseResults = sortLitPrefixesForTest initial rewrites
+      map snd reuseResults
+        @?= [firstSnapshot, secondSnapshot, thirdSnapshot]
+      case reuseResults of
+        [ ((firstComparisons, _), _)
+          , (singletonMetrics, _)
+          , ((thirdComparisons, _), _)
+          ] -> do
+            assertBool "nontrivial reused prefixes must record comparisons" $
+              firstComparisons > 0 && thirdComparisons > 0
+            singletonMetrics @?= (0, 0)
+        _ -> assertFailure "expected one result per scratch-prefix rewrite"
+  , testCase "instrumented root propagation preserves trail and scan invariants" do
       let (_, stats) =
             solveVarIdWithStats
               defaultOptions
@@ -382,6 +437,61 @@ instrumentationTests =
         Satisfiable {} -> pure ()
       assertBool "the restoration witness must encounter a conflict" $
         conflictCount stats > 0
+  , testCase "traces reverse-trail first-UIP analysis with a nonzero target" $ do
+      let (result, stats) =
+            solveVarIdWithStats defaultOptions nonzeroTargetUIPCNF
+      case result of
+        Unsat -> assertFailure "first-UIP trace witness must be satisfiable"
+        Satisfiable model ->
+          eval model (toFormula @Full nonzeroTargetUIPCNF) @?= Just True
+      analysisCount stats @?= 1
+      analysisRootConflictCount stats @?= 0
+      analysisConflictClauseVisitCount stats @?= 1
+      analysisReasonClauseVisitCount stats @?= 1
+      analysisConflictLiteralVisitCount stats @?= 3
+      analysisReasonLiteralVisitCount stats @?= 3
+      analysisTrailReadCount stats @?= 2
+      analysisPivotCount stats @?= 2
+      analysisMarkCount stats @?= 3
+      analysisDuplicateMarkCount stats @?= 2
+      analysisLearnedLiteralCount stats @?= 2
+      analysisEpochClearCount stats @?= 1
+      analysisSortComparisonCount stats @?= 0
+      analysisSortSwapCount stats @?= 0
+      analysisLastTargetLevel stats @?= 1
+      analysisLastPivotTrace stats
+        @?= [Positive 2, Negative 1]
+      analysisLastLearnedClause stats
+        @?= [Positive 1, Positive 0]
+  , testCase "chooses the least ordered literal when the backjump level is tied" $ do
+      let (result, stats) =
+            solveVarIdWithStats defaultOptions tiedTargetUIPCNF
+      case result of
+        Unsat -> assertFailure "tied-target first-UIP witness must be satisfiable"
+        Satisfiable model ->
+          eval model (toFormula @Full tiedTargetUIPCNF) @?= Just True
+      analysisCount stats @?= 1
+      analysisLastTargetLevel stats @?= 1
+      assertBool "the tied target witness must exercise prefix sorting" $
+        analysisSortComparisonCount stats > 0
+      assertBool "the tied target witness must exercise in-place swaps" $
+        analysisSortSwapCount stats > 0
+      analysisLastLearnedClause stats
+        @?= [Positive 1, Positive 0, Negative 3]
+  , testProperty "every bounded-random learned clause is entailed and asserting" $ do
+      cnf <-
+        gen $
+          fmap toEnum
+            <$> cnfGen 6 8 ((0, 6) `withOrigin` 4)
+      let (_, stats) = solveVarIdWithStats defaultOptions cnf
+          traces = analysisLearnedTrace stats
+      collect "learned clauses" [length traces]
+      assert $
+        P.eq
+          .$ ("expected", True)
+          .$ ( "answer"
+             , all (validLearnedTrace cnf) traces
+             )
   , testCaseSteps "reports trail-suffix backtrack counters" \step -> do
       let (result, stats) =
             solveVarIdWithStats defaultOptions watchSuffixRestoreCNF
@@ -534,6 +644,59 @@ watchSuffixRestoreCNF =
     , [Positive 0, Positive 8]
     , [Positive 0, Positive 9]
     ]
+
+#ifdef HERBRAND_CDCL_INSTRUMENTED
+nonzeroTargetUIPCNF :: CNF VarId
+nonzeroTargetUIPCNF =
+  CNF
+    [ [Positive 0, Positive 1, Positive 2]
+    , [Positive 0, Positive 1, Negative 2]
+    ]
+
+tiedTargetUIPCNF :: CNF VarId
+tiedTargetUIPCNF =
+  CNF
+    [ [Positive 0, Positive 3]
+    , [Positive 0, Negative 3, Positive 1, Positive 2]
+    , [Positive 0, Negative 3, Positive 1, Negative 2]
+    ]
+
+validLearnedTrace ::
+  CNF VarId ->
+  ([Literal Word], Int, [Literal Word]) ->
+  Bool
+validLearnedTrace original (pivots, target, learned) =
+  target >= 0
+    && learnedClauseEntailed original learned
+    && orderedLearnedRemainder learned
+    && case (reverse pivots, learned) of
+      (finalPivot : _, assertingLit : _) ->
+        assertingLit == negateLiteral finalPivot
+      _ -> False
+
+orderedLearnedRemainder :: [Literal Word] -> Bool
+orderedLearnedRemainder learned =
+  let remainder = drop 2 learned
+   in remainder == sort remainder
+
+learnedClauseEntailed :: CNF VarId -> [Literal Word] -> Bool
+learnedClauseEntailed original learned =
+  case classifyFormula $ toFormula @Full counterexample of
+    Inconsistent -> True
+    _ -> False
+  where
+    CNF originalClauses =
+      fmap (fromIntegral . fromEnum) original
+    counterexample =
+      CNF $
+        originalClauses
+          <> map (CNFClause . pure . negateLiteral) learned
+
+negateLiteral :: Literal a -> Literal a
+negateLiteral = \case
+  Positive var -> Negative var
+  Negative var -> Positive var
+#endif
 
 sparsePureLiteralCNF :: CNF VarId
 sparsePureLiteralCNF =
