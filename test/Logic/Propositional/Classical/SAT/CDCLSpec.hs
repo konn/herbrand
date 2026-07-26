@@ -5,7 +5,7 @@
 {-# LANGUAGE OverloadedLists #-}
 {-# LANGUAGE TypeApplications #-}
 
-module Logic.Propositional.Classical.SAT.CDCLSpec (test_solve, test_solveVarId, test_sudoku) where
+module Logic.Propositional.Classical.SAT.CDCLSpec (test_solve, test_solve_file, test_solveVarId, test_sudoku) where
 
 import qualified Control.Foldl as L
 import Control.Lens (both, folded, maximumOf, view, (%~), _3)
@@ -31,6 +31,8 @@ import Logic.Propositional.Classical.SAT.Types (Model (..), SatResult (..), eval
 import Logic.Propositional.Classical.Syntax.TestUtils
 import Logic.Propositional.Syntax.General
 import Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
+import System.FilePath (takeFileName, (</>))
+import System.FilePattern.Directory (getDirectoryFiles)
 import qualified Test.Falsify.Generator as F
 import Test.Falsify.Predicate ((.$))
 import qualified Test.Falsify.Predicate as P
@@ -63,6 +65,31 @@ cdclOptions =
       ]
         <> [("Adaptive Decay", defaultAdaptiveFactor)]
   ]
+
+test_solve_file :: IO TestTree
+test_solve_file = do
+  uf20_91 <-
+    mapM loadCNF
+      =<< getDirectoryFiles "data/satlib/uf20-91-full" ["*.cnf"]
+  pure $
+    testGroup
+      "solveWith (fixedInput)"
+      [ testGroup
+          optName
+          [ testCase name do
+              case solveWith opt cnf of
+                Satisfiable model ->
+                  eval model (toFormula @Full cnf) @?= Just True
+                Unsat ->
+                  assertFailure "Must be satisfiable, but got Unsat!"
+          | (name, cnf) <- uf20_91
+          ]
+      | (optName, opt) <- cdclOptions
+      ]
+  where
+    loadCNF fp = do
+      cnf <- decodeCNFFile ("data/satlib/uf20-91-full" </> fp)
+      pure (takeFileName fp, cnf)
 
 test_solve :: TestTree
 test_solve =
