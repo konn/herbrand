@@ -295,7 +295,7 @@ jobs:
         path: ${{env.pages-dir}}/docs
     - name: Deploy to GitHub Pages
       id: deployment
-      uses: actions/deploy-pages@v2
+      uses: actions/deploy-pages@v5
     - name: Report to PR
       if: ${{ github.event_name == 'pull_request' }}
       env:
