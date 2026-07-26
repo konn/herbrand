@@ -44,10 +44,20 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   qheadL,
   pushClause,
   getClauseLits,
+  getClauseSearch,
   getNumClauses,
   setWatchVar,
-  setSatisfiedLevel,
-  getSatisfiedLevel,
+  detachWatchBucket,
+  getNextWatchOccurrence,
+  appendWatchOccurrence,
+  linkWatchOccurrence,
+  getWatchHeadAt,
+  getWatchTailAt,
+  getWatchMapSizes,
+  litBucketIndex,
+  watchOccurrence,
+  watchOccurrenceClause,
+  watchOccurrenceSlot,
   withClauseLits,
   foldClauseLits,
   watchesL,
@@ -121,6 +131,7 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   bumpPropagationEvent,
   bumpWatchVisit,
   bumpWatchMove,
+  bumpLiteralInspections,
   bumpDecision,
   bumpConflict,
   SolverStats (..),
@@ -128,15 +139,15 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   zeroSolverStats,
 ) where
 
-import Control.DeepSeq (NFData, force)
+import Control.DeepSeq (NFData)
 import Control.Foldl qualified as Foldl
 import Control.Foldl qualified as L
 import Control.Functor.Linear qualified as C
 import Control.Functor.Linear.State.Extra qualified as S
 import Control.Lens (Lens', Prism', foldring, lens, prism', (.~))
 import Control.Monad (guard)
+import Control.Monad.ST (runST)
 import Control.Optics.Linear qualified as LinLens
-import Data.Array.Mutable.Linear.Extra qualified as LA
 import Data.Array.Mutable.Linear.Unboxed qualified as LUA
 import Data.Array.Polarized.Push.Extra qualified as Push
 import Data.Bifunctor.Linear qualified as BiL
@@ -149,10 +160,7 @@ import Data.Functor.Linear qualified as D
 import Data.Generics.Labels ()
 import Data.Hashable (Hashable)
 import Data.IntPSQ qualified as PSQ
-import Data.IntSet (IntSet)
-import Data.IntSet qualified as IS
 import Data.List (mapAccumL)
-import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe)
 import Data.Monoid.Linear.Orphans ()
 import Data.Ord (Down (..))
@@ -166,13 +174,13 @@ import Data.Unrestricted.Linear (Ur (..), UrT (..))
 import Data.Unrestricted.Linear qualified as L
 import Data.Unrestricted.Linear qualified as Ur
 import Data.Unrestricted.Linear.Orphans ()
-import Data.Vector qualified as V
 import Data.Vector.Generic qualified as G
 import Data.Vector.Generic.Mutable qualified as MG
 import Data.Vector.Mutable.Linear.Extra qualified as LV
 import Data.Vector.Mutable.Linear.Unboxed qualified as LUV
 import Data.Vector.Unboxed qualified as U
 import Data.Vector.Unboxed.Deriving (derivingUnbox)
+import Data.Vector.Unboxed.Mutable qualified as UM
 import GHC.Generics (Generic)
 import Generics.Linear qualified as L
 import Generics.Linear.TH (deriveGeneric)
@@ -200,6 +208,7 @@ data SolverStats = SolverStats
   , propagationEventCount :: {-# UNPACK #-} !Int
   , watchVisitCount :: {-# UNPACK #-} !Int
   , watchMoveCount :: {-# UNPACK #-} !Int
+  , literalInspectionCount :: {-# UNPACK #-} !Int
   , decisionCount :: {-# UNPACK #-} !Int
   , conflictCount :: {-# UNPACK #-} !Int
   , observedRestartCount :: {-# UNPACK #-} !Int
@@ -215,7 +224,7 @@ deriving via L.AsMovable SolverStats instance PL.Dupable SolverStats
 deriving via L.Generically SolverStats instance PL.Movable SolverStats
 
 zeroSolverStats :: SolverStats
-zeroSolverStats = SolverStats 0 0 0 0 0 0 0 0 0 0 0
+zeroSolverStats = SolverStats 0 0 0 0 0 0 0 0 0 0 0 0
 
 #ifdef HERBRAND_CDCL_INSTRUMENTED
 data Instrumentation = Instrumentation !SolverStats
@@ -498,7 +507,6 @@ derivingUnbox
 
 data Clause = Clause
   { lits :: {-# UNPACK #-} !(U.Vector Lit)
-  , satisfiedAt :: {-# UNPACK #-} !DecideLevel
   , watched1 :: {-# UNPACK #-} !Index
   , watched2 :: {-# UNPACK #-} !Index
   }
@@ -507,11 +515,145 @@ data Clause = Clause
 
 type Valuation = LUA.UArray Variable
 
-type WatchMap = LA.Array IntSet
+data WatchVar = W1 | W2 deriving (Show, Eq, Ord, Generic)
+
+deriveGeneric ''WatchVar
+
+deriving via L.AsMovable WatchVar instance PL.Consumable WatchVar
+
+deriving via L.AsMovable WatchVar instance PL.Dupable WatchVar
+
+deriving via L.Generically WatchVar instance PL.Movable WatchVar
+
+data WatchMap where
+  WatchMap ::
+    {-# UNPACK #-} !(LUA.UArray Int) %1 ->
+    {-# UNPACK #-} !(LUA.UArray Int) %1 ->
+    {-# UNPACK #-} !(LUV.Vector Int) %1 ->
+    WatchMap
+
+instance PL.Consumable WatchMap where
+  consume (WatchMap heads tails nexts) =
+    heads `lseq` tails `lseq` nexts `lseq` ()
+
+litBucketIndex :: Lit -> Int
+{-# INLINE litBucketIndex #-}
+litBucketIndex lit =
+  2 * fromVarId (litVar lit)
+    + case decodeLit lit of
+      Negative {} -> 1
+      Positive {} -> 0
+
+watchOccurrence :: ClauseId -> WatchVar -> Int
+{-# INLINE watchOccurrence #-}
+watchOccurrence cid W1 = 2 * unClauseId cid
+watchOccurrence cid W2 = 2 * unClauseId cid + 1
+
+watchOccurrenceClause :: Int -> ClauseId
+{-# INLINE watchOccurrenceClause #-}
+watchOccurrenceClause = ClauseId . (`quot` 2)
+
+watchOccurrenceSlot :: Int -> WatchVar
+{-# INLINE watchOccurrenceSlot #-}
+watchOccurrenceSlot occurrence
+  | even occurrence = W1
+  | otherwise = W2
+
+detachWatchBucket :: Lit -> S.State WatchMap (Ur Int)
+{-# INLINE detachWatchBucket #-}
+detachWatchBucket lit =
+  S.state \(WatchMap heads tails nexts) ->
+    LUA.unsafeGet (litBucketIndex lit) heads & \(Ur head, heads) ->
+      ( Ur head
+      , WatchMap
+          (LUA.unsafeSet (litBucketIndex lit) (-1) heads)
+          (LUA.unsafeSet (litBucketIndex lit) (-1) tails)
+          nexts
+      )
+
+getNextWatchOccurrence :: Int -> S.State WatchMap (Ur Int)
+{-# INLINE getNextWatchOccurrence #-}
+getNextWatchOccurrence occurrence =
+  S.state \(WatchMap heads tails nexts) ->
+    LUV.unsafeGet occurrence nexts & \(Ur next, nexts) ->
+      (Ur next, WatchMap heads tails nexts)
+
+appendWatchOccurrence :: Lit -> Int -> S.State WatchMap ()
+{-# INLINE appendWatchOccurrence #-}
+appendWatchOccurrence lit occurrence =
+  S.modify PL.$ \(WatchMap heads tails nexts) ->
+    let bucket = litBucketIndex lit
+     in LUA.unsafeGet bucket tails & \(Ur oldTail, tails) ->
+          if oldTail < 0
+            then
+              WatchMap
+                (LUA.unsafeSet bucket occurrence heads)
+                (LUA.unsafeSet bucket occurrence tails)
+                (LUV.unsafeSet occurrence (-1) nexts)
+            else
+              WatchMap
+                heads
+                (LUA.unsafeSet bucket occurrence tails)
+                ( LUV.unsafeSet occurrence (-1) PL.$
+                    LUV.unsafeSet oldTail occurrence nexts
+                )
+
+linkWatchOccurrence :: Lit -> Int -> S.State WatchMap ()
+{-# INLINE linkWatchOccurrence #-}
+linkWatchOccurrence lit occurrence =
+  S.modify PL.$ \(WatchMap heads tails nexts) ->
+    let bucket = litBucketIndex lit
+     in LUA.unsafeGet bucket heads & \(Ur oldHead, heads) ->
+          LUA.unsafeGet bucket tails & \(Ur oldTail, tails) ->
+            if oldTail < 0
+              then
+                WatchMap
+                  (LUA.unsafeSet bucket occurrence heads)
+                  (LUA.unsafeSet bucket occurrence tails)
+                  (LUV.unsafeSet occurrence (-1) nexts)
+              else
+                if occurrence < oldHead
+                  then
+                    WatchMap
+                      (LUA.unsafeSet bucket occurrence heads)
+                      tails
+                      (LUV.unsafeSet occurrence oldHead nexts)
+                  else
+                    WatchMap
+                      heads
+                      (LUA.unsafeSet bucket occurrence tails)
+                      ( LUV.unsafeSet occurrence (-1) PL.$
+                          LUV.unsafeSet oldTail occurrence nexts
+                      )
+
+getWatchHeadAt :: Int -> S.State WatchMap (Ur Int)
+getWatchHeadAt bucket =
+  S.state \(WatchMap heads tails nexts) ->
+    LUA.unsafeGet bucket heads & \(head, heads) ->
+      (head, WatchMap heads tails nexts)
+
+getWatchTailAt :: Int -> S.State WatchMap (Ur Int)
+getWatchTailAt bucket =
+  S.state \(WatchMap heads tails nexts) ->
+    LUA.unsafeGet bucket tails & \(tailOccurrence, tails) ->
+      (tailOccurrence, WatchMap heads tails nexts)
+
+getWatchMapSizes :: S.State WatchMap (Ur (Int, Int, Int))
+getWatchMapSizes =
+  S.state \(WatchMap heads tails nexts) ->
+    LUA.size heads & \(Ur headCount, heads) ->
+      LUA.size tails & \(Ur tailCount, tails) ->
+        LUV.size nexts & \(Ur nextCount, nexts) ->
+          (Ur (headCount, tailCount, nextCount), WatchMap heads tails nexts)
+
+appendWatchSlots :: S.State WatchMap ()
+{-# INLINE appendWatchSlots #-}
+appendWatchSlots =
+  S.modify PL.$ \(WatchMap heads tails nexts) ->
+    WatchMap heads tails PL.$ LUV.push (-1) PL.$ LUV.push (-1) nexts
 
 data ClauseBody = ClauseBody
-  { satAt :: {-# UNPACK #-} !DecideLevel
-  , wat1, wat2 :: {-# UNPACK #-} !Index
+  { wat1, wat2 :: {-# UNPACK #-} !Index
   }
   deriving (Show, Eq, Ord, Generic)
 
@@ -536,12 +678,11 @@ instance G.Vector U.Vector ClauseBody where
   basicLength = \(V_CB l _) -> l
   {-# INLINE basicLength #-}
   basicUnsafeSlice off len = \(V_CB _ v) ->
-    V_CB len (G.basicUnsafeSlice (off * 3) (len * 3) v)
+    V_CB len (G.basicUnsafeSlice (off * 2) (len * 2) v)
   {-# INLINE basicUnsafeSlice #-}
   basicUnsafeIndexM = \(V_CB _ v) i -> do
-    satAt <- DecideLevel <$> G.basicUnsafeIndexM v (3 * i)
-    wat1 <- G.basicUnsafeIndexM v (3 * i + 1)
-    wat2 <- G.basicUnsafeIndexM v (3 * i + 2)
+    wat1 <- G.basicUnsafeIndexM v (2 * i)
+    wat2 <- G.basicUnsafeIndexM v (2 * i + 1)
     pure $! ClauseBody {..}
   {-# INLINE basicUnsafeIndexM #-}
   basicUnsafeCopy = \(MV_CB _ mv) (V_CB _ v) ->
@@ -552,24 +693,22 @@ instance MG.MVector U.MVector ClauseBody where
   basicLength = \(MV_CB l _) -> l
   {-# INLINE basicLength #-}
   basicUnsafeSlice off len = \(MV_CB _ v) ->
-    MV_CB len (MG.basicUnsafeSlice (off * 3) (len * 3) v)
+    MV_CB len (MG.basicUnsafeSlice (off * 2) (len * 2) v)
   {-# INLINE basicUnsafeSlice #-}
   basicOverlaps = \(MV_CB _ l) (MV_CB _ r) -> MG.basicOverlaps l r
   {-# INLINE basicOverlaps #-}
-  basicUnsafeNew l = MV_CB l <$> MG.unsafeNew (3 * l)
+  basicUnsafeNew l = MV_CB l <$> MG.unsafeNew (2 * l)
   {-# INLINE basicUnsafeNew #-}
   basicInitialize (MV_CB _ l) = MG.basicInitialize l
   {-# INLINE basicInitialize #-}
   basicUnsafeRead (MV_CB _ v) i = do
-    satAt <- DecideLevel <$> MG.basicUnsafeRead v (3 * i)
-    wat1 <- MG.basicUnsafeRead v (3 * i + 1)
-    wat2 <- MG.basicUnsafeRead v (3 * i + 2)
+    wat1 <- MG.basicUnsafeRead v (2 * i)
+    wat2 <- MG.basicUnsafeRead v (2 * i + 1)
     pure $! ClauseBody {..}
   {-# INLINE basicUnsafeRead #-}
   basicUnsafeWrite (MV_CB _ v) i ClauseBody {..} = do
-    MG.basicUnsafeWrite v (3 * i) $ unDecideLevel satAt
-    MG.basicUnsafeWrite v (3 * i + 1) wat1
-    MG.basicUnsafeWrite v (3 * i + 2) wat2
+    MG.basicUnsafeWrite v (2 * i) wat1
+    MG.basicUnsafeWrite v (2 * i + 1) wat2
   {-# INLINE basicUnsafeWrite #-}
   basicClear (MV_CB _ l) = MG.basicClear l
   {-# INLINE basicClear #-}
@@ -578,7 +717,7 @@ instance MG.MVector U.MVector ClauseBody where
   basicUnsafeMove (MV_CB _ dst) (MV_CB _ src) = MG.basicUnsafeMove dst src
   {-# INLINE basicUnsafeMove #-}
   basicUnsafeGrow = \(MV_CB l mv) growth ->
-    MV_CB (l + growth) <$> MG.basicUnsafeGrow mv (3 * growth)
+    MV_CB (l + growth) <$> MG.basicUnsafeGrow mv (2 * growth)
 
 data Clauses where
   Clauses ::
@@ -673,16 +812,31 @@ pushClause :: forall s. (Reifies s CDCLOptions) => Clause -> S.State (CDCLState 
 {-# INLINE pushClause #-}
 {- HLINT ignore pushClause "Redundant lambda" -}
 pushClause = \Clause {..} -> S.do
+  Ur cid <- Ur.lift ClauseId C.<$> getNumClauses
   clausesL S.%= \(Clauses litss bs) ->
     LUV.push
       ClauseBody
-        { satAt = satisfiedAt
-        , wat1 = watched1
+        { wat1 = watched1
         , wat2 = watched2
         }
       bs
       & \bs ->
         LV.push lits litss & \litss -> Clauses litss bs
+  S.zoom watchesL appendWatchSlots
+  if watched1 >= 0
+    then
+      S.zoom watchesL PL.$
+        linkWatchOccurrence
+          (U.unsafeIndex lits watched1)
+          (watchOccurrence cid W1)
+    else S.pure ()
+  if watched2 >= 0
+    then
+      S.zoom watchesL PL.$
+        linkWatchOccurrence
+          (U.unsafeIndex lits watched2)
+          (watchOccurrence cid W2)
+    else S.pure ()
   Ur !lbd <- S.zoom valuationL (Ur.runUrT (L.foldOverM (foldring U.foldr) calcLBDL lits))
   vsidsStateL
     S.%= case decayFactor $ reflect @s Proxy of
@@ -926,8 +1080,8 @@ toCDCLState (CNF cls) lin =
           0
           True
           1.0
-      (numOrigCls :!: upds, cls'') = mapAccumL buildClause (0 :!: Map.empty) cls'
-      !watches0 = force $ V.toList $ V.update (V.replicate numVars mempty) (V.fromList $ Map.toList upds)
+      (numOrigCls, cls'') = mapAccumL buildClause 0 cls'
+      (!watchHeads, !watchTails, !watchNexts) = buildWatchVectors numVars cls''
    in case () of
         _
           | truth -> lin `lseq` Left (Ur (Satisfiable ()))
@@ -938,7 +1092,7 @@ toCDCLState (CNF cls) lin =
              in besides lin (LUV.constantL numVars (PosL 0)) PL.& \(trail0, lin) ->
                   let trail = LUV.slice 0 0 trail0
                    in besides lin (toClauses cls'') PL.& \(clauses, lin) ->
-                        besides lin (LA.fromListL watches0) & \(watcheds, lin) ->
+                        besides lin (toWatchMap watchHeads watchTails watchNexts) & \(watcheds, lin) ->
                           besides lin (LUA.allocL (maybe 0 ((+ 1) . fromEnum) maxVar) Indefinite) PL.& \(vals, lin) ->
                             Right PL.$
                               CDCLState
@@ -959,7 +1113,11 @@ toClauses cs l =
     F.foldMap'
       ( \Clause {..} ->
           ( Ur (DL.singleton lits)
-          , Push.singleton ClauseBody {satAt = satisfiedAt, wat1 = watched1, wat2 = watched2}
+          , Push.singleton
+              ClauseBody
+                { wat1 = watched1
+                , wat2 = watched2
+                }
           )
       )
       cs
@@ -969,51 +1127,63 @@ toClauses cs l =
           (LUV.fromVectorL (Push.alloc bs) l')
 
 buildClause ::
-  Pair Int (Map.Map Int IntSet) ->
+  Int ->
   [Lit] ->
-  (Pair Int (Map.Map Int IntSet), Clause)
-buildClause (i :!: watches) [] =
-  (i :!: watches, Clause {lits = mempty, satisfiedAt = -1, watched1 = -1, watched2 = -1})
-buildClause (i :!: watches) [x] =
-  ( (i + 1) :!: Map.insertWith IS.union (fromEnum $ litVar x) (IS.singleton i) watches
-  , Clause {lits = U.singleton x, satisfiedAt = -1, watched1 = 0, watched2 = -1}
-  )
-buildClause (i :!: watches) xs =
-  ( i
-      + 1
-        :!: Map.insertWith
-          IS.union
-          (fromEnum $ litVar $ head xs)
-          (IS.singleton i)
-          ( Map.insertWith
-              IS.union
-              (fromEnum $ litVar $ xs !! 1)
-              (IS.singleton i)
-              watches
-          )
-  , Clause {lits = U.fromList xs, satisfiedAt = -1, watched1 = 0, watched2 = 1}
-  )
+  (Int, Clause)
+buildClause i [] =
+  (i + 1, Clause {lits = mempty, watched1 = -1, watched2 = -1})
+buildClause i [x] =
+  (i + 1, Clause {lits = U.singleton x, watched1 = 0, watched2 = -1})
+buildClause i xs =
+  (i + 1, Clause {lits = U.fromList xs, watched1 = 0, watched2 = 1})
+
+buildWatchVectors :: Int -> [Clause] -> (U.Vector Int, U.Vector Int, U.Vector Int)
+buildWatchVectors numVars clauses = runST do
+  heads <- UM.replicate (2 * numVars) (-1)
+  tails <- UM.replicate (2 * numVars) (-1)
+  nexts <- UM.replicate (2 * length clauses) (-1)
+  let add occurrence lit = do
+        let bucket = litBucketIndex lit
+        oldTail <- UM.unsafeRead tails bucket
+        if oldTail < 0
+          then UM.unsafeWrite heads bucket occurrence
+          else UM.unsafeWrite nexts oldTail occurrence
+        UM.unsafeWrite tails bucket occurrence
+  mapM_
+    ( \(clauseIndex, Clause {..}) -> do
+        let cid = ClauseId clauseIndex
+        if watched1 >= 0
+          then add (watchOccurrence cid W1) $ U.unsafeIndex lits watched1
+          else pure ()
+        if watched2 >= 0
+          then add (watchOccurrence cid W2) $ U.unsafeIndex lits watched2
+          else pure ()
+    )
+    $ zip [0 ..] clauses
+  (,,)
+    <$> U.unsafeFreeze heads
+    <*> U.unsafeFreeze tails
+    <*> U.unsafeFreeze nexts
+
+toWatchMap :: U.Vector Int -> U.Vector Int -> U.Vector Int -> Linearly %1 -> WatchMap
+toWatchMap heads tails nexts lin =
+  PL.dup2 lin & \(headsLin, restLin) ->
+    PL.dup2 restLin & \(tailsLin, nextsLin) ->
+      WatchMap
+        (LUA.fromVectorL heads headsLin)
+        (LUA.fromVectorL tails tailsLin)
+        (LUV.fromVectorL nexts nextsLin)
 
 deriveGeneric ''CDCLState
 
 deriving via L.Generically (CDCLState s) instance PL.Consumable (CDCLState s)
 
-data WatchVar = W1 | W2 deriving (Show, Eq, Ord, Generic)
-
-deriveGeneric ''WatchVar
-
-deriving via L.AsMovable WatchVar instance PL.Consumable WatchVar
-
-deriving via L.AsMovable WatchVar instance PL.Dupable WatchVar
-
-deriving via L.Generically WatchVar instance PL.Movable WatchVar
-
 data UnitResult
   = Unit {-# UNPACK #-} !Lit
   | Conflict {-# UNPACK #-} !Lit
-  | -- | Optional 'Pair' records possible old watched variable and new variable.
-    Satisfied !(Maybe (Pair (Pair WatchVar VarId) (Pair VarId Index)))
-  | WatchChangedFromTo !WatchVar {-# UNPACK #-} !VarId {-# UNPACK #-} !VarId {-# UNPACK #-} !Index
+  | -- | Optional 'Pair' records possible old watched literal and new literal.
+    Satisfied !(Maybe (Pair (Pair WatchVar Lit) (Pair Lit Index)))
+  | WatchChangedFromTo !WatchVar {-# UNPACK #-} !Lit {-# UNPACK #-} !Lit {-# UNPACK #-} !Index
   deriving (Show, Eq, Ord, Generic)
 
 deriveGeneric ''UnitResult
@@ -1094,19 +1264,6 @@ setWatchVar cid W2 = Unsafe.toLinear \vid ->
     LUV.modify_ (#wat2 .~ vid) (unClauseId cid) bs & \bs ->
       Clauses litss bs
 
-setSatisfiedLevel :: ClauseId -> DecideLevel -> S.State (CDCLState s) ()
-{-# INLINE setSatisfiedLevel #-}
-setSatisfiedLevel cid lvl =
-  clausesL S.%= \(Clauses litss bs) ->
-    LUV.modify_ (#satAt .~ lvl) (unClauseId cid) bs & \bs ->
-      Clauses litss bs
-
-getSatisfiedLevel :: ClauseId -> S.State (CDCLState s) (Ur DecideLevel)
-getSatisfiedLevel cid =
-  S.uses clausesL \(Clauses ls bs) ->
-    LUV.unsafeGet (unClauseId cid) bs & \(Ur ClauseBody {..}, bs) ->
-      (Ur satAt, Clauses ls bs)
-
 data WatchedLits
   = WatchOne {-# UNPACK #-} !Lit
   | WatchThese {-# UNPACK #-} !Lit {-# UNPACK #-} !Lit
@@ -1165,6 +1322,16 @@ deriving via L.AsMovable WatchedLitIndices instance PL.Dupable WatchedLitIndices
 
 deriving via L.Generically WatchedLitIndices instance PL.Movable WatchedLitIndices
 
+getClauseSearch :: ClauseId -> S.State Clauses (Ur (U.Vector Lit, WatchedLitIndices))
+getClauseSearch cid = S.state \(Clauses ls bs) ->
+  LUV.unsafeGet (unClauseId cid) bs & \(Ur ClauseBody {..}, bs) ->
+    LV.unsafeGet (unClauseId cid) ls & \(Ur clauseLits, ls) ->
+      let watchedIndices =
+            if wat2 >= 0
+              then WatchTheseI wat1 wat2
+              else WatchOneI wat1
+       in (Ur (clauseLits, watchedIndices), Clauses ls bs)
+
 getWatchedLitIndices :: ClauseId -> S.State Clauses (Ur WatchedLitIndices)
 getWatchedLitIndices cid = S.state \(Clauses ls bs) ->
   LUV.unsafeGet (unClauseId cid) bs & \(Ur ClauseBody {..}, bs) ->
@@ -1218,6 +1385,12 @@ bumpWatchMove = bumpStats PL.$ Unsafe.toLinear \stats -> stats {watchMoveCount =
 bumpDecision = bumpStats PL.$ Unsafe.toLinear \stats -> stats {decisionCount = decisionCount stats + 1}
 bumpConflict = bumpStats PL.$ Unsafe.toLinear \stats -> stats {conflictCount = conflictCount stats + 1}
 
+bumpLiteralInspections :: Int -> S.State (CDCLState s) ()
+bumpLiteralInspections count =
+  bumpStats PL.$
+    Unsafe.toLinear \stats ->
+      stats {literalInspectionCount = literalInspectionCount stats + count}
+
 bumpRestart :: S.State (CDCLState s) ()
 bumpRestart = bumpStats PL.$ Unsafe.toLinear \stats -> stats {observedRestartCount = observedRestartCount stats + 1}
 #else
@@ -1234,6 +1407,9 @@ bumpWatchVisit = S.pure ()
 bumpWatchMove = S.pure ()
 bumpDecision = S.pure ()
 bumpConflict = S.pure ()
+
+bumpLiteralInspections :: Int -> S.State (CDCLState s) ()
+bumpLiteralInspections _ = S.pure ()
 
 bumpRestart :: S.State (CDCLState s) ()
 bumpRestart = S.pure ()

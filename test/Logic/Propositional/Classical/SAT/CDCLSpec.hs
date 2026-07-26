@@ -38,6 +38,9 @@ import Test.Falsify.Range (withOrigin)
 import Test.Tasty
 import Test.Tasty.Falsify
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
+#ifdef HERBRAND_CDCL_INSTRUMENTED
+import Test.Tasty.HUnit (testCaseSteps)
+#endif
 
 cdclOptions :: [(String, CDCLOptions)]
 cdclOptions =
@@ -184,6 +187,19 @@ test_solveVarId =
           , testCase "default solver behavior remains no-restart" $
               restartStrategy defaultOptions @?= NoRestart
           ]
+      , testGroup
+          "watch occurrence regressions"
+          [ testCase "handles opposite polarities in distinct buckets" $
+              case solveVarIdWith defaultOptions mixedPolarityWatchCNF of
+                Unsat -> assertFailure "mixed-polarity watch witness must be satisfiable"
+                Satisfiable {} -> pure ()
+          , testCase "moves watches through a long implication chain" $
+              solveVarIdWith defaultOptions longWatchMoveCNF @?= Unsat
+          , testCase "restores the unread bucket suffix after a conflict" $
+              case solveVarIdWith defaultOptions watchSuffixRestoreCNF of
+                Unsat -> assertFailure "watch-suffix restoration witness must be satisfiable"
+                Satisfiable {} -> pure ()
+          ]
       ]
         <> instrumentationTests
         <> [ testGroup
@@ -286,8 +302,7 @@ instrumentationTests =
       postDrainScanCount stats @?= 0
       assignmentCount stats @?= trailAppendCount stats
       propagationEventCount stats @?= assignmentCount stats
-      assertBool "root propagation must visit watched clauses" $
-        watchVisitCount stats > 0
+      watchVisitCount stats @?= 0
   , testGroup
       "instrumented threshold-1 restarts"
       [ testCase restartName do
@@ -307,6 +322,25 @@ instrumentationTests =
           , ("LubyRestart(1)", LubyRestart 1)
           ]
       ]
+  , testCaseSteps "reports watch-structure stress counters" \step -> do
+      let (mixedResult, mixedStats) = solveVarIdWithStats defaultOptions mixedPolarityWatchCNF
+          (longResult, longStats) = solveVarIdWithStats defaultOptions longWatchMoveCNF
+      step $ "mixed-polarity: " <> show mixedStats
+      step $ "long-clause: " <> show longStats
+      case mixedResult of
+        Unsat -> assertFailure "mixed-polarity watch witness must be satisfiable"
+        Satisfiable {} -> pure ()
+      longResult @?= Unsat
+      watchVisitCount mixedStats @?= 128
+      watchMoveCount longStats @?= 126
+      literalInspectionCount longStats @?= 252
+  , testCase "exercises conflict-time watch-suffix restoration" $ do
+      let (result, stats) = solveVarIdWithStats defaultOptions watchSuffixRestoreCNF
+      case result of
+        Unsat -> assertFailure "watch-suffix restoration witness must be satisfiable"
+        Satisfiable {} -> pure ()
+      assertBool "the restoration witness must encounter a conflict" $
+        conflictCount stats > 0
   ]
 #else
 instrumentationTests = []
@@ -341,6 +375,35 @@ allBinaryTwoCNF =
     , [Positive 0, Negative 1]
     , [Negative 0, Positive 1]
     , [Negative 0, Negative 1]
+    ]
+
+mixedPolarityWatchCNF :: CNF VarId
+mixedPolarityWatchCNF =
+  CNF $
+    [[Positive 0]]
+      <> [[Positive 0, Positive i] | i <- [1 .. 64]]
+      <> [[Negative 0, Positive i] | i <- [65 .. 128]]
+
+longWatchMoveCNF :: CNF VarId
+longWatchMoveCNF =
+  CNF $
+    [CNFClause [Negative 0]]
+      <> [CNFClause [Positive i, Negative (i + 1)] | i <- [0 .. 126]]
+      <> [CNFClause [Positive i | i <- [0 .. 127]]]
+
+watchSuffixRestoreCNF :: CNF VarId
+watchSuffixRestoreCNF =
+  CNF
+    [ [Positive 1, Positive 2]
+    , [Positive 1, Positive 3]
+    , [Positive 1, Positive 4]
+    , [Positive 0, Negative 1]
+    , [Positive 0, Negative 2]
+    , [Positive 0, Positive 5]
+    , [Positive 0, Positive 6]
+    , [Positive 0, Positive 7]
+    , [Positive 0, Positive 8]
+    , [Positive 0, Positive 9]
     ]
 
 exhaustiveSmallCNFs :: [CNF VarId]
