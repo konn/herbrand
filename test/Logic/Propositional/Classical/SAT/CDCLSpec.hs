@@ -382,6 +382,44 @@ instrumentationTests =
         Satisfiable {} -> pure ()
       assertBool "the restoration witness must encounter a conflict" $
         conflictCount stats > 0
+  , testCase "traces reverse-trail first-UIP analysis with a nonzero target" $ do
+      let (result, stats) =
+            solveVarIdWithStats defaultOptions nonzeroTargetUIPCNF
+      case result of
+        Unsat -> assertFailure "first-UIP trace witness must be satisfiable"
+        Satisfiable model ->
+          eval model (toFormula @Full nonzeroTargetUIPCNF) @?= Just True
+      analysisCount stats @?= 1
+      analysisRootConflictCount stats @?= 0
+      analysisConflictClauseVisitCount stats @?= 1
+      analysisReasonClauseVisitCount stats @?= 1
+      analysisConflictLiteralVisitCount stats @?= 3
+      analysisReasonLiteralVisitCount stats @?= 3
+      analysisTrailReadCount stats @?= 2
+      analysisPivotCount stats @?= 2
+      analysisMarkCount stats @?= 3
+      analysisDuplicateMarkCount stats @?= 2
+      analysisLearnedLiteralCount stats @?= 2
+      analysisEpochClearCount stats @?= 1
+      analysisLastTargetLevel stats @?= 1
+      analysisLastPivotTrace stats
+        @?= [Positive 2, Negative 1]
+      analysisLastLearnedClause stats
+        @?= [Positive 1, Positive 0]
+  , testProperty "every bounded-random learned clause is entailed and asserting" $ do
+      cnf <-
+        gen $
+          fmap toEnum
+            <$> cnfGen 6 8 ((0, 6) `withOrigin` 4)
+      let (_, stats) = solveVarIdWithStats defaultOptions cnf
+          traces = analysisLearnedTrace stats
+      collect "learned clauses" [length traces]
+      assert $
+        P.eq
+          .$ ("expected", True)
+          .$ ( "answer"
+             , all (validLearnedTrace cnf) traces
+             )
   , testCaseSteps "reports trail-suffix backtrack counters" \step -> do
       let (result, stats) =
             solveVarIdWithStats defaultOptions watchSuffixRestoreCNF
@@ -534,6 +572,45 @@ watchSuffixRestoreCNF =
     , [Positive 0, Positive 8]
     , [Positive 0, Positive 9]
     ]
+
+#ifdef HERBRAND_CDCL_INSTRUMENTED
+nonzeroTargetUIPCNF :: CNF VarId
+nonzeroTargetUIPCNF =
+  CNF
+    [ [Positive 0, Positive 1, Positive 2]
+    , [Positive 0, Positive 1, Negative 2]
+    ]
+
+validLearnedTrace ::
+  CNF VarId ->
+  ([Literal Word], Int, [Literal Word]) ->
+  Bool
+validLearnedTrace original (pivots, target, learned) =
+  target >= 0
+    && learnedClauseEntailed original learned
+    && case (reverse pivots, learned) of
+      (finalPivot : _, assertingLit : _) ->
+        assertingLit == negateLiteral finalPivot
+      _ -> False
+
+learnedClauseEntailed :: CNF VarId -> [Literal Word] -> Bool
+learnedClauseEntailed original learned =
+  case classifyFormula $ toFormula @Full counterexample of
+    Inconsistent -> True
+    _ -> False
+  where
+    CNF originalClauses =
+      fmap (fromIntegral . fromEnum) original
+    counterexample =
+      CNF $
+        originalClauses
+          <> map (CNFClause . pure . negateLiteral) learned
+
+negateLiteral :: Literal a -> Literal a
+negateLiteral = \case
+  Positive var -> Negative var
+  Negative var -> Positive var
+#endif
 
 sparsePureLiteralCNF :: CNF VarId
 sparsePureLiteralCNF =

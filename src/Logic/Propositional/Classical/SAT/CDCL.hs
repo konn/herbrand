@@ -41,7 +41,6 @@ module Logic.Propositional.Classical.SAT.CDCL (
   VarId (..),
 ) where
 
-import Control.Foldl qualified as L
 import Control.Functor.Linear qualified as C
 import Control.Functor.Linear.State.Extra qualified as S
 import Control.Lens hiding (Index, lens, (%=), (&), (.=))
@@ -62,17 +61,13 @@ import Data.IntSet qualified as IS
 #endif
 import Data.Proxy (Proxy (..))
 import Data.Reflection (Reifies, reflect, reify)
-import Data.Semigroup (Arg (..), Max (..))
-import Data.Set (Set)
-import Data.Set qualified as Set
 import Data.Strict (Pair (..))
-import Data.Strict.Classes qualified as St
-import Data.Strict.Maybe qualified as St
 import Data.Tuple qualified as P
 import Data.Unrestricted.Linear (UrT (..), liftUrT, runUrT)
 import Data.Unrestricted.Linear qualified as Ur
 import Data.Vector.Mutable.Linear.Unboxed qualified as LUV
 import Data.Vector.Unboxed qualified as U
+import Data.Word (Word64)
 import GHC.Generics qualified as GHC
 import GHC.Stack
 import Linear.Token.Linearly (besides, linearly)
@@ -298,9 +293,8 @@ solverLoop :: (Reifies s CDCLOptions, HasCallStack) => PropagationStart -> S.Sta
 solverLoop = fix $ \go start -> S.do
   resl <- propagateFrom start
   case resl of
-    ConflictFound cid l ->
-      move (cid, l) & \(Ur (cid, l)) -> S.do
-        backjump cid l
+    ConflictFound cid ->
+      move cid & \(Ur cid) -> backjump cid
     NoMorePropagation -> S.do
       validateFixpoint
       Ur mid <- S.zoom vsidsStateL findUnsatVar
@@ -312,24 +306,19 @@ solverLoop = fix $ \go start -> S.do
           levelStartsL S.%= LUV.push (fromIntegral trailSize)
           go (EnqueueLit (NegL vid) (-1))
 
-backjump :: (Reifies s CDCLOptions) => ClauseId -> Lit -> S.State (CDCLState s) FinalState
-backjump confCls lit = S.do
+backjump :: (Reifies s CDCLOptions) => ClauseId -> S.State (CDCLState s) FinalState
+backjump confCls = S.do
   bumpConflict
   S.zoom vsidsStateL decayVarPriosM
-  Ur confLits <- S.zoom clausesL $ foldClauseLits L.set confCls
-  mLearnt <- findUIP1 lit confLits
-  case mLearnt of
-    Nothing ->
-      -- No valid backjumping destination found. Unsat.
+  Ur analysis <- analyzeConflict confCls
+  case analysis of
+    RootConflict -> S.do
+      recordRootAnalysis confCls
       S.pure Failed
-    Just (Ur (decLvl, mlearnt, truth)) -> S.do
-      Ur reason <- case mlearnt of
-        Just learnt -> S.do
-          pushClause learnt
-          Ur reason <- Ur.lift (fromIntegral . subtract 1) C.<$> getNumClauses
-          S.pure $ Ur reason
-        Nothing -> S.pure $ Ur confCls
-
+    LearnedClause decLvl learnt truth metrics -> S.do
+      recordLearnedAnalysis decLvl learnt metrics
+      pushClause learnt
+      Ur reason <- Ur.lift (fromIntegral . subtract 1) C.<$> getNumClauses
       backtrackTrail False decLvl
       restart <- tryRestart
       case restart of
@@ -339,6 +328,7 @@ backjump confCls lit = S.do
         Restarted -> S.do
           backtrackTrail True 0
           Ur classification <- classifyClause reason
+          validateRestartedLearnedClause truth classification
           case classification of
             ClauseConflict -> S.pure Failed
             ClauseUnit unitLit -> solverLoop $ EnqueueLit unitLit reason
@@ -369,148 +359,893 @@ backtrackTrail isRestart target = S.do
   qheadL S..= P.min oldQhead cutoff
   recordBacktrack isRestart boundaryReads cleared cleared 0 0
 
-findUIP1 ::
+data ConflictAnalysis
+  = RootConflict
+  | LearnedClause
+      {-# UNPACK #-} !DecideLevel
+      !Clause
+      {-# UNPACK #-} !Lit
+      !AnalysisMetrics
+
+#ifdef HERBRAND_CDCL_INSTRUMENTED
+data AnalysisMetrics = AnalysisMetrics
+  { metricConflictClauseVisitCount :: {-# UNPACK #-} !Int
+  , metricReasonClauseVisitCount :: {-# UNPACK #-} !Int
+  , metricConflictLiteralVisitCount :: {-# UNPACK #-} !Int
+  , metricReasonLiteralVisitCount :: {-# UNPACK #-} !Int
+  , metricTrailReadCount :: {-# UNPACK #-} !Int
+  , metricPivotCount :: {-# UNPACK #-} !Int
+  , metricMarkCount :: {-# UNPACK #-} !Int
+  , metricDuplicateMarkCount :: {-# UNPACK #-} !Int
+  , metricEpochClearCount :: {-# UNPACK #-} !Int
+  , metricPivotTraceRev :: ![Lit]
+  }
+#else
+data AnalysisMetrics = AnalysisMetrics
+#endif
+
+data AnalysisAcc = AnalysisAcc
+  { analysisPathCount :: {-# UNPACK #-} !Int
+  , analysisScratchLength :: {-# UNPACK #-} !Int
+  , analysisTargetLevel :: {-# UNPACK #-} !DecideLevel
+  , analysisTargetIndex :: {-# UNPACK #-} !Int
+  , analysisMetrics :: !AnalysisMetrics
+  }
+
+initialAnalysisAcc :: Int -> Bool -> AnalysisAcc
+#ifdef HERBRAND_CDCL_INSTRUMENTED
+initialAnalysisAcc conflictLiteralCount epochCleared =
+  AnalysisAcc
+    { analysisPathCount = 0
+    , analysisScratchLength = 0
+    , analysisTargetLevel = -1
+    , analysisTargetIndex = -1
+    , analysisMetrics =
+        AnalysisMetrics
+          { metricConflictClauseVisitCount = 1
+          , metricReasonClauseVisitCount = 0
+          , metricConflictLiteralVisitCount = conflictLiteralCount
+          , metricReasonLiteralVisitCount = 0
+          , metricTrailReadCount = 0
+          , metricPivotCount = 0
+          , metricMarkCount = 0
+          , metricDuplicateMarkCount = 0
+          , metricEpochClearCount = if epochCleared then 1 else 0
+          , metricPivotTraceRev = []
+          }
+    }
+#else
+initialAnalysisAcc _ _ =
+  AnalysisAcc
+    { analysisPathCount = 0
+    , analysisScratchLength = 0
+    , analysisTargetLevel = -1
+    , analysisTargetIndex = -1
+    , analysisMetrics = AnalysisMetrics
+    }
+#endif
+
+noteAnalysisClauseScan :: Maybe (Lit, Step) -> Int -> AnalysisAcc -> AnalysisAcc
+#ifdef HERBRAND_CDCL_INSTRUMENTED
+noteAnalysisClauseScan Nothing _ acc = acc
+noteAnalysisClauseScan Just {} literalCount acc@AnalysisAcc {analysisMetrics = metrics} =
+  acc
+    { analysisMetrics =
+        metrics
+          { metricReasonClauseVisitCount =
+              metricReasonClauseVisitCount metrics + 1
+          , metricReasonLiteralVisitCount =
+              metricReasonLiteralVisitCount metrics + literalCount
+          }
+    }
+#else
+{-# INLINE noteAnalysisClauseScan #-}
+noteAnalysisClauseScan _ _ acc = acc
+#endif
+
+noteAnalysisTrailRead :: AnalysisAcc -> AnalysisAcc
+#ifdef HERBRAND_CDCL_INSTRUMENTED
+noteAnalysisTrailRead acc@AnalysisAcc {analysisMetrics = metrics} =
+  acc
+    { analysisMetrics =
+        metrics {metricTrailReadCount = metricTrailReadCount metrics + 1}
+    }
+#else
+{-# INLINE noteAnalysisTrailRead #-}
+noteAnalysisTrailRead acc = acc
+#endif
+
+noteAnalysisPivot :: Lit -> AnalysisAcc -> AnalysisAcc
+#ifdef HERBRAND_CDCL_INSTRUMENTED
+noteAnalysisPivot lit acc@AnalysisAcc {analysisMetrics = metrics} =
+  acc
+    { analysisMetrics =
+        metrics
+          { metricPivotCount = metricPivotCount metrics + 1
+          , metricPivotTraceRev = lit : metricPivotTraceRev metrics
+          }
+    }
+#else
+{-# INLINE noteAnalysisPivot #-}
+noteAnalysisPivot _ acc = acc
+#endif
+
+noteAnalysisMark :: AnalysisAcc -> AnalysisAcc
+#ifdef HERBRAND_CDCL_INSTRUMENTED
+noteAnalysisMark acc@AnalysisAcc {analysisMetrics = metrics} =
+  acc
+    { analysisMetrics =
+        metrics {metricMarkCount = metricMarkCount metrics + 1}
+    }
+#else
+{-# INLINE noteAnalysisMark #-}
+noteAnalysisMark acc = acc
+#endif
+
+noteAnalysisDuplicateMark :: AnalysisAcc -> AnalysisAcc
+#ifdef HERBRAND_CDCL_INSTRUMENTED
+noteAnalysisDuplicateMark acc@AnalysisAcc {analysisMetrics = metrics} =
+  acc
+    { analysisMetrics =
+        metrics
+          { metricDuplicateMarkCount =
+              metricDuplicateMarkCount metrics + 1
+          }
+    }
+#else
+{-# INLINE noteAnalysisDuplicateMark #-}
+noteAnalysisDuplicateMark acc = acc
+#endif
+
+recordRootAnalysis :: ClauseId -> S.State (CDCLState s) ()
+#ifdef HERBRAND_CDCL_INSTRUMENTED
+recordRootAnalysis conflictClause = S.do
+  Ur conflictLits <- S.zoom clausesL $ getClauseLits conflictClause
+  solverStatsL S.%= \stats ->
+    move stats & \(Ur stats) ->
+      stats
+        { analysisCount = analysisCount stats + 1
+        , analysisRootConflictCount = analysisRootConflictCount stats + 1
+        , analysisConflictClauseVisitCount =
+            analysisConflictClauseVisitCount stats + 1
+        , analysisConflictLiteralVisitCount =
+            analysisConflictLiteralVisitCount stats + U.length conflictLits
+        }
+#else
+{-# INLINE recordRootAnalysis #-}
+recordRootAnalysis _ = S.pure ()
+#endif
+
+#ifdef HERBRAND_CDCL_INSTRUMENTED
+recordLearnedAnalysis ::
+  DecideLevel ->
+  Clause ->
+  AnalysisMetrics ->
+  S.State (CDCLState s) ()
+recordLearnedAnalysis target Clause {lits = learnedLits} AnalysisMetrics {..} =
+  solverStatsL S.%= \stats ->
+    move stats & \(Ur stats) ->
+      stats
+        { analysisCount = analysisCount stats + 1
+        , analysisConflictClauseVisitCount =
+            analysisConflictClauseVisitCount stats
+              + metricConflictClauseVisitCount
+        , analysisReasonClauseVisitCount =
+            analysisReasonClauseVisitCount stats + metricReasonClauseVisitCount
+        , analysisConflictLiteralVisitCount =
+            analysisConflictLiteralVisitCount stats
+              + metricConflictLiteralVisitCount
+        , analysisReasonLiteralVisitCount =
+            analysisReasonLiteralVisitCount stats
+              + metricReasonLiteralVisitCount
+        , analysisTrailReadCount =
+            analysisTrailReadCount stats + metricTrailReadCount
+        , analysisPivotCount = analysisPivotCount stats + metricPivotCount
+        , analysisMarkCount = analysisMarkCount stats + metricMarkCount
+        , analysisDuplicateMarkCount =
+            analysisDuplicateMarkCount stats + metricDuplicateMarkCount
+        , analysisLearnedLiteralCount =
+            analysisLearnedLiteralCount stats + U.length learnedLits
+        , analysisEpochClearCount =
+            analysisEpochClearCount stats + metricEpochClearCount
+        , analysisLastTargetLevel = unDecideLevel target
+        , analysisLastPivotTrace =
+            P.map (fmap (fromIntegral P.. fromVarId) P.. decodeLit) $
+              P.reverse metricPivotTraceRev
+        , analysisLastLearnedClause =
+            P.map (fmap (fromIntegral P.. fromVarId) P.. decodeLit) $
+              U.toList learnedLits
+        , analysisLearnedTrace =
+            ( P.map (fmap (fromIntegral P.. fromVarId) P.. decodeLit) $
+                P.reverse metricPivotTraceRev
+            , unDecideLevel target
+            , P.map (fmap (fromIntegral P.. fromVarId) P.. decodeLit) $
+                U.toList learnedLits
+            )
+              : analysisLearnedTrace stats
+        }
+#else
+{-# INLINE recordLearnedAnalysis #-}
+recordLearnedAnalysis ::
+  DecideLevel ->
+  Clause ->
+  AnalysisMetrics ->
+  S.State (CDCLState s) ()
+recordLearnedAnalysis _ _ _ = S.pure ()
+#endif
+
+analyzeConflict ::
   forall s.
   (Reifies s CDCLOptions) =>
-  Lit ->
-  Set Lit ->
-  S.State (CDCLState s) (Maybe (Ur (DecideLevel, Maybe Clause, Lit)))
-findUIP1 !lit !curCls
-  | Set.null curCls = S.do
-      S.pure Nothing
-  | otherwise = S.do
-      ml <- checkUnitClauseLit curCls
-      case ml of
-        Ur (Just (l', decLvl)) -> S.do
-          let remaining = Set.delete l' curCls
-          Ur watch2 <-
-            if Set.null remaining
-              then S.pure $ Ur Nothing
-              else findLitAtLevel decLvl remaining
-          -- Already a unit clause. Watch the asserting literal and a literal
-          -- at the backjump level so both watches are reset by deeper jumps.
-          S.pure $ Just $ Ur (mkLearntClause decLvl l' watch2 remaining)
-        Ur Nothing -> S.do
-          -- Not a UIP. resolve.
-          Ur v <- S.uses valuationL $ LUA.unsafeGet $ fromVarId $ litVar lit
-          case v of
-            Indefinite -> error $ "Literal " P.<> show lit P.<> " was chosen as resolver, but indefinite!"
-            Definite {..} -> S.do
-              Ur cls' <- case antecedent of
-                Just ante -> S.zoom clausesL $ foldClauseLits L.set ante
-                Nothing -> S.pure $ Ur Set.empty
-              activateResolved (reflect $ Proxy @s) & \case
-                True -> S.zoom vsidsStateL $ incrementVarM lit
-                False -> S.pure ()
-              let resolved = resolve lit curCls cls'
-              if Set.null resolved
-                then S.do
-                  S.pure Nothing -- Conflicting clause
-                else S.do
-                  Ur mlit' <- findConflictingLit resolved
-                  case mlit' of
-                    Just lit' -> findUIP1 lit' resolved
-                    Nothing -> S.do
-                      Ur lvl <- currentDecideLevel
-                      -- the literal is decision variable
-                      S.pure $ Just $ Ur (lvl - 1, Nothing, lit)
+  ClauseId ->
+  S.State (CDCLState s) (Ur ConflictAnalysis)
+analyzeConflict conflictClause = S.do
+  Ur currentLevel <- currentDecideLevel
+  if currentLevel == 0
+    then S.do
+      validateConflictClause conflictClause
+      S.pure $ Ur RootConflict
+    else S.do
+      Ur result <-
+        S.uses analysisKernelL \(analysis, trail, clauses, valuation, vsids) ->
+          analyzeConflictKernel
+            (activateResolved $ reflect $ Proxy @s)
+            currentLevel
+            conflictClause
+            analysis
+            trail
+            clauses
+            valuation
+            vsids
+      case result of
+        RootConflict ->
+          error "positive-level analysis returned a root conflict"
+        LearnedClause target learned assertingLit _ -> S.do
+          validateLearnedAnalysis
+            currentLevel
+            target
+            learned
+            assertingLit
+          S.pure $ Ur result
 
-findLitAtLevel :: DecideLevel -> Set Lit -> S.State (CDCLState s) (Ur (Maybe Lit))
-findLitAtLevel targetLevel lits = S.uses valuationL \vals ->
-  foldlLin'
-    vals
-    ( \vals (Ur found) lit ->
-        LUA.unsafeGet (fromVarId $ litVar lit) vals & \(Ur variable, vals) ->
-          let found' = case found of
-                Just {} -> found
-                Nothing -> case variable of
-                  Definite {..}
-                    | decideLevel == targetLevel -> Just lit
-                  _ -> Nothing
-           in (Ur found', vals)
-    )
-    Nothing
-    lits
-
-mkLearntClause :: DecideLevel -> Lit -> Maybe Lit -> Set Lit -> (DecideLevel, Maybe Clause, Lit)
-mkLearntClause decLvl assertingLit watch2 remaining =
-  let cls' =
-        U.cons assertingLit case watch2 of
+analyzeConflictKernel ::
+  forall s.
+  Bool ->
+  DecideLevel ->
+  ClauseId ->
+  AnalysisScratch %1 ->
+  LUV.Vector Lit %1 ->
+  Clauses %1 ->
+  Valuation %1 ->
+  VSIDSState s %1 ->
+  ( Ur ConflictAnalysis
+  , (AnalysisScratch, LUV.Vector Lit, Clauses, Valuation, VSIDSState s)
+  )
+analyzeConflictKernel bumpResolved currentLevel conflictClause =
+  \(AnalysisScratch oldEpoch stamps0 scratch) trail clauses valuation vsids ->
+    advanceEpoch oldEpoch stamps0 & \(Ur epoch, stamps) ->
+      S.runState (getClauseLits conflictClause) clauses & \(Ur conflictLits, clauses) ->
+        scanAnalysisClause
+          currentLevel
+          epoch
           Nothing
-            | Set.null remaining -> U.empty
-            | otherwise ->
-                error $
-                  "learned clause has no literal at its backjump level: "
-                    P.<> show (decLvl, remaining)
-          Just second ->
-            U.cons second $
-              L.fold L.vector $
-                Set.delete second remaining
-   in ( decLvl
-      , Just
-          Clause
-            { watched2 = if U.length cls' > 1 then 1 else -1
-            , watched1 = 0
-            , lits = cls'
-            }
-      , assertingLit
+          conflictLits
+          (initialAnalysisAcc (U.length conflictLits) (oldEpoch == maxBound))
+          stamps
+          scratch
+          valuation
+          & \(Ur initialAcc, stamps, scratch, valuation) ->
+            if analysisPathCount initialAcc P.<= 0
+              then
+                analysisFailure
+                  ( "positive-level conflict has no current-level path: "
+                      P.<> show (conflictClause, currentLevel)
+                  )
+                  epoch
+                  stamps
+                  scratch
+                  trail
+                  clauses
+                  valuation
+                  vsids
+              else
+                LUV.size trail & \(Ur trailLength, trail) ->
+                  seek
+                    (trailLength - 1)
+                    initialAcc
+                    epoch
+                    stamps
+                    scratch
+                    trail
+                    clauses
+                    valuation
+                    vsids
+  where
+    seek ::
+      Int ->
+      AnalysisAcc ->
+      Word64 ->
+      LUA.UArray Word64 %1 ->
+      LUA.UArray Lit %1 ->
+      LUV.Vector Lit %1 ->
+      Clauses %1 ->
+      Valuation %1 ->
+      VSIDSState s %1 ->
+      ( Ur ConflictAnalysis
+      , (AnalysisScratch, LUV.Vector Lit, Clauses, Valuation, VSIDSState s)
       )
+    seek !cursor !acc !epoch stamps scratch trail clauses valuation vsids
+      | cursor < 0 =
+          analysisFailure
+            "first-UIP analysis exhausted the trail before finding a marked pivot"
+            epoch
+            stamps
+            scratch
+            trail
+            clauses
+            valuation
+            vsids
+      | otherwise =
+          LUV.unsafeGet cursor trail & \(Ur assignedLit, trail) ->
+            let accRead = noteAnalysisTrailRead acc
+                variableIndex = fromVarId $ litVar assignedLit
+             in LUA.unsafeGet variableIndex stamps & \(Ur stamp, stamps) ->
+                  if stamp /= epoch
+                    then
+                      seek
+                        (cursor - 1)
+                        accRead
+                        epoch
+                        stamps
+                        scratch
+                        trail
+                        clauses
+                        valuation
+                        vsids
+                    else
+                      let remainingPaths = analysisPathCount accRead - 1
+                          acc' =
+                            noteAnalysisPivot assignedLit $
+                              accRead {analysisPathCount = remainingPaths}
+                          stamps' = LUA.unsafeSet variableIndex 0 stamps
+                       in if remainingPaths == 0
+                            then
+                              finishAnalysis
+                                (negL assignedLit)
+                                acc'
+                                epoch
+                                stamps'
+                                scratch
+                                trail
+                                clauses
+                                valuation
+                                vsids
+                            else
+                              if remainingPaths < 0
+                                then
+                                  analysisFailure
+                                    "first-UIP path counter became negative"
+                                    epoch
+                                    stamps'
+                                    scratch
+                                    trail
+                                    clauses
+                                    valuation
+                                    vsids
+                                else
+                                  LUA.unsafeGet variableIndex valuation & \(Ur variable, valuation) ->
+                                    case variable of
+                                      Indefinite ->
+                                        analysisFailure
+                                          ("marked trail pivot is unassigned: " P.<> show assignedLit)
+                                          epoch
+                                          stamps'
+                                          scratch
+                                          trail
+                                          clauses
+                                          valuation
+                                          vsids
+                                      Definite {antecedent = Nothing} ->
+                                        analysisFailure
+                                          ( "reasonless decision selected before the final UIP: "
+                                              P.<> show assignedLit
+                                          )
+                                          epoch
+                                          stamps'
+                                          scratch
+                                          trail
+                                          clauses
+                                          valuation
+                                          vsids
+                                      Definite {antecedent = Just reason, decisionStep = pivotStep} ->
+                                        let vsids' =
+                                              if bumpResolved
+                                                then
+                                                  S.execState
+                                                    (incrementVarM assignedLit)
+                                                    vsids
+                                                else vsids
+                                         in S.runState (getClauseLits reason) clauses
+                                              & \(Ur reasonLits, clauses) ->
+                                                scanAnalysisClause
+                                                  currentLevel
+                                                  epoch
+                                                  (Just (assignedLit, pivotStep))
+                                                  reasonLits
+                                                  acc'
+                                                  stamps'
+                                                  scratch
+                                                  valuation
+                                                  & \(Ur nextAcc, stamps, scratch, valuation) ->
+                                                    seek
+                                                      (cursor - 1)
+                                                      nextAcc
+                                                      epoch
+                                                      stamps
+                                                      scratch
+                                                      trail
+                                                      clauses
+                                                      valuation
+                                                      vsids'
 
-findConflictingLit :: (Foldable t) => t Lit -> S.State (CDCLState s) (Ur (Maybe Lit))
-findConflictingLit lits = S.uses valuationL \vals ->
-  foldlLin'
-    vals
-    ( \vals !mn !l ->
-        LUA.unsafeGet (fromVarId $ litVar l) vals & \(Ur var, vals) ->
-          let intro = introduced var
-           in ( Ur.lift (P.<> Max (Arg intro (St.Just l))) mn
-              , vals
-              )
-    )
-    (Max (Arg (-1 :!: -1) St.Nothing))
-    lits
-    PL.& BiL.first (Ur.lift \(Max (Arg _ l)) -> St.toLazy l)
+advanceEpoch ::
+  Word64 ->
+  LUA.UArray Word64 %1 ->
+  (Ur Word64, LUA.UArray Word64)
+advanceEpoch oldEpoch stamps
+  | oldEpoch == maxBound = (Ur 1, LUA.mapSame (P.const 0) stamps)
+  | otherwise = (Ur (oldEpoch + 1), stamps)
 
-resolve :: Lit -> Set Lit -> Set Lit -> Set Lit
-resolve lit l r =
-  Set.filter ((/= litVar lit) . litVar) l
-    P.<> Set.filter ((/= litVar lit) . litVar) r
+scanAnalysisClause ::
+  DecideLevel ->
+  Word64 ->
+  Maybe (Lit, Step) ->
+  U.Vector Lit ->
+  AnalysisAcc ->
+  LUA.UArray Word64 %1 ->
+  LUA.UArray Lit %1 ->
+  Valuation %1 ->
+  (Ur AnalysisAcc, LUA.UArray Word64, LUA.UArray Lit, Valuation)
+scanAnalysisClause currentLevel epoch pivot lits initialAcc =
+  \stamps scratch valuation ->
+    go
+      0
+      (noteAnalysisClauseScan pivot literalCount initialAcc)
+      0
+      stamps
+      scratch
+      valuation
+  where
+    !literalCount = U.length lits
 
-data ULS = ULS
-  { _ulCount :: {-# UNPACK #-} !Int
-  , _mcand :: !(St.Maybe Lit)
-  , _latestDec :: {-# UNPACK #-} !DecideLevel
-  , _penultimateDec :: {-# UNPACK #-} !DecideLevel
-  }
-  deriving (Show)
+    go ::
+      Int ->
+      AnalysisAcc ->
+      Int ->
+      LUA.UArray Word64 %1 ->
+      LUA.UArray Lit %1 ->
+      Valuation %1 ->
+      (Ur AnalysisAcc, LUA.UArray Word64, LUA.UArray Lit, Valuation)
+    go !index !acc !pivotOccurrences stamps scratch valuation
+      | index == literalCount =
+          case pivot of
+            Nothing -> (Ur acc, stamps, scratch, valuation)
+            Just {}
+              | pivotOccurrences == 1 ->
+                  (Ur acc, stamps, scratch, valuation)
+              | otherwise ->
+                  analysisClauseFailure
+                    ( "reason contains the pivot assignment an invalid number of times: "
+                        P.<> show pivotOccurrences
+                    )
+                    stamps
+                    scratch
+                    valuation
+      | otherwise =
+          let lit = U.unsafeIndex lits index
+           in case pivot of
+                Just (assignedLit, _)
+                  | litVar lit == litVar assignedLit ->
+                      if lit == assignedLit
+                        then
+                          go
+                            (index + 1)
+                            acc
+                            (pivotOccurrences + 1)
+                            stamps
+                            scratch
+                            valuation
+                        else
+                          analysisClauseFailure
+                            ( "reason contains the opposite pivot literal: "
+                                P.<> show (assignedLit, lit)
+                            )
+                            stamps
+                            scratch
+                            valuation
+                _ ->
+                  let variableIndex = fromVarId $ litVar lit
+                   in LUA.unsafeGet variableIndex valuation & \(Ur variable, valuation) ->
+                        case variable of
+                          Indefinite ->
+                            analysisClauseFailure
+                              ("analysis clause contains an unassigned literal: " P.<> show lit)
+                              stamps
+                              scratch
+                              valuation
+                          Definite {..}
+                            | value == isPositive lit ->
+                                analysisClauseFailure
+                                  ("analysis clause contains a true literal: " P.<> show lit)
+                                  stamps
+                                  scratch
+                                  valuation
+                            | decideLevel > currentLevel ->
+                                analysisClauseFailure
+                                  ( "analysis clause literal exceeds the conflict level: "
+                                      P.<> show (lit, decideLevel, currentLevel)
+                                  )
+                                  stamps
+                                  scratch
+                                  valuation
+                            | otherwise ->
+                                validateReasonPrecedence pivot lit decisionStep `lseq`
+                                  LUA.unsafeGet variableIndex stamps
+                                    & \(Ur stamp, stamps) ->
+                                      if stamp == epoch
+                                        then
+                                          go
+                                            (index + 1)
+                                            (noteAnalysisDuplicateMark acc)
+                                            pivotOccurrences
+                                            stamps
+                                            scratch
+                                            valuation
+                                        else
+                                          let stamps' =
+                                                LUA.unsafeSet variableIndex epoch stamps
+                                              markedAcc = noteAnalysisMark acc
+                                           in if decideLevel == currentLevel
+                                                then
+                                                  go
+                                                    (index + 1)
+                                                    markedAcc
+                                                      { analysisPathCount =
+                                                          analysisPathCount markedAcc + 1
+                                                      }
+                                                    pivotOccurrences
+                                                    stamps'
+                                                    scratch
+                                                    valuation
+                                                else
+                                                  let scratchIndex =
+                                                        analysisScratchLength markedAcc
+                                                      scratch' =
+                                                        LUA.unsafeSet scratchIndex lit scratch
+                                                      (targetLevel, targetIndex)
+                                                        | analysisTargetIndex markedAcc < 0
+                                                            || decideLevel > analysisTargetLevel markedAcc =
+                                                            (decideLevel, scratchIndex)
+                                                        | otherwise =
+                                                            ( analysisTargetLevel markedAcc
+                                                            , analysisTargetIndex markedAcc
+                                                            )
+                                                   in go
+                                                        (index + 1)
+                                                        markedAcc
+                                                          { analysisScratchLength =
+                                                              scratchIndex + 1
+                                                          , analysisTargetLevel = targetLevel
+                                                          , analysisTargetIndex = targetIndex
+                                                          }
+                                                        pivotOccurrences
+                                                        stamps'
+                                                        scratch'
+                                                        valuation
 
-checkUnitClauseLit :: Set Lit -> S.State (CDCLState s) (Ur (Maybe (Lit, DecideLevel)))
-checkUnitClauseLit ls = S.do
-  Ur lvl <- currentDecideLevel
-  Ur lcnd <- S.uses valuationL \vals ->
-    foldlLin'
-      vals
-      ( \vals (Ur (ULS count mcand large small)) lit ->
-          LUA.unsafeGet (fromVarId (litVar lit)) vals & \(Ur var, vals) ->
-            case var of
-              Definite {..} ->
-                let (large', small')
-                      | decideLevel > large = (decideLevel, large)
-                      | decideLevel == large = (large, small)
-                      | decideLevel > small = (large, decideLevel)
-                      | otherwise = (large, small)
-                    (count', mcand') =
-                      if decideLevel P.>= lvl
-                        then (count + 1, St.maybe (St.Just lit) St.Just mcand)
-                        else (count, mcand)
-                 in (Ur (ULS count' mcand' large' small'), vals)
-              _ -> (Ur (ULS count mcand large small), vals)
-      )
-      (ULS 0 St.Nothing 0 (-1))
-      ls
-  S.pure $ case lcnd of
-    (ULS 1 mx _ pu) | pu >= 0 -> Ur ((,pu) <$> St.toLazy mx)
-    _ -> Ur Nothing
+finishAnalysis ::
+  Lit ->
+  AnalysisAcc ->
+  Word64 ->
+  LUA.UArray Word64 %1 ->
+  LUA.UArray Lit %1 ->
+  LUV.Vector Lit %1 ->
+  Clauses %1 ->
+  Valuation %1 ->
+  VSIDSState s %1 ->
+  ( Ur ConflictAnalysis
+  , (AnalysisScratch, LUV.Vector Lit, Clauses, Valuation, VSIDSState s)
+  )
+finishAnalysis assertingLit AnalysisAcc {..} epoch stamps scratch trail clauses valuation vsids =
+  let learnedLength = analysisScratchLength + 1
+   in LUA.unsafeAllocBeside learnedLength scratch & \(output0, scratch) ->
+        let output = LUA.unsafeSet 0 assertingLit output0
+         in copyLowerLiterals
+              0
+              analysisScratchLength
+              analysisTargetIndex
+              scratch
+              output
+              & \(scratch, output) ->
+                LUA.freeze output & \(Ur learnedLits) ->
+                  let target
+                        | analysisScratchLength == 0 = 0
+                        | analysisTargetIndex >= 0 = analysisTargetLevel
+                        | otherwise =
+                            P.error "non-unit learned clause has no backjump target"
+                      clause =
+                        Clause
+                          { lits = learnedLits
+                          , watched1 = 0
+                          , watched2 = if learnedLength > 1 then 1 else -1
+                          }
+                   in ( Ur
+                          ( LearnedClause
+                              target
+                              clause
+                              assertingLit
+                              analysisMetrics
+                          )
+                      ,
+                        ( AnalysisScratch epoch stamps scratch
+                        , trail
+                        , clauses
+                        , valuation
+                        , vsids
+                        )
+                      )
+
+copyLowerLiterals ::
+  Int ->
+  Int ->
+  Int ->
+  LUA.UArray Lit %1 ->
+  LUA.UArray Lit %1 ->
+  (LUA.UArray Lit, LUA.UArray Lit)
+copyLowerLiterals !index !count !targetIndex scratch output
+  | index == count = (scratch, output)
+  | otherwise =
+      let sourceIndex
+            | index == 0 = targetIndex
+            | index == targetIndex = 0
+            | otherwise = index
+       in LUA.unsafeGet sourceIndex scratch & \(Ur lit, scratch) ->
+            copyLowerLiterals
+              (index + 1)
+              count
+              targetIndex
+              scratch
+              (LUA.unsafeSet (index + 1) lit output)
+
+analysisFailure ::
+  String ->
+  Word64 ->
+  LUA.UArray Word64 %1 ->
+  LUA.UArray Lit %1 ->
+  LUV.Vector Lit %1 ->
+  Clauses %1 ->
+  Valuation %1 ->
+  VSIDSState s %1 ->
+  a
+analysisFailure message epoch stamps scratch trail clauses valuation vsids =
+  epoch `lseq`
+    stamps `lseq`
+      scratch `lseq`
+        trail `lseq`
+          clauses `lseq`
+            valuation `lseq`
+              vsids `lseq`
+                P.error message
+
+analysisClauseFailure ::
+  String ->
+  LUA.UArray Word64 %1 ->
+  LUA.UArray Lit %1 ->
+  Valuation %1 ->
+  a
+analysisClauseFailure message stamps scratch valuation =
+  stamps `lseq` scratch `lseq` valuation `lseq` P.error message
+
+#ifdef HERBRAND_CDCL_INSTRUMENTED
+validateReasonPrecedence :: Maybe (Lit, Step) -> Lit -> Step -> ()
+validateReasonPrecedence Nothing _ _ = ()
+validateReasonPrecedence (Just (pivot, pivotStep)) lit introducedAt
+  | introducedAt < pivotStep = ()
+  | otherwise =
+      P.error $
+        "reason literal does not precede its pivot: "
+          P.<> show (pivot, pivotStep, lit, introducedAt)
+#else
+validateReasonPrecedence :: Maybe (Lit, Step) -> Lit -> Step -> ()
+{-# INLINE validateReasonPrecedence #-}
+validateReasonPrecedence _ _ _ = ()
+#endif
+
+#ifdef HERBRAND_CDCL_INSTRUMENTED
+validateConflictClause :: ClauseId -> S.State (CDCLState s) ()
+validateConflictClause cid = S.do
+  Ur classification <- classifyClause cid
+  case classification of
+    ClauseConflict -> S.pure ()
+    _ ->
+      error $
+        "reported conflict clause is not fully false: "
+          P.<> show (cid, classification)
+#else
+validateConflictClause :: ClauseId -> S.State (CDCLState s) ()
+{-# INLINE validateConflictClause #-}
+validateConflictClause cid = cid `lseq` S.pure ()
+#endif
+
+#ifdef HERBRAND_CDCL_INSTRUMENTED
+validateLearnedAnalysis ::
+  DecideLevel ->
+  DecideLevel ->
+  Clause ->
+  Lit ->
+  S.State (CDCLState s) ()
+validateLearnedAnalysis currentLevel target Clause {..} assertingLit
+  | currentLevel P.<= 0 =
+      error $
+        "learned analysis has a nonpositive conflict level: "
+          P.<> show currentLevel
+  | target < 0 || target >= currentLevel =
+      error $
+        "learned analysis has an invalid target level: "
+          P.<> show (target, currentLevel)
+  | U.null lits =
+      error "learned analysis returned an empty clause"
+  | U.unsafeIndex lits 0 /= assertingLit =
+      error $
+        "learned clause does not start with its asserting literal: "
+          P.<> show (assertingLit, U.toList lits)
+  | watched1 /= 0 =
+      error $
+        "learned clause does not watch its asserting literal first: "
+          P.<> show (watched1, U.toList lits)
+  | watched2 /= if U.length lits > 1 then 1 else -1 =
+      error $
+        "learned clause has an invalid second watch: "
+          P.<> show (watched2, U.toList lits)
+  | otherwise = S.do
+      if U.length lits > 1
+        then S.do
+          let secondLit = U.unsafeIndex lits 1
+          Ur secondVariable <-
+            S.uses valuationL $
+              LUA.unsafeGet (fromVarId $ litVar secondLit)
+          case secondVariable of
+            Indefinite ->
+              error $
+                "learned clause second watch is unassigned before backtracking: "
+                  P.<> show (secondLit, U.toList lits)
+            Definite {..}
+              | value == isPositive secondLit ->
+                  error $
+                    "learned clause second watch is true before backtracking: "
+                      P.<> show (secondLit, U.toList lits)
+              | decideLevel /= target ->
+                  error $
+                    "learned clause second watch is not at the backjump level: "
+                      P.<> show
+                        (secondLit, decideLevel, target, U.toList lits)
+              | otherwise -> S.pure ()
+        else S.pure ()
+      Ur (currentLevelLiterals, maximumLowerLevel, seenVariables) <-
+        S.uses valuationL \valuation ->
+          foldlLin'
+            valuation
+            ( \valuation (Ur (!currentCount, !maxLower, !seen)) lit ->
+                let variableIndex = fromVarId $ litVar lit
+                 in if IS.member variableIndex seen
+                      then
+                        learnedValidationFailure
+                          ( "learned clause contains a duplicate variable: "
+                              P.<> show (lit, U.toList lits)
+                          )
+                          valuation
+                      else
+                        LUA.unsafeGet variableIndex valuation
+                          & \(Ur variable, valuation) ->
+                            case variable of
+                              Indefinite ->
+                                learnedValidationFailure
+                                  ( "learned clause contains an unassigned literal "
+                                      P.<> "before backtracking: "
+                                      P.<> show (lit, U.toList lits)
+                                  )
+                                  valuation
+                              Definite {..}
+                                | value == isPositive lit ->
+                                    learnedValidationFailure
+                                      ( "learned clause contains a true literal "
+                                          P.<> "before backtracking: "
+                                          P.<> show (lit, U.toList lits)
+                                      )
+                                      valuation
+                                | decideLevel == currentLevel ->
+                                    ( Ur
+                                        ( currentCount + 1
+                                        , maxLower
+                                        , IS.insert variableIndex seen
+                                        )
+                                    , valuation
+                                    )
+                                | decideLevel < currentLevel ->
+                                    ( Ur
+                                        ( currentCount
+                                        , P.max maxLower decideLevel
+                                        , IS.insert variableIndex seen
+                                        )
+                                    , valuation
+                                    )
+                                | otherwise ->
+                                    learnedValidationFailure
+                                      ( "learned clause literal exceeds the conflict level: "
+                                          P.<> show
+                                            (lit, decideLevel, currentLevel)
+                                      )
+                                      valuation
+            )
+            (0, 0, IS.empty)
+            (U.toList lits)
+      if
+        | currentLevelLiterals /= 1 ->
+            error $
+              "learned clause is not first-UIP asserting: "
+                P.<> show (currentLevelLiterals, U.toList lits)
+        | maximumLowerLevel /= target ->
+            error $
+              "learned clause target is not the maximum lower level: "
+                P.<> show
+                  ( target
+                  , maximumLowerLevel
+                  , U.toList lits
+                  )
+        | IS.size seenVariables /= U.length lits ->
+            error "learned-clause variable accounting mismatch"
+        | otherwise -> S.pure ()
+  where
+    learnedValidationFailure ::
+      String ->
+      Valuation %1 ->
+      (Ur (Int, DecideLevel, IS.IntSet), Valuation)
+    learnedValidationFailure message valuation =
+      valuation `lseq` P.error message
+
+validateRestartedLearnedClause ::
+  Lit ->
+  ClauseClassification ->
+  S.State (CDCLState s) ()
+validateRestartedLearnedClause assertingLit = \case
+  ClauseUnit unitLit
+    | unitLit == assertingLit -> S.pure ()
+    | otherwise ->
+        error $
+          "restarted learned clause is unit on the wrong literal: "
+            P.<> show (assertingLit, unitLit)
+  ClauseOpen -> S.pure ()
+  ClauseSatisfied ->
+    error "restarted learned clause is unexpectedly satisfied"
+  ClauseConflict ->
+    error "restarted learned clause is unexpectedly conflicting"
+#else
+validateLearnedAnalysis ::
+  DecideLevel ->
+  DecideLevel ->
+  Clause ->
+  Lit ->
+  S.State (CDCLState s) ()
+{-# INLINE validateLearnedAnalysis #-}
+validateLearnedAnalysis _ _ _ _ = S.pure ()
+
+validateRestartedLearnedClause ::
+  Lit ->
+  ClauseClassification ->
+  S.State (CDCLState s) ()
+{-# INLINE validateRestartedLearnedClause #-}
+validateRestartedLearnedClause _ _ = S.pure ()
+#endif
 
 foldlLin' :: (Foldable.Foldable t) => b %1 -> (b %1 -> Ur x -> a -> (Ur x, b)) -> x -> t a -> (Ur x, b)
 foldlLin' b f x =
@@ -938,10 +1673,20 @@ propagateFrom start = S.do
     enqueue reason lit = S.do
       result <- assertLit reason lit
       case result of
-        ContradictingAssertion -> S.pure $ Just $ ConflictFound reason lit
-        AlreadyAsserted -> S.do
-          bumpDuplicateEnqueue
-          S.pure Nothing
+        ContradictingAssertion
+          | reason < 0 ->
+              error $
+                "reasonless decision enqueue contradicted an existing assignment: "
+                  P.<> show lit
+          | otherwise -> S.pure $ Just $ ConflictFound reason
+        AlreadyAsserted
+          | reason < 0 ->
+              error $
+                "reasonless decision enqueue duplicated an existing assignment: "
+                  P.<> show lit
+          | otherwise -> S.do
+              bumpDuplicateEnqueue
+              S.pure Nothing
         NewlyAsserted -> S.do
           bumpAssignment
           S.pure Nothing
@@ -995,10 +1740,10 @@ propagateFrom start = S.do
             Nothing -> S.do
               keepWatch falseLit occurrence
               loop falseLit nextOccurrence
-            Just (Conflict confLit) -> S.do
+            Just Conflict -> S.do
               keepWatch falseLit occurrence
               restoreWatchChain falseLit nextOccurrence
-              S.pure $ ConflictFound cid confLit
+              S.pure $ ConflictFound cid
             Just (Satisfied m) ->
               case m of
                 Just ((w :!: old) :!: (new :!: newIdx)) -> S.do
@@ -1101,7 +1846,7 @@ updateWatchLit cid w old new idx =
           linkWatchOccurrence new PL.$
             watchOccurrence cid w
 
-assertLit :: (HasCallStack) => ClauseId -> Lit -> S.State (CDCLState s) AssertionResult
+assertLit :: ClauseId -> Lit -> S.State (CDCLState s) AssertionResult
 assertLit ante lit = S.do
   let vid = fromVarId $ litVar lit :: Int
   mres <- S.uses valuationL (LUA.unsafeGet vid)
@@ -1139,39 +1884,25 @@ propLit falseLit watchSlot cid = S.do
         "watch occurrence is in the wrong literal bucket: "
           <> show (cid, watchSlot, falseLit, watchedLit)
     else case otherLit of
-      Nothing -> findReplacement wlits Nothing
+      Nothing -> findReplacement Nothing
       Just other -> S.do
         Ur otherValue <- move C.<$> S.zoom valuationL (evalLit other)
         case otherValue of
           Just True -> S.pure $ Just $ Satisfied Nothing
-          _ -> findReplacement wlits $ Just (other, otherValue)
+          _ -> findReplacement $ Just (other, otherValue)
   where
-    findReplacement wlits other = S.do
+    findReplacement other = S.do
       mnext <- findNextAvailable watchSlot cid
       case mnext of
         Just next -> S.pure $ Just $ fromNextSlot next
         Nothing -> case other of
-          Nothing -> S.pure $ Just $ Conflict $ getLit1 wlits
+          Nothing -> S.pure $ Just Conflict
           Just (otherLit, Nothing) -> S.pure $ Just $ Unit otherLit
           Just (otherLit, Just False) ->
-            otherLit `lseq`
-              Just D.<$> S.zoom valuationL (reportLastAddedAsConflict wlits)
+            otherLit `lseq` S.pure (Just Conflict)
           Just (otherLit, Just True) ->
             otherLit `lseq`
               error "propLit: satisfied blocker reached replacement search"
-
-reportLastAddedAsConflict :: WatchedLits -> S.State Valuation UnitResult
-reportLastAddedAsConflict (WatchOne l1) = S.pure $ Conflict l1
-reportLastAddedAsConflict (WatchThese l1 l2) = S.do
-  Ur v1 <- S.state $ LUA.unsafeGet (fromVarId $ litVar l1)
-  Ur v2 <- S.state $ LUA.unsafeGet (fromVarId $ litVar l2)
-  S.pure $
-    Conflict $
-      if introduced v1 > introduced v2 then l1 else l2
-
-introduced :: Variable -> Pair DecideLevel Step
-introduced Indefinite = -1 :!: -1
-introduced Definite {..} = decideLevel :!: decisionStep
 
 fromNextSlot :: NextSlot %1 -> UnitResult
 fromNextSlot (NextSlot True w old new lid) = Satisfied $ Just $ (w :!: old) :!: (new :!: lid)
