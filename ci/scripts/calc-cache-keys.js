@@ -10,7 +10,7 @@ module.exports = async ({ os, plan, path, core, glob }) => {
   const project_hash = await glob.hashFiles("cabal.project", path);
   core.setOutput("project", project_hash);
 
-  const package_hash = await glob.hashFiles("**/package.yaml", "**/*.cabal");
+  const package_hash = await glob.hashFiles("**/*.cabal");
   core.setOutput("package", package_hash);
 
   const source_hash = await glob.hashFiles(

@@ -14,6 +14,7 @@ module Herbrand.Bench (
   findSatsIn,
   withCnfs,
   withFileTree,
+  filterFileTreeRoots,
   globTree,
   findCnfsIn,
   module Test.Tasty.Bench,
@@ -76,6 +77,10 @@ insertFT fp (x :: a) = go (splitPath' fp)
           p
         . unFTree
 
+filterFileTreeRoots :: (String -> Bool) -> FileTrie a -> FileTrie a
+filterFileTreeRoots keep =
+  FTree . Map.filterWithKey (\name _ -> keep name) . unFTree
+
 splitPath' :: FilePath -> [FilePath]
 splitPath' = map (packed %~ T.dropWhileEnd (== '/')) . splitPath
 
@@ -99,27 +104,27 @@ withFileTree alloc name0 trie act = go name0 trie
       bgroup
         name
         [ case mv of
-          Just inp ->
-            withResource (alloc inp) mempty $ bgroup label . act
-          Nothing -> go label chs'
+            Just inp ->
+              withResource (alloc inp) mempty $ bgroup label . act
+            Nothing -> go label chs'
         | (label, (mv, chs')) <- Map.toList $ unFTree chs
         ]
 
 withSats :: String -> FileTrie FilePath -> (IO (Formula Full Word) -> [Benchmark]) -> Benchmark
 withSats =
-  withFileTree
-    $ either throwString (evaluate . force . view _3)
-    . parseSATLazy
-    <=< LBS.readFile
+  withFileTree $
+    either throwString (evaluate . force . view _3)
+      . parseSATLazy
+      <=< LBS.readFile
 
 withCnfs :: String -> FileTrie FilePath -> (IO (CNF Word, Formula Full Word) -> [Benchmark]) -> Benchmark
 withCnfs =
-  withFileTree
-    $ either
+  withFileTree $
+    either
       throwString
       (evaluate . force . ((,) <$> id <*> toFormula) . view _3)
-    . parseCNFLazy
-    <=< LBS.readFile
+      . parseCNFLazy
+      <=< LBS.readFile
 
 defaultMain :: [Benchmark] -> IO ()
 defaultMain b = do

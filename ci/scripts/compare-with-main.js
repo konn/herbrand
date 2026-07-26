@@ -73,7 +73,7 @@ module.exports = async ({
       core.info(`Downloading from: ${url}`);
       const base_commit = target_run.head_sha;
       const response = await fetch(url, { compress: true });
-      const body = await response.buffer();
+      const body = Buffer.from(await response.arrayBuffer());
       const base_art_dir = `base-artifacts-${base_commit.slice(0, 7)}`;
       const base_csv_dir = `base-csv-${base_commit.slice(0, 7)}`;
       io.mkdirP(base_art_dir);

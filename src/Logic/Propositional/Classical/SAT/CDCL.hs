@@ -1,9 +1,11 @@
 {-# LANGUAGE GHC2021 #-}
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE LinearTypes #-}
 {-# LANGUAGE MonoLocalBinds #-}
+{-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE PartialTypeSignatures #-}
 {-# LANGUAGE QualifiedDo #-}
@@ -24,8 +26,11 @@ module Logic.Propositional.Classical.SAT.CDCL (
   defaultRestartStrategy,
   defaultExponentialRestart,
   defaultLubyRestart,
+  luby,
+  SolverStats (..),
   solveWith,
   solveVarIdWith,
+  solveVarIdWithStats,
   solveState,
   propagateUnit,
 
@@ -36,20 +41,14 @@ module Logic.Propositional.Classical.SAT.CDCL (
   VarId (..),
 ) where
 
-import Control.Applicative
 import Control.Foldl qualified as L
 import Control.Functor.Linear qualified as C
 import Control.Functor.Linear.State.Extra qualified as S
 import Control.Lens hiding (Index, lens, (%=), (&), (.=))
 import Control.Lens qualified as Lens
 import Control.Monad qualified as P
-import Control.Monad.Trans.Class (lift)
-import Control.Monad.Trans.Except (runExceptT, throwE)
-import Control.Monad.Trans.Maybe (runMaybeT)
 import Control.Optics.Linear qualified as LinOpt
-import Data.Array.Mutable.Linear qualified as LA
 import Data.Array.Mutable.Linear.Unboxed qualified as LUA
-import Data.Bifunctor qualified as Bi
 import Data.Bifunctor.Linear qualified as BiL
 import Data.Foldable qualified as Foldable
 import Data.Function (fix)
@@ -58,16 +57,14 @@ import Data.Generics.Labels ()
 import Data.HashMap.Mutable.Linear.Extra qualified as LHM
 import Data.HashSet qualified as HS
 import Data.Hashable
+#ifdef HERBRAND_CDCL_INSTRUMENTED
 import Data.IntSet qualified as IS
-import Data.Maybe qualified as P
+#endif
 import Data.Proxy (Proxy (..))
 import Data.Reflection (Reifies, reflect, reify)
 import Data.Semigroup (Arg (..), Max (..))
-import Data.Sequence (Seq (..))
-import Data.Sequence qualified as Seq
 import Data.Set (Set)
 import Data.Set qualified as Set
-import Data.Set.Mutable.Linear.Extra qualified as LSet
 import Data.Strict (Pair (..))
 import Data.Strict.Classes qualified as St
 import Data.Strict.Maybe qualified as St
@@ -91,6 +88,25 @@ import Prelude qualified as P
 data FinalState = Ok | Failed
   deriving (Show, P.Eq, P.Ord, GHC.Generic)
 
+data PropagationStart
+  = SeedRootUnits
+  | EnqueueLit {-# UNPACK #-} !Lit {-# UNPACK #-} !ClauseId
+  | ResumePropagation
+  deriving (Show, P.Eq, P.Ord, GHC.Generic)
+
+data ClauseClassification
+  = ClauseSatisfied
+  | ClauseOpen
+  | ClauseUnit {-# UNPACK #-} !Lit
+  | ClauseConflict
+  deriving (Show, P.Eq, P.Ord, GHC.Generic)
+
+data ClauseScan = ClauseScan
+  { scanSatisfied :: !Bool
+  , scanUnassignedCount :: {-# UNPACK #-} !Int
+  , scanUnassignedLit :: !(Maybe Lit)
+  }
+
 solve :: (LHM.Keyed a) => CNF a -> SatResult (Model a)
 {-# INLINE solve #-}
 solve = solveWith defaultOptions
@@ -98,22 +114,87 @@ solve = solveWith defaultOptions
 solveWith :: (LHM.Keyed a) => CDCLOptions -> CNF a -> SatResult (Model a)
 {-# INLINE [1] solveWith #-}
 {-# ANN solveWith "HLint: ignore Avoid lambda" #-}
-solveWith opts cnf = reify opts \(_ :: Proxy s) -> unur $ LHM.empty 128 \dic ->
-  besides dic (LHM.emptyL 128) & \(rev, dic) ->
-    S.runState
-      (runUrT (traverse (\v -> liftUrT (renameCNF v)) cnf))
-      ((rev, Ur 0), dic)
-      & \(Ur cnf, ((dic, Ur _), rev)) ->
-        dic `lseq`
-          besides rev (toCDCLState @s cnf)
-            & \case
-              (Left (Ur resl), rev) ->
-                rev `lseq` Ur (P.mempty P.<$ resl)
-              (Right state, rev) ->
-                solveState state & \case
-                  (Ur Unsat) -> rev `lseq` Ur Unsat
-                  (Ur (Satisfiable m)) ->
-                    Satisfiable D.<$> S.evalState (unrenameModel m) rev
+solveWith opts cnf =
+  case solveSparseByPureLiterals cnf of
+    Just model -> Satisfiable model
+    Nothing -> reify opts \(_ :: Proxy s) -> unur $ LHM.empty 128 \dic ->
+      besides dic (LHM.emptyL 128) & \(rev, dic) ->
+        S.runState
+          (runUrT (traverse (\v -> liftUrT (renameCNF v)) cnf))
+          ((rev, Ur 0), dic)
+          & \(Ur cnf, ((dic, Ur _), rev)) ->
+            dic `lseq`
+              besides rev (toCDCLState @s cnf)
+                & \case
+                  (Left (Ur resl), rev) ->
+                    rev `lseq` Ur (P.mempty P.<$ resl)
+                  (Right state, rev) ->
+                    solveState state & \case
+                      (Ur Unsat) -> rev `lseq` Ur Unsat
+                      (Ur (Satisfiable m)) ->
+                        Satisfiable D.<$> S.evalState (unrenameModel m) rev
+
+solveSparseByPureLiterals :: (Hashable a) => CNF a -> Maybe (Model a)
+{-# INLINE solveSparseByPureLiterals #-}
+solveSparseByPureLiterals (CNF clauses)
+  | P.not $ hasWideFirstClause clauses = Nothing
+  | P.not $ hasAtMost 64 clauses = Nothing
+  | otherwise =
+      let !clauseCount = P.length clauses
+          !literalCount =
+            Foldable.foldl'
+              (\count (CNFClause clause) -> count P.+ P.length clause)
+              0
+              clauses
+       in if literalCount P.< 8 P.* clauseCount
+            then Nothing
+            else go clauses P.mempty
+  where
+    hasAtMost :: Int -> [b] -> Bool
+    hasAtMost _ [] = True
+    hasAtMost 0 _ = False
+    hasAtMost count (_ : rest) = hasAtMost (count P.- 1) rest
+
+    hasWideFirstClause [] = True
+    hasWideFirstClause (CNFClause clause : _) = hasAtLeast 8 clause
+
+    hasAtLeast :: Int -> [b] -> Bool
+    hasAtLeast 0 _ = True
+    hasAtLeast _ [] = False
+    hasAtLeast count (_ : rest) = hasAtLeast (count P.- 1) rest
+
+    go [] model = Just model
+    go active model =
+      let (!positiveVars, !negativeVars) =
+            Foldable.foldl' collectClause (HS.empty, HS.empty) active
+          !purePositive = positiveVars `HS.difference` negativeVars
+          !pureNegative = negativeVars `HS.difference` positiveVars
+          !pureModel =
+            Model
+              { positive = purePositive
+              , negative = pureNegative
+              }
+       in if HS.null purePositive P.&& HS.null pureNegative
+            then Nothing
+            else
+              go
+                (P.filter (P.not P.. isCovered purePositive pureNegative) active)
+                (model P.<> pureModel)
+
+    collectClause (!positiveVars, !negativeVars) (CNFClause clause) =
+      Foldable.foldl' collectLit (positiveVars, negativeVars) clause
+
+    collectLit (!positiveVars, !negativeVars) = \case
+      Positive var -> (HS.insert var positiveVars, negativeVars)
+      Negative var -> (positiveVars, HS.insert var negativeVars)
+
+    isCovered purePositive pureNegative (CNFClause clause) =
+      P.any
+        ( \case
+            Positive var -> HS.member var purePositive
+            Negative var -> HS.member var pureNegative
+        )
+        clause
 
 unrenameModel ::
   (Hashable a) =>
@@ -170,67 +251,70 @@ solveVarId = solveVarIdWith defaultOptions
 
 solveVarIdWith :: CDCLOptions -> CNF VarId -> SatResult (Model VarId)
 {-# INLINE solveVarIdWith #-}
-solveVarIdWith opts cnf = reify opts \(_ :: Proxy s) ->
-  unur PL.$ linearly \l ->
-    toCDCLState @s cnf l PL.& \case
-      Left (Ur resl) -> Ur (P.mempty P.<$ resl)
-      Right stt -> solveState stt
+solveVarIdWith opts cnf =
+  case solveSparseByPureLiterals cnf of
+    Just model -> Satisfiable model
+    Nothing -> reify opts \(_ :: Proxy s) ->
+      unur PL.$ linearly \l ->
+        toCDCLState @s cnf l PL.& \case
+          Left (Ur resl) -> Ur (P.mempty P.<$ resl)
+          Right stt -> solveState stt
+
+solveVarIdWithStats :: CDCLOptions -> CNF VarId -> (SatResult (Model VarId), SolverStats)
+solveVarIdWithStats opts cnf =
+  case solveSparseByPureLiterals cnf of
+    Just model -> (Satisfiable model, zeroSolverStats)
+    Nothing -> reify opts \(_ :: Proxy s) ->
+      unur PL.$ linearly \l ->
+        toCDCLState @s cnf l PL.& \case
+          Left (Ur resl) -> Ur (P.mempty P.<$ resl, zeroSolverStats)
+          Right state -> solveStateWithStats state
+
+solveStateWithStats ::
+  (Reifies s CDCLOptions) =>
+  CDCLState s %1 ->
+  Ur (SatResult (Model VarId), SolverStats)
+#ifdef HERBRAND_CDCL_INSTRUMENTED
+solveStateWithStats = finalizeWithStats PL.. S.runState (solverLoop SeedRootUnits)
+
+finalizeWithStats ::
+  (FinalState, CDCLState s) %1 ->
+  Ur (SatResult (Model VarId), SolverStats)
+finalizeWithStats (finalState, finalSolverState) =
+  S.runState (S.use solverStatsL) finalSolverState & \(stats, finalSolverState) ->
+    PL.move stats & \(Ur stats) ->
+      toSatResult (finalState, finalSolverState) & \(Ur result) ->
+        Ur (result, stats)
+#else
+solveStateWithStats state =
+  solveState state & \(Ur result) ->
+    Ur (result, zeroSolverStats)
+#endif
 
 solveState :: (Reifies s CDCLOptions) => CDCLState s %1 -> Ur (SatResult (Model VarId))
-solveState = toSatResult PL.. S.runState (solverLoop Nothing)
+solveState = toSatResult PL.. S.runState (solverLoop SeedRootUnits)
 
-solverLoop :: (Reifies s CDCLOptions, HasCallStack) => Maybe (Lit, ClauseId) -> S.State (CDCLState s) FinalState
-solverLoop = fix $ \go mlit -> S.do
-  -- First, check if the original clauses are all satisfied (at the current stage)
-  -- We only have to traverse the initial segment, as the lerant clauses are always
-  -- deducible from the original clauses.
-  -- Without this, CDCL solver seems at most x1000 slower than DPLL and even Naïve tableaux...
-
-  Ur allSat <- Ur.lift (== 0) C.<$> S.uses unsatisfiedsL LSet.size
-  if allSat
-    then S.pure Ok
-    else S.do
-      Ur numIniCls <- move C.<$> S.use numInitialClausesL
-      mstt <-
-        fix
-          ( \self !i ->
-              (i == numIniCls) & \case
-                True -> S.pure True
-                False -> S.do
-                  val <- evalClause $ ClauseId i
-                  val & \case
-                    Just True -> S.do
-                      unsatisfiedsL S.%= LSet.delete (ClauseId i)
-                      self PL.$! i + 1
-                    Just False -> S.pure False
-                    Nothing -> S.pure False
-          )
-          0
-      mstt & \case
-        True -> S.pure Ok
-        -- Contracdiction! The last assigned variable must be
-        False -> S.do
-          resl <- propagateUnit mlit
-          case resl of
-            ConflictFound cid l ->
-              move (cid, l) & \(Ur (cid, l)) -> S.do
-                backjump cid l -- Conflict found. Let's Backjump!
-            NoMorePropagation -> S.do
-              -- Decide indefinite variable
-              -- FIXME: Perhaps we can choose the variable from unsatisified clause?
-              -- FIXME: Use heuristics for variable selection.
-              Ur mid <- S.zoom vsidsStateL findUnsatVar
-              case mid of
-                Nothing -> S.do
-                  S.pure Ok -- No vacant variable - model is full!
-                Just vid -> S.do
-                  stepsL S.%= LUV.push 0
-                  let decLit = NegL vid
-                  C.void $ assertLit (-1) decLit
-                  go (Just (decLit, -1))
+solverLoop :: (Reifies s CDCLOptions, HasCallStack) => PropagationStart -> S.State (CDCLState s) FinalState
+solverLoop = fix $ \go start -> S.do
+  resl <- propagateFrom start
+  case resl of
+    ConflictFound cid l ->
+      move (cid, l) & \(Ur (cid, l)) -> S.do
+        backjump cid l
+    NoMorePropagation -> S.do
+      validateFixpoint
+      Ur mid <- S.zoom vsidsStateL findUnsatVar
+      case mid of
+        Nothing -> S.pure Ok
+        Just vid -> S.do
+          bumpDecision
+          Ur trailSize <- S.uses trailL LUV.size
+          levelStartsL S.%= LUV.push (fromIntegral trailSize)
+          go (EnqueueLit (NegL vid) (-1))
 
 backjump :: (Reifies s CDCLOptions) => ClauseId -> Lit -> S.State (CDCLState s) FinalState
 backjump confCls lit = S.do
+  bumpConflict
   S.zoom vsidsStateL decayVarPriosM
   Ur confLits <- S.zoom clausesL $ foldClauseLits L.set confCls
   mLearnt <- findUIP1 lit confLits
@@ -239,63 +323,51 @@ backjump confCls lit = S.do
       -- No valid backjumping destination found. Unsat.
       S.pure Failed
     Just (Ur (decLvl, mlearnt, truth)) -> S.do
-      Ur numCls <- getNumClauses
-      fix
-        ( \self !i ->
-            if i == numCls
-              then S.pure ()
-              else S.do
-                Ur satAt <- getSatisfiedLevel $ ClauseId i
-                satAt
-                  > decLvl
-                  & \case
-                    True -> S.do
-                      setSatisfiedLevel (ClauseId i) (-1)
-                      unsatisfiedsL S.%= LSet.insert (ClauseId i)
-                    False -> S.pure ()
-                self (i + 1)
-        )
-        0
-
       Ur reason <- case mlearnt of
         Just learnt -> S.do
-          stepsL S.%= LUV.slice 0 (unDecideLevel decLvl + 1)
           pushClause learnt
           Ur reason <- Ur.lift (fromIntegral . subtract 1) C.<$> getNumClauses
-          watch reason $ litVar (lits learnt U.! watched1 learnt)
-          if watched2 learnt >= 0
-            then watch reason $ litVar (lits learnt U.! watched2 learnt)
-            else S.pure ()
           S.pure $ Ur reason
         Nothing -> S.pure $ Ur confCls
 
-      -- FIXME: Perhaps we can iterate through unsats instead of entire vals?
-      Ur unsats' <- S.uses valuationL \vals ->
-        LUA.size vals & \(Ur n, vals) ->
-          fix
-            ( \go !i !upds vals ->
-                if i == n
-                  then (Ur upds, vals)
-                  else
-                    LUA.unsafeGet i vals & \(Ur v, vals) ->
-                      isAssignedAfter decLvl v & \case
-                        True ->
-                          LUA.unsafeSet i Indefinite vals & \vals ->
-                            go (i + 1) (fromIntegral i : upds) vals
-                        False -> go (i + 1) upds vals
-            )
-            0
-            []
-            vals
+      backtrackTrail False decLvl
+      restart <- tryRestart
+      case restart of
+        Continued -> S.do
+          validateAssertingReason reason truth
+          solverLoop $ EnqueueLit truth reason
+        Restarted -> S.do
+          backtrackTrail True 0
+          Ur classification <- classifyClause reason
+          case classification of
+            ClauseConflict -> S.pure Failed
+            ClauseUnit unitLit -> solverLoop $ EnqueueLit unitLit reason
+            ClauseSatisfied -> solverLoop ResumePropagation
+            ClauseOpen -> solverLoop ResumePropagation
 
-      S.zoom vsidsStateL $ Ur.evalUrT $ P.forM_ unsats' \v ->
-        liftUrT $
-          S.state $
-            ((),)
-              PL.. moveToUnsatQueue v
-      C.void $ assertLit reason truth
-      tryRestart
-      solverLoop $ Just (truth, reason)
+backtrackTrail :: Bool -> DecideLevel -> S.State (CDCLState s) ()
+backtrackTrail isRestart target = S.do
+  Ur currentLevel <- currentDecideLevel
+  Ur trailLength <- S.uses trailL LUV.size
+  Ur (cutoff, boundaryReads) <-
+    if target < currentLevel
+      then S.do
+        Ur levelStart <-
+          S.uses levelStartsL $
+            LUV.unsafeGet (unDecideLevel target + 1)
+        S.pure $ Ur (fromIntegral levelStart, 1)
+      else
+        if target == currentLevel
+          then S.pure $ Ur (trailLength, 0)
+          else
+            error $
+              "backtrack target exceeds current level: "
+                P.<> show (target, currentLevel)
+  levelStartsL S.%= LUV.slice 0 (unDecideLevel target + 1)
+  Ur oldQhead <- move C.<$> S.use qheadL
+  Ur cleared <- clearTrailSuffix cutoff
+  qheadL S..= P.min oldQhead cutoff
+  recordBacktrack isRestart boundaryReads cleared cleared 0 0
 
 findUIP1 ::
   forall s.
@@ -310,8 +382,14 @@ findUIP1 !lit !curCls
       ml <- checkUnitClauseLit curCls
       case ml of
         Ur (Just (l', decLvl)) -> S.do
-          -- Already Unit clause. Learn it!
-          S.pure $ Just $ Ur (mkLearntClause decLvl l' curCls)
+          let remaining = Set.delete l' curCls
+          Ur watch2 <-
+            if Set.null remaining
+              then S.pure $ Ur Nothing
+              else findLitAtLevel decLvl remaining
+          -- Already a unit clause. Watch the asserting literal and a literal
+          -- at the backjump level so both watches are reset by deeper jumps.
+          S.pure $ Just $ Ur (mkLearntClause decLvl l' watch2 remaining)
         Ur Nothing -> S.do
           -- Not a UIP. resolve.
           Ur v <- S.uses valuationL $ LUA.unsafeGet $ fromVarId $ litVar lit
@@ -337,18 +415,45 @@ findUIP1 !lit !curCls
                       -- the literal is decision variable
                       S.pure $ Just $ Ur (lvl - 1, Nothing, lit)
 
-mkLearntClause :: DecideLevel -> Lit -> Set Lit -> (DecideLevel, Maybe Clause, Lit)
-mkLearntClause decLvl l' curCls =
-  let cls' = U.cons l' $ L.fold L.vector $ Set.delete l' curCls
+findLitAtLevel :: DecideLevel -> Set Lit -> S.State (CDCLState s) (Ur (Maybe Lit))
+findLitAtLevel targetLevel lits = S.uses valuationL \vals ->
+  foldlLin'
+    vals
+    ( \vals (Ur found) lit ->
+        LUA.unsafeGet (fromVarId $ litVar lit) vals & \(Ur variable, vals) ->
+          let found' = case found of
+                Just {} -> found
+                Nothing -> case variable of
+                  Definite {..}
+                    | decideLevel == targetLevel -> Just lit
+                  _ -> Nothing
+           in (Ur found', vals)
+    )
+    Nothing
+    lits
+
+mkLearntClause :: DecideLevel -> Lit -> Maybe Lit -> Set Lit -> (DecideLevel, Maybe Clause, Lit)
+mkLearntClause decLvl assertingLit watch2 remaining =
+  let cls' =
+        U.cons assertingLit case watch2 of
+          Nothing
+            | Set.null remaining -> U.empty
+            | otherwise ->
+                error $
+                  "learned clause has no literal at its backjump level: "
+                    P.<> show (decLvl, remaining)
+          Just second ->
+            U.cons second $
+              L.fold L.vector $
+                Set.delete second remaining
    in ( decLvl
       , Just
           Clause
             { watched2 = if U.length cls' > 1 then 1 else -1
             , watched1 = 0
-            , satisfiedAt = decLvl
             , lits = cls'
             }
-      , l'
+      , assertingLit
       )
 
 findConflictingLit :: (Foldable t) => t Lit -> S.State (CDCLState s) (Ur (Maybe Lit))
@@ -418,7 +523,382 @@ currentDecideLevel :: S.State (CDCLState s) (Ur DecideLevel)
 {-# INLINE currentDecideLevel #-}
 currentDecideLevel =
   Ur.lift (fromIntegral P.. P.subtract 1)
-    D.<$> S.uses stepsL LUV.size
+    D.<$> S.uses levelStartsL LUV.size
+
+#ifdef HERBRAND_CDCL_INSTRUMENTED
+validateFixpoint :: S.State (CDCLState s) ()
+validateFixpoint = S.do
+  Ur qhead <- move C.<$> S.use qheadL
+  Ur trailSize <- S.uses trailL LUV.size
+  if qhead /= trailSize
+    then error $ "BCP fixpoint has qhead/trail mismatch: " P.<> show (qhead, trailSize)
+    else S.pure ()
+
+  Ur currentLevel <- currentDecideLevel
+  checkLevelStarts currentLevel trailSize
+  Ur seen <- checkTrail currentLevel trailSize 0 IS.empty (-1)
+  Ur numVars <- S.uses valuationL LUA.size
+  checkValuation currentLevel seen numVars 0
+
+  Ur numClauses <- getNumClauses
+  Ur watchOccurrences <- checkWatchMap numVars numClauses
+  checkActiveWatches numClauses watchOccurrences 0
+  checkClauses numClauses 0
+  where
+    checkLevelStarts ::
+      DecideLevel ->
+      Int ->
+      S.State (CDCLState s) ()
+    checkLevelStarts currentLevel trailSize = S.do
+      Ur levelCount <- S.uses levelStartsL LUV.size
+      if levelCount == unDecideLevel currentLevel + 1
+        then checkLevelStart levelCount trailSize 0 (-1)
+        else
+          error $
+            "decision-level boundary count mismatch: "
+              P.<> show (levelCount, currentLevel)
+
+    checkLevelStart ::
+      Int ->
+      Int ->
+      Int ->
+      Int ->
+      S.State (CDCLState s) ()
+    checkLevelStart levelCount trailSize level previousStart
+      | level == levelCount = S.pure ()
+      | otherwise = S.do
+          Ur boundaryStep <-
+            S.uses levelStartsL $
+              LUV.unsafeGet level
+          let boundary = fromIntegral boundaryStep
+          if
+            | level == 0 && boundary /= 0 ->
+                error $
+                  "root trail boundary is not zero: "
+                    P.<> show boundary
+            | level > 0
+                && ( boundary < previousStart
+                      || (level > 1 && boundary == previousStart)
+                      || boundary >= trailSize
+                   ) ->
+                error $
+                  "invalid decision-level trail boundary: "
+                    P.<> show
+                      ( level
+                      , boundary
+                      , previousStart
+                      , trailSize
+                      )
+            | boundary > trailSize ->
+                error $
+                  "decision-level trail boundary is out of bounds: "
+                    P.<> show (level, boundary, trailSize)
+            | otherwise -> S.pure ()
+          if level == 0
+            then S.pure ()
+            else S.do
+              Ur firstLit <- S.uses trailL $ LUV.unsafeGet boundary
+              Ur firstVariable <-
+                S.uses valuationL $
+                  LUA.unsafeGet (fromVarId $ litVar firstLit)
+              if boundary == 0
+                then case firstVariable of
+                  Definite {decideLevel = firstLevel}
+                    | level == 1 && firstLevel == 1 -> S.pure ()
+                  _ ->
+                    error $
+                      "first decision-level boundary has the wrong level: "
+                        P.<> show
+                          (level, boundary, firstLit, firstVariable)
+                else S.do
+                  Ur previousLit <-
+                    S.uses trailL $
+                      LUV.unsafeGet (boundary - 1)
+                  Ur previousVariable <-
+                    S.uses valuationL $
+                      LUA.unsafeGet (fromVarId $ litVar previousLit)
+                  case (firstVariable, previousVariable) of
+                    ( Definite {decideLevel = firstLevel}
+                      , Definite {decideLevel = previousLevel}
+                      )
+                        | firstLevel == fromIntegral level
+                            && previousLevel < firstLevel ->
+                            S.pure ()
+                    _ ->
+                      error $
+                        "decision-level boundary does not bracket its level: "
+                          P.<> show
+                            ( level
+                            , boundary
+                            , firstLit
+                            , firstVariable
+                            , previousLit
+                            , previousVariable
+                            )
+          checkLevelStart
+            levelCount
+            trailSize
+            (level + 1)
+            boundary
+
+    checkTrail ::
+      DecideLevel ->
+      Int ->
+      Int ->
+      IS.IntSet ->
+      DecideLevel ->
+      S.State (CDCLState s) (Ur IS.IntSet)
+    checkTrail currentLevel trailSize index seen previousLevel
+      | index == trailSize = S.pure $ Ur seen
+      | otherwise = S.do
+          Ur lit <- S.uses trailL $ LUV.unsafeGet index
+          let variableId = fromVarId $ litVar lit
+          if IS.member variableId seen
+            then error $ "duplicate variable on trail: " P.<> show (litVar lit)
+            else S.pure ()
+          Ur variable <- S.uses valuationL $ LUA.unsafeGet variableId
+          case variable of
+            Indefinite ->
+              error $ "indefinite variable appears on trail: " P.<> show (litVar lit)
+            Definite {..}
+              | value /= isPositive lit ->
+                  error $ "trail/valuation polarity mismatch: " P.<> show lit
+              | decideLevel < previousLevel || decideLevel > currentLevel ->
+                  error $
+                    "non-monotone or future trail level: "
+                      P.<> show (lit, previousLevel, decideLevel, currentLevel)
+              | decisionStep /= fromIntegral index ->
+                  error $
+                    "trail/valuation assignment-step mismatch: "
+                      P.<> show (lit, index, decisionStep)
+              | otherwise ->
+                  checkTrail
+                    currentLevel
+                    trailSize
+                    (index + 1)
+                    (IS.insert variableId seen)
+                    decideLevel
+
+    checkValuation ::
+      DecideLevel ->
+      IS.IntSet ->
+      Int ->
+      Int ->
+      S.State (CDCLState s) ()
+    checkValuation currentLevel seen numVars index
+      | index == numVars = S.pure ()
+      | otherwise = S.do
+          Ur variable <- S.uses valuationL $ LUA.unsafeGet index
+          case variable of
+            Indefinite -> S.pure ()
+            Definite {..} -> S.do
+              if IS.member index seen && decideLevel P.<= currentLevel
+                then S.pure ()
+                else
+                  error $
+                    "valuation/trail mismatch: "
+                      P.<> show (index, decideLevel, currentLevel)
+              case antecedent of
+                Nothing -> S.pure ()
+                Just reason -> S.do
+                  Ur reasonLits <- S.zoom clausesL $ getClauseLits reason
+                  let implied =
+                        if value
+                          then PosL $ toVarId index
+                          else NegL $ toVarId index
+                  if U.elem implied reasonLits
+                    then S.pure ()
+                    else
+                      error $
+                        "reason does not contain implied literal: "
+                          P.<> show (reason, implied)
+          checkValuation currentLevel seen numVars (index + 1)
+
+    checkWatchMap ::
+      Int ->
+      Int ->
+      S.State (CDCLState s) (Ur IS.IntSet)
+    checkWatchMap numVars numClauses = S.do
+      Ur (headCount, tailCount, nextCount) <-
+        S.zoom watchesL getWatchMapSizes
+      if
+        headCount == 2 P.* numVars
+          && tailCount == headCount
+          && nextCount == 2 P.* numClauses
+        then checkBuckets headCount nextCount 0 IS.empty
+        else
+          error $
+            "watch storage size mismatch: "
+              P.<> show
+                ( headCount
+                , 2 P.* numVars
+                , tailCount
+                , nextCount
+                , 2 P.* numClauses
+                )
+
+    checkBuckets ::
+      Int ->
+      Int ->
+      Int ->
+      IS.IntSet ->
+      S.State (CDCLState s) (Ur IS.IntSet)
+    checkBuckets headCount nextCount bucket seen
+      | bucket == headCount = S.pure $ Ur seen
+      | otherwise = S.do
+          Ur first <-
+            S.zoom watchesL $
+              getWatchHeadAt bucket
+          Ur tailOccurrence <-
+            S.zoom watchesL $
+              getWatchTailAt bucket
+          Ur (lastOccurrence :!: seen') <-
+            checkWatchChain nextCount bucket first (-1) seen
+          if tailOccurrence == lastOccurrence
+            then S.pure ()
+            else
+              error $
+                "watch bucket tail mismatch: "
+                  P.<> show (bucket, first, tailOccurrence, lastOccurrence)
+          checkBuckets headCount nextCount (bucket + 1) seen'
+
+    checkWatchChain ::
+      Int ->
+      Int ->
+      Int ->
+      Int ->
+      IS.IntSet ->
+      S.State (CDCLState s) (Ur (Pair Int IS.IntSet))
+    checkWatchChain _ _ (-1) previous seen =
+      S.pure $ Ur (previous :!: seen)
+    checkWatchChain nextCount bucket occurrence _ seen
+      | occurrence < 0 || occurrence >= nextCount =
+          error $
+            "watch occurrence out of bounds: "
+              P.<> show (bucket, occurrence, nextCount)
+      | IS.member occurrence seen =
+          error $
+            "duplicate or cyclic watch occurrence: "
+              P.<> show (bucket, occurrence)
+      | otherwise = S.do
+          let cid = watchOccurrenceClause occurrence
+              watchSlot = watchOccurrenceSlot occurrence
+          Ur watchedIndices <-
+            S.zoom clausesL $
+              getWatchedLitIndices cid
+          case (watchSlot, watchedIndices) of
+            (W1, _) -> S.pure ()
+            (W2, WatchTheseI {}) -> S.pure ()
+            (W2, WatchOneI {}) ->
+              error $
+                "inactive second watch occurrence is linked: "
+                  P.<> show (bucket, occurrence, cid)
+          Ur watched <-
+            S.zoom clausesL $
+              getWatchedLits cid
+          let watchedLit = watchLitOf watchSlot watched
+          if litBucketIndex watchedLit == bucket
+            then S.pure ()
+            else
+              error $
+                "watch occurrence bucket/literal mismatch: "
+                  P.<> show
+                    (bucket, occurrence, cid, watchSlot, watchedLit)
+          Ur next <-
+            S.zoom watchesL $
+              getNextWatchOccurrence occurrence
+          checkWatchChain
+            nextCount
+            bucket
+            next
+            occurrence
+            (IS.insert occurrence seen)
+
+    checkActiveWatches ::
+      Int ->
+      IS.IntSet ->
+      Int ->
+      S.State (CDCLState s) ()
+    checkActiveWatches numClauses seen clauseIndex
+      | clauseIndex == numClauses = S.pure ()
+      | otherwise = S.do
+          let cid = ClauseId clauseIndex
+              first = watchOccurrence cid W1
+              second = watchOccurrence cid W2
+          Ur watchedIndices <-
+            S.zoom clausesL $
+              getWatchedLitIndices cid
+          if IS.member first seen
+            then S.pure ()
+            else
+              error $
+                "active first watch occurrence is missing: "
+                  P.<> show cid
+          case watchedIndices of
+            WatchOneI {} ->
+              if IS.member second seen
+                then
+                  error $
+                    "inactive second watch occurrence is present: "
+                      P.<> show cid
+                else S.pure ()
+            WatchTheseI {} ->
+              if IS.member second seen
+                then S.pure ()
+                else
+                  error $
+                    "active second watch occurrence is missing: "
+                      P.<> show cid
+          checkActiveWatches numClauses seen (clauseIndex + 1)
+
+    checkClauses :: Int -> Int -> S.State (CDCLState s) ()
+    checkClauses numClauses index
+      | index == numClauses = S.pure ()
+      | otherwise = S.do
+          Ur clauseLits <- S.zoom clausesL $ getClauseLits $ ClauseId index
+          Ur (hasTrue :!: unassignedCount) <- S.uses valuationL \valuation ->
+            foldlLin'
+              valuation
+              ( \valuation (Ur (hasTrue :!: unassignedCount)) clauseLit ->
+                  LUA.unsafeGet (fromVarId $ litVar clauseLit) valuation
+                    & \(Ur variable, valuation) ->
+                      case variable of
+                        Indefinite ->
+                          (Ur (hasTrue :!: unassignedCount + 1), valuation)
+                        Definite {..} ->
+                          ( Ur
+                              ( (hasTrue || value == isPositive clauseLit)
+                                  :!: unassignedCount
+                              )
+                          , valuation
+                          )
+              )
+              (False :!: (0 :: Int))
+              (U.toList clauseLits)
+          if hasTrue || unassignedCount > 1
+            then checkClauses numClauses (index + 1)
+            else S.do
+              Ur watched <- S.zoom clausesL $ getWatchedLits $ ClauseId index
+              Ur firstValue <- move C.<$> S.zoom valuationL (evalLit $ getLit1 watched)
+              Ur secondValue <-
+                move C.<$> case getLit2 watched of
+                  Nothing -> S.pure Nothing
+                  Just lit -> S.zoom valuationL $ evalLit lit
+              error $
+                "BCP fixpoint contains unit/conflicting clause: "
+                  P.<> show
+                    ( ClauseId index
+                    , U.toList clauseLits
+                    , unassignedCount
+                    , watched
+                    , firstValue
+                    , secondValue
+                    )
+#else
+validateFixpoint :: S.State (CDCLState s) ()
+{-# INLINE validateFixpoint #-}
+validateFixpoint = S.pure ()
+#endif
 
 toSatResult :: (FinalState, CDCLState s) %1 -> Ur (SatResult (Model VarId))
 toSatResult (Failed, state) = state `lseq` Ur Unsat
@@ -437,145 +917,189 @@ toSatResult (Ok, state) =
         )
       . U.indexed
 
-toClauseId :: Int -> ClauseId
-toClauseId = fromIntegral
-
-newtype Early s a = Early {runEarly :: UrT (S.State (CDCLState s)) (St.Maybe (Either (ClauseId, Lit) (Lit, ClauseId)))}
-  deriving (Functor)
-
-instance Applicative (Early s) where
-  pure = P.const $ Early $ pure St.Nothing
-  liftA2 _ (Early mf) (Early mx) = Early do
-    f <- mf
-    case f of
-      St.Nothing -> mx
-      St.Just x -> pure $ St.Just x
-
-  Early mf <* Early mx = Early do
-    f <- mf
-    case f of
-      St.Nothing -> mx
-      St.Just x -> pure $ St.Just x
-
-  Early mf *> Early mx = Early do
-    f <- mf
-    case f of
-      St.Nothing -> mx
-      St.Just x -> pure $ St.Just x
-
-  Early mf <*> Early mx = Early do
-    f <- mf
-    case f of
-      St.Nothing -> mx
-      St.Just x -> pure $ St.Just x
-
 propagateUnit :: (HasCallStack) => Maybe (Lit, ClauseId) -> S.State (CDCLState s) PropResult
-propagateUnit ml = S.do
-  go (P.maybe Seq.empty Seq.singleton ml)
+propagateUnit mlit =
+  propagateFrom case mlit of
+    Nothing -> SeedRootUnits
+    Just (lit, reason) -> EnqueueLit lit reason
+
+propagateFrom :: (HasCallStack) => PropagationStart -> S.State (CDCLState s) PropResult
+propagateFrom start = S.do
+  mconflict <-
+    case start of
+      SeedRootUnits -> seedRootUnits
+      EnqueueLit lit reason -> enqueue reason lit
+      ResumePropagation -> S.pure Nothing
+  case mconflict of
+    Just conflict -> S.pure conflict
+    Nothing -> drainTrail
   where
-    go :: Seq.Seq (Lit, ClauseId) -> S.State (CDCLState s) PropResult
-    go ((l, reason) :<| rest) = S.do
-      assResl <- assertLit reason l
-      case assResl of
-        ContradictingAssertion -> S.do
-          S.pure (ConflictFound reason l)
-        Asserted -> S.do
-          Ur !dest <-
-            C.fmap
-              (Ur.lift IS.toList)
-              $ S.uses watchesL
-              $ LA.unsafeGet (fromEnum $ litVar l)
-          loop dest rest
+    enqueue :: ClauseId -> Lit -> S.State (CDCLState s) (Maybe PropResult)
+    enqueue reason lit = S.do
+      result <- assertLit reason lit
+      case result of
+        ContradictingAssertion -> S.pure $ Just $ ConflictFound reason lit
+        AlreadyAsserted -> S.do
+          bumpDuplicateEnqueue
+          S.pure Nothing
+        NewlyAsserted -> S.do
+          bumpAssignment
+          S.pure Nothing
+
+    seedRootUnits :: S.State (CDCLState s) (Maybe PropResult)
+    seedRootUnits = S.do
+      bumpSeedScan
+      Ur numClauses <- getNumClauses
+      fix
+        ( \go !i ->
+            if i == numClauses
+              then S.pure Nothing
+              else S.do
+                let cid = ClauseId i
+                Ur watched <- S.zoom clausesL $ getWatchedLits cid
+                case watched of
+                  WatchOne lit -> S.do
+                    result <- enqueue cid lit
+                    case result of
+                      Just conflict -> S.pure $ Just conflict
+                      Nothing -> go $ i + 1
+                  WatchThese {} -> go $ i + 1
+        )
+        0
+
+    drainTrail :: S.State (CDCLState s) PropResult
+    drainTrail = S.do
+      Ur qhead <- move C.<$> S.use qheadL
+      Ur trailSize <- S.uses trailL LUV.size
+      if qhead == trailSize
+        then S.pure NoMorePropagation
+        else S.do
+          Ur lit <- S.uses trailL $ LUV.unsafeGet qhead
+          bumpPropagationEvent
+          qheadL S..= qhead + 1
+          let falseLit = negL lit
+          Ur firstOccurrence <- S.zoom watchesL $ detachWatchBucket falseLit
+          loop falseLit firstOccurrence
       where
-        loop :: [Int] -> Seq.Seq (Lit, ClauseId) -> S.State (CDCLState s) PropResult
-        loop [] !rest = S.do
-          go rest
-        loop (!i : !is) !rest = S.do
-          let cid = ClauseId i
-          resl <- propLit l cid
+        loop :: Lit -> Int -> S.State (CDCLState s) PropResult
+        loop _ (-1) = drainTrail
+        loop !falseLit !occurrence = S.do
+          Ur nextOccurrence <-
+            S.zoom watchesL $
+              getNextWatchOccurrence occurrence
+          bumpWatchVisit
+          let cid = watchOccurrenceClause occurrence
+              watchSlot = watchOccurrenceSlot occurrence
+          resl <- propLit falseLit watchSlot cid
           case resl of
             Nothing -> S.do
-              loop is rest
+              keepWatch falseLit occurrence
+              loop falseLit nextOccurrence
             Just (Conflict confLit) -> S.do
-              S.pure (ConflictFound (toClauseId i) confLit)
-            Just (Satisfied m) -> S.do
-              setSatisfied m (ClauseId i)
-              loop is rest
+              keepWatch falseLit occurrence
+              restoreWatchChain falseLit nextOccurrence
+              S.pure $ ConflictFound cid confLit
+            Just (Satisfied m) ->
+              case m of
+                Just ((w :!: old) :!: (new :!: newIdx)) -> S.do
+                  bumpWatchMove
+                  updateWatchLit cid w old new newIdx
+                  loop falseLit nextOccurrence
+                Nothing -> S.do
+                  keepWatch falseLit occurrence
+                  loop falseLit nextOccurrence
             Just (WatchChangedFromTo w old new newIdx) -> S.do
-              updateWatchLit (ClauseId i) w old new newIdx
-              loop is rest
-            Just (Unit newl) ->
-              -- This move is essentally no-op, as it inherits instance
-              -- from Word.
-              move newl & \(Ur newl) ->
-                loop is (rest |> (newl, toClauseId i))
-    go Seq.Empty = S.do
-      -- No literal given a priori. Find first literal.
-      -- FIXME: Use heuristics for variable selection.
-      Ur cands <- S.uses unsatisfiedsL $ BiL.first LSet.toList PL.. dup2
-      Ur mresl <-
-        runUrT $
-          runEarly $
-            Foldable.traverse_
-              ( \ !i -> Early do
-                  w <- UrT $ S.zoom clausesL $ getWatchedLits i
-                  resl <- liftUrT $ findUnit i w
-                  case resl of
-                    Nothing -> pure St.Nothing
-                    Just (WatchChangedFromTo w old new newIdx) -> S.do
-                      St.Nothing <$ liftUrT (updateWatchLit i w old new newIdx)
-                    Just (Satisfied m) -> S.do
-                      St.Nothing <$ liftUrT (setSatisfied m i)
-                    Just (Conflict ml) -> S.do
-                      pure $ St.Just $ Left (i, ml)
-                    Just (Unit l) -> S.do
-                      pure $ St.Just $ Right (l, i)
-              )
-              cands
-      case mresl of
-        St.Nothing -> S.pure NoMorePropagation
-        St.Just (Left (i, ml)) -> S.pure $ ConflictFound i ml
-        St.Just (Right (l, i)) ->
-          -- NOTE: this Unsafe.toLinear is safe because (l, i) ~= (Int, Int).
-          Unsafe.toLinear (go P.. Seq.singleton) (l, i)
+              bumpWatchMove
+              updateWatchLit cid w old new newIdx
+              loop falseLit nextOccurrence
+            Just (Unit newLit) ->
+              move newLit & \(Ur newLit) -> S.do
+                keepWatch falseLit occurrence
+                result <- enqueue cid newLit
+                case result of
+                  Just conflict -> S.do
+                    restoreWatchChain falseLit nextOccurrence
+                    S.pure conflict
+                  Nothing -> loop falseLit nextOccurrence
 
-setSatisfied :: Maybe (Pair (Pair WatchVar VarId) (Pair VarId Index)) %1 -> ClauseId -> S.State (CDCLState s) ()
-{-# INLINE setSatisfied #-}
-setSatisfied m i = S.do
-  Ur lvl <- currentDecideLevel
-  setSatisfiedLevel i lvl
-  unsatisfiedsL S.%= LSet.delete i
-  case m of
-    Just ((w :!: old) :!: (new :!: newIdx)) ->
-      updateWatchLit i w old new newIdx
-    Nothing -> S.pure ()
+        keepWatch :: Lit -> Int -> S.State (CDCLState s) ()
+        keepWatch lit occurrence =
+          S.zoom watchesL $
+            appendWatchOccurrence lit occurrence
 
-updateWatchLit :: ClauseId -> WatchVar %1 -> VarId %1 -> VarId %1 -> Index %1 -> S.State (CDCLState s) ()
+        restoreWatchChain :: Lit -> Int -> S.State (CDCLState s) ()
+        restoreWatchChain _ (-1) = S.pure ()
+        restoreWatchChain lit occurrence = S.do
+          Ur nextOccurrence <-
+            S.zoom watchesL $
+              getNextWatchOccurrence occurrence
+          keepWatch lit occurrence
+          restoreWatchChain lit nextOccurrence
+
+classifyClause :: ClauseId -> S.State (CDCLState s) (Ur ClauseClassification)
+classifyClause cid = S.do
+  Ur clauseLits <- S.zoom clausesL $ getClauseLits cid
+  Ur ClauseScan {..} <- S.uses valuationL \valuation ->
+    foldlLin'
+      valuation
+      ( \valuation (Ur scan) lit ->
+          LUA.unsafeGet (fromVarId $ litVar lit) valuation
+            & \(Ur variable, valuation) ->
+              let scan' =
+                    case variable of
+                      Indefinite ->
+                        scan
+                          { scanUnassignedCount = scanUnassignedCount scan + 1
+                          , scanUnassignedLit = Just lit
+                          }
+                      Definite {..}
+                        | value == isPositive lit ->
+                            scan {scanSatisfied = True}
+                        | otherwise -> scan
+               in (Ur scan', valuation)
+      )
+      (ClauseScan False 0 Nothing)
+      (U.toList clauseLits)
+  S.pure $
+    Ur $
+      if scanSatisfied
+        then ClauseSatisfied
+        else case scanUnassignedCount of
+          0 -> ClauseConflict
+          1 -> case scanUnassignedLit of
+            Just unitLit -> ClauseUnit unitLit
+            Nothing ->
+              error $ "classifyClause: missing unit literal " P.<> show cid
+          _ -> ClauseOpen
+
+#ifdef HERBRAND_CDCL_INSTRUMENTED
+validateAssertingReason :: ClauseId -> Lit -> S.State (CDCLState s) ()
+validateAssertingReason reason expected = S.do
+  Ur classification <- classifyClause reason
+  case classification of
+    ClauseUnit actual
+      | actual == expected -> S.pure ()
+    _ ->
+      error $
+        "non-asserting reason after backtrack: "
+          P.<> show (reason, expected, classification)
+#else
+validateAssertingReason :: ClauseId -> Lit -> S.State (CDCLState s) ()
+{-# INLINE validateAssertingReason #-}
+validateAssertingReason reason truth =
+  reason `lseq` truth `lseq` S.pure ()
+#endif
+
+updateWatchLit :: ClauseId -> WatchVar %1 -> Lit %1 -> Lit %1 -> Index %1 -> S.State (CDCLState s) ()
 {-# INLINE updateWatchLit #-}
-updateWatchLit cid w old new idx = S.do
-  setWatchVar cid w idx
-  unwatch cid old
-  watch cid new
-
-watch :: ClauseId -> VarId %1 -> S.State (CDCLState s) ()
-watch cid =
-  -- NOTE: This toLinear is safe b/c VarId ~ Int.
-  Unsafe.toLinear \v ->
-    watchesL
-      S.%= \ws ->
-        LA.unsafeGet (fromEnum v) ws & \(Ur !xs, ws) ->
-          let !xs' = IS.insert (unClauseId cid) xs
-           in LA.unsafeSet (fromEnum v) xs' ws
-
-unwatch :: ClauseId -> VarId %1 -> S.State (CDCLState s) ()
-unwatch cid =
-  -- NOTE: This toLinear is safe b/c VarId ~ Int.
-  Unsafe.toLinear \v ->
-    watchesL
-      S.%= \ws ->
-        LA.unsafeGet (fromEnum v) ws & \(Ur !xs, ws) ->
-          let !xs' = IS.delete (unClauseId cid) xs
-           in LA.unsafeSet (fromEnum v) xs' ws
+updateWatchLit cid w old new idx =
+  old `lseq`
+    PL.move (w, new)
+      & \(Ur (w, new)) -> S.do
+        setWatchVar cid w idx
+        S.zoom watchesL PL.$
+          linkWatchOccurrence new PL.$
+            watchOccurrence cid w
 
 assertLit :: (HasCallStack) => ClauseId -> Lit -> S.State (CDCLState s) AssertionResult
 assertLit ante lit = S.do
@@ -588,116 +1112,53 @@ assertLit ante lit = S.do
       let antecedent
             | ante < 0 = Nothing
             | otherwise = Just ante
-      Ur (decideLevel :!: decisionStep) <- S.zoom stepsL S.do
-        Ur len <- S.state LUV.size
-        let curStp = len - 1
-        S.state $ LUV.modify (\i -> (i + 1, fromIntegral curStp :!: i)) curStp
+      Ur decideLevel <- currentDecideLevel
+      Ur trailSize <- S.uses trailL LUV.size
+      let decisionStep = fromIntegral trailSize
       valuationL
         S.%= LUA.unsafeSet vid Definite {value = isPositive lit, ..}
-      S.pure Asserted
+      trailL S.%= LUV.push lit
+      bumpTrailAppend
+      S.pure NewlyAsserted
     Ur Definite {..}
-      | isPositive lit == value -> S.pure Asserted
+      | isPositive lit == value -> S.pure AlreadyAsserted
       | otherwise -> S.pure ContradictingAssertion
 
 -- | Propagate Literal.
-propLit :: Lit -> ClauseId -> S.State (CDCLState s) (Maybe UnitResult)
-propLit trueLit cid = S.do
-  Ur satLvl <- getSatisfiedLevel cid
-  if satLvl >= 0
-    then S.pure $ Just $ Satisfied Nothing
-    else S.do
-      Ur wlits <- S.zoom clausesL (getWatchedLits cid)
-      let !l1 = getLit1 wlits
-      if litVar l1 == litVar trueLit
-        then -- Have the same variable as watched var #1
-          if l1 == trueLit
-            then S.pure $ Just $ Satisfied Nothing -- Satisfied.
-            else S.do
-              -- False. Find next watched lit.
-              mnext <- findNextAvailable W1 cid
-              case mnext of
-                Just next -> S.pure $ Just $ fromNextSlot next
-                Nothing -> case getLit2 wlits of
-                  Nothing ->
-                    -- No vacancy
-                    S.pure $ Just $ Conflict l1
-                  Just l2 -> S.do
-                    mval2 <- S.zoom valuationL $ evalLit l2
-                    case mval2 of
-                      Nothing -> S.pure $ Just $ Unit l2
-                      Just True -> S.pure $ Just $ Satisfied Nothing
-                      Just False ->
-                        -- Unsatifiable! pick the oldest variable as conflicting lit.
-                        Just D.<$> S.zoom valuationL (reportLastAddedAsConflict wlits)
-        else -- Otherwise it must be watched var #2
-          let !l2 =
-                P.fromMaybe (error $ "Impossible: propagated literal matched neither of lits! (prop, watcheds) = " <> show (trueLit, wlits)) $
-                  getLit2 wlits
-           in if l2 == trueLit
-                then S.pure $ Just $ Satisfied Nothing -- Satisfied
-                else S.do
-                  mnext <- findNextAvailable W2 cid
-                  case mnext of
-                    Just next -> S.pure $ Just $ fromNextSlot next
-                    Nothing -> S.do
-                      mval1 <- S.zoom valuationL (evalLit l1)
-                      case mval1 of
-                        Nothing -> S.pure $ Just $ Unit l1
-                        Just True -> S.pure $ Just $ Satisfied Nothing
-                        Just False ->
-                          -- Unsatifiable! pick the oldest variable as conflicting lit.
-                          S.zoom valuationL $ Just D.<$> reportLastAddedAsConflict wlits
-
-findUnit ::
-  ClauseId ->
-  WatchedLits ->
-  S.State (CDCLState s) (Maybe UnitResult)
-findUnit _ (WatchOne l) = S.do
-  -- Only the first literal is active.
-  mres <- S.zoom valuationL $ evalLit l
-  S.pure case mres of
-    Just False -> Just (Conflict l)
-    Just True -> Just $ Satisfied Nothing
-    Nothing -> Just (Unit l)
-findUnit cid w@(WatchThese l1 l2) = S.do
-  -- The clause has more than two literals.
-  mres <- S.zoom valuationL $ evalLit l1
-  case mres of
-    Just True ->
-      -- satisfied; nothing to do.
-      S.pure $ Just $ Satisfied Nothing
-    Just False -> S.do
-      -- Unsatisfiable literal: find next available literal for watched1
-      mres <- findNextAvailable W1 cid
-      case mres of
-        Just next ->
-          -- Next slot found. Move to it.
-          S.pure $ Just $ fromNextSlot next
-        Nothing -> S.do
-          -- No vacancy. Trying to "satisfy" watched 2.
-          mres' <- S.zoom valuationL $ evalLit l2
-          case mres' of
-            Nothing ->
-              -- w2 can be unit!
-              S.pure $ Just $ Unit l2
-            Just True -> S.pure $ Just $ Satisfied Nothing
-            Just False ->
-              -- Unsatifiable! pick the oldest variable as conflicting lit.
-              S.zoom valuationL $ Just D.<$> reportLastAddedAsConflict w
-    Nothing -> S.do
-      -- Undetermined. Check for watched2
-      mres' <- S.zoom valuationL $ evalLit l2
-      case mres' of
-        Just True ->
-          -- satisfied; nothing to do.
-          S.pure $ Just $ Satisfied Nothing
-        Just False -> S.do
-          -- Unsatisfiable literal: find next available literal for watched2
-          mres'' <- findNextAvailable W2 cid
-          S.pure $ case mres'' of
-            Just next -> Just $ fromNextSlot next
-            Nothing -> Just $ Unit l1 -- w1 is unit!
-        Nothing -> S.pure Nothing -- No literal changed.
+propLit :: Lit -> WatchVar -> ClauseId -> S.State (CDCLState s) (Maybe UnitResult)
+propLit falseLit watchSlot cid = S.do
+  Ur wlits <- S.zoom clausesL (getWatchedLits cid)
+  let !l1 = getLit1 wlits
+      watchedLit = watchLitOf watchSlot wlits
+      otherLit = case watchSlot of
+        W1 -> getLit2 wlits
+        W2 -> Just l1
+  if watchedLit /= falseLit
+    then
+      error $
+        "watch occurrence is in the wrong literal bucket: "
+          <> show (cid, watchSlot, falseLit, watchedLit)
+    else case otherLit of
+      Nothing -> findReplacement wlits Nothing
+      Just other -> S.do
+        Ur otherValue <- move C.<$> S.zoom valuationL (evalLit other)
+        case otherValue of
+          Just True -> S.pure $ Just $ Satisfied Nothing
+          _ -> findReplacement wlits $ Just (other, otherValue)
+  where
+    findReplacement wlits other = S.do
+      mnext <- findNextAvailable watchSlot cid
+      case mnext of
+        Just next -> S.pure $ Just $ fromNextSlot next
+        Nothing -> case other of
+          Nothing -> S.pure $ Just $ Conflict $ getLit1 wlits
+          Just (otherLit, Nothing) -> S.pure $ Just $ Unit otherLit
+          Just (otherLit, Just False) ->
+            otherLit `lseq`
+              Just D.<$> S.zoom valuationL (reportLastAddedAsConflict wlits)
+          Just (otherLit, Just True) ->
+            otherLit `lseq`
+              error "propLit: satisfied blocker reached replacement search"
 
 reportLastAddedAsConflict :: WatchedLits -> S.State Valuation UnitResult
 reportLastAddedAsConflict (WatchOne l1) = S.pure $ Conflict l1
@@ -719,58 +1180,171 @@ fromNextSlot (NextSlot False w old new lid) = WatchChangedFromTo w old new lid
 data NextSlot = NextSlot
   { satisfied :: !Bool
   , target :: !WatchVar
-  , oldVar, newVar :: {-# UNPACK #-} !VarId
+  , oldLit, newLit :: {-# UNPACK #-} !Lit
   , litIndexInClause :: {-# UNPACK #-} !Index
   }
   deriving (Show, P.Eq, P.Ord, GHC.Generic)
 
-(<|>:) :: St.Maybe a -> St.Maybe a -> St.Maybe a
-{-# INLINE (<|>:) #-}
-(<|>:) = St.maybe P.id (P.const . St.Just)
-
 findNextAvailable :: WatchVar -> ClauseId -> S.State (CDCLState s) (Maybe NextSlot)
 findNextAvailable w cid = S.do
-  Ur widx <- S.zoom clausesL $ getWatchedLitIndices cid
-  Ur wlits <- S.zoom clausesL $ getWatchedLits cid
-  let origVar = litVar $ watchLitOf w wlits
+  Ur (lits, watchedIndices) <-
+    S.zoom clausesL $
+      getClauseSearch cid
+  Ur numInitialClauses <-
+    move C.<$> S.use numInitialClausesL
+  let !watchedIndex = watchIndexOf w watchedIndices
+      !origLit = U.unsafeIndex lits watchedIndex
+      !clauseLength = U.length lits
+      !isLearnt = unClauseId cid P.>= numInitialClauses
+      !cursor
+        | isLearnt || clauseLength P.<= 8 = 0
+        | watchedIndex + 1 == clauseLength = 0
+        | otherwise = watchedIndex + 1
+      -- Retain the incumbent satisfying-literal preference for learnt clauses:
+      -- it materially reduces future watch traffic in this solver's learning
+      -- scheme. Long original clauses stop at the first non-false literal so
+      -- a moving watch does not repeatedly scan the whole clause.
+      !preferSatisfied =
+        clauseLength P.<= 8
+          || isLearnt
+  Ur (mnext :!: inspections) <-
+    S.uses valuationL $
+      search
+        lits
+        watchedIndices
+        origLit
+        clauseLength
+        cursor
+        preferSatisfied
+        0
+        0
+        Nothing
+  bumpLiteralInspections inspections
+  S.pure mnext
+  where
+    search ::
+      U.Vector Lit ->
+      WatchedLitIndices ->
+      Lit ->
+      Int ->
+      Index ->
+      Bool ->
+      Int ->
+      Int ->
+      Maybe (Index, Lit) ->
+      Valuation %1 ->
+      (Ur (Pair (Maybe NextSlot) Int), Valuation)
+    search lits watchedIndices origLit clauseLength cursor preferSatisfied !offset !inspections undetermined valuation
+      | offset == clauseLength = case undetermined of
+          Nothing -> (Ur (Nothing :!: inspections), valuation)
+          Just (index, candidate) ->
+            selectReplacement
+              origLit
+              index
+              candidate
+              False
+              inspections
+              valuation
+      | otherwise =
+          let rawIndex = cursor + offset
+              index
+                | rawIndex < clauseLength = rawIndex
+                | otherwise = rawIndex - clauseLength
+           in if index `elemWatchLitIdx` watchedIndices
+                then
+                  search
+                    lits
+                    watchedIndices
+                    origLit
+                    clauseLength
+                    cursor
+                    preferSatisfied
+                    (offset + 1)
+                    inspections
+                    undetermined
+                    valuation
+                else
+                  let candidate = U.unsafeIndex lits index
+                   in LUA.unsafeGet (fromVarId $ litVar candidate) valuation
+                        & \(Ur variable, valuation) ->
+                          let !inspections' = inspections + 1
+                              value = case variable of
+                                Definite {..} -> Just $ isPositive candidate == value
+                                Indefinite -> Nothing
+                           in case value of
+                                Just False ->
+                                  search
+                                    lits
+                                    watchedIndices
+                                    origLit
+                                    clauseLength
+                                    cursor
+                                    preferSatisfied
+                                    (offset + 1)
+                                    inspections'
+                                    undetermined
+                                    valuation
+                                Just True ->
+                                  selectReplacement
+                                    origLit
+                                    index
+                                    candidate
+                                    True
+                                    inspections'
+                                    valuation
+                                Nothing
+                                  | preferSatisfied ->
+                                      search
+                                        lits
+                                        watchedIndices
+                                        origLit
+                                        clauseLength
+                                        cursor
+                                        preferSatisfied
+                                        (offset + 1)
+                                        inspections'
+                                        case undetermined of
+                                          Nothing -> Just (index, candidate)
+                                          Just {} -> undetermined
+                                        valuation
+                                  | otherwise ->
+                                      selectReplacement
+                                        origLit
+                                        index
+                                        candidate
+                                        False
+                                        inspections'
+                                        valuation
 
-  Ur lits <- S.zoom clausesL $ getClauseLits cid
-  Ur (mSat :!: mUndet) <-
-    S.zoom valuationL $
-      runUrT $
-        fmap (P.either P.id P.id) $
-          runExceptT $
-            U.ifoldM'
-              -- Loop invariant: both mSat and mUndet must be Nothing
-              ( \(mSat :!: mUndet) !i !l -> do
-                  if i `elemWatchLitIdx` widx
-                    then pure (mSat :!: mUndet)
-                    else do
-                      !v <- lift $ liftUrT (evalLit l)
-                      let (!mSat', !mUndet') =
-                            Bi.bimap
-                              (mSat <|>:)
-                              (mUndet <|>:)
-                              case v of
-                                Nothing -> (St.Nothing, St.Just i)
-                                Just False -> (St.Nothing, St.Nothing)
-                                Just True -> (St.Just i, St.Nothing)
-                      if St.isJust mSat' && St.isJust mUndet'
-                        then throwE (mSat' :!: mUndet')
-                        else pure (mSat' :!: mUndet')
-              )
-              (St.Nothing :!: St.Nothing)
-              lits
+    selectReplacement ::
+      Lit ->
+      Index ->
+      Lit ->
+      Bool ->
+      Int ->
+      Valuation %1 ->
+      (Ur (Pair (Maybe NextSlot) Int), Valuation)
+    selectReplacement origLit index candidate isSatisfied inspections valuation =
+      ( Ur
+          ( Just
+              NextSlot
+                { satisfied = isSatisfied
+                , target = w
+                , oldLit = origLit
+                , newLit = candidate
+                , litIndexInClause = index
+                }
+              :!: inspections
+          )
+      , valuation
+      )
 
-  case mSat of
-    St.Just i -> S.do
-      Ur l' <- S.zoom clausesL $ getClauseLitAt cid i
-      S.pure $ Just $ NextSlot True w origVar (litVar l') i
-    St.Nothing -> case mUndet of
-      St.Just i -> S.do
-        Ur l' <- S.zoom clausesL $ getClauseLitAt cid i
-        S.pure $ Just $ NextSlot False w origVar (litVar l') i
-      St.Nothing -> S.pure Nothing
+    watchIndexOf :: WatchVar -> WatchedLitIndices -> Index
+    watchIndexOf W1 (WatchOneI first) = first
+    watchIndexOf W1 (WatchTheseI first _) = first
+    watchIndexOf W2 (WatchTheseI _ second) = second
+    watchIndexOf W2 WatchOneI {} =
+      error "findNextAvailable: inactive second watch"
 
 evalLit :: Lit -> S.State Valuation (Maybe Bool)
 evalLit l = S.do
@@ -778,26 +1352,3 @@ evalLit l = S.do
   S.pure case m of
     Definite {..} -> Just $ isPositive l == value
     Indefinite -> Nothing
-
-evalClause :: ClauseId -> S.State (CDCLState s) (Maybe Bool)
-{- HLINT ignore evalClause "Avoid lambda" -}
-evalClause cid = S.do
-  Ur lvl <- getSatisfiedLevel cid
-  if lvl >= 0
-    then S.pure $ Just True
-    else S.do
-      Ur lits <- S.zoom clausesL $ getClauseLits cid
-      S.zoom valuationL $
-        D.fmap unur $
-          runUrT $
-            fmap (P.fromMaybe (Just True)) $
-              runMaybeT $
-                U.foldM'
-                  ( \ !anyNothing !l ->
-                      lift (liftUrT $ evalLit l) >>= \case
-                        Nothing -> pure Nothing
-                        Just False -> pure anyNothing
-                        Just True -> empty
-                  )
-                  (Just False)
-                  lits

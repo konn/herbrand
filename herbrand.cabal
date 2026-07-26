@@ -1,25 +1,26 @@
-cabal-version: 2.0
-
--- This file has been generated from package.yaml by hpack version 0.38.1.
---
--- see: https://github.com/sol/hpack
-
+cabal-version: 3.8
 name: herbrand
 version: 0.1.0.0
+synopsis: Propositional logic tools and SAT solvers
 description: Please see the README on GitHub at <https://github.com/konn/herbrand#readme>
+category: Logic
 homepage: https://github.com/konn/herbrand#readme
 bug-reports: https://github.com/konn/herbrand/issues
 author: Hiromi ISHII
 maintainer: konn.jinro_at_gmail.com
 copyright: 2023 (c) Hiromi ISHII
-license: BSD3
+license: BSD-3-Clause
 license-file: LICENSE
 build-type: Simple
 tested-with:
-  GHC == 9.12.4 || == 9.14.1
-extra-source-files:
-  README.md
+  ghc ==9.12.4 || ==9.14.1
+
+extra-doc-files:
   CHANGELOG.md
+  README.md
+
+extra-source-files:
+  data/satlib/uf20-91-full/*.cnf
 
 source-repository head
   type: git
@@ -30,44 +31,35 @@ flag bench-chart
   manual: True
   default: False
 
-library
-  exposed-modules:
-    Control.Foldl.Linear
-    Control.Functor.Linear.State.Extra
-    Data.HashMap.Mutable.Linear.Extra
-    Data.Matrix.Mutable.Linear.Unboxed
-    Data.Monoid.Linear.Orphans
-    Data.Set.Mutable.Linear.Extra
-    Data.Unrestricted.Linear.Orphans
-    Data.Vector.Mutable.Linear.Helpers
-    Debug.Trace.Lienar.Extra
-    Logic.Propositional.Classical.SAT.BruteForce
-    Logic.Propositional.Classical.SAT.CDCL
-    Logic.Propositional.Classical.SAT.DPLL
-    Logic.Propositional.Classical.SAT.Format.DIMACS
-    Logic.Propositional.Classical.SAT.Tableaux
-    Logic.Propositional.Classical.SAT.Types
-    Logic.Propositional.Syntax.General
-    Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
-    Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive.Sudoku
-    Logic.Propositional.Syntax.Transformation.Claassical
+common defaults
+  default-language: Haskell2010
   other-modules:
-    Logic.Propositional.Classical.SAT.CDCL.Types
-  hs-source-dirs:
-    src
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -flate-dmd-anal
+    Paths_herbrand
+
+  autogen-modules:
+    Paths_herbrand
+
+  ghc-options:
+    -Wall
+    -Wcompat
+    -Widentities
+    -Wincomplete-record-updates
+    -Wincomplete-uni-patterns
+    -Wmissing-export-lists
+    -Wmissing-home-modules
+    -Wpartial-fields
+    -Wredundant-constraints
+    -flate-dmd-anal
+
   build-depends:
     aeson,
     attoparsec,
     base >=4.7 && <5,
     bifunctors,
-    bitvec,
     bytestring,
     containers,
     data-fix,
     deepseq,
-    derive-storable,
-    derive-storable-plugin,
     distributive,
     dlist,
     filtrable,
@@ -79,11 +71,6 @@ library
     hashable,
     integer-logarithms,
     lens,
-    linear-array-extra,
-    linear-base,
-    linear-generics,
-    linear-memory,
-    linear-witness,
     parallel,
     psqueues,
     random,
@@ -96,112 +83,90 @@ library
     trie-simple,
     unordered-containers,
     vector,
-    vector-th-unbox
-  default-language: Haskell2010
+
+library
+  import: defaults
+  -- cabal-gild: discover src --exclude=src/**/Internal.hs --exclude=src/**/Internal/**/*.hs
+  exposed-modules:
+    Control.Foldl.Linear
+    Control.Functor.Linear.State.Extra
+    Data.HashMap.Mutable.Linear.Extra
+    Data.Matrix.Mutable.Linear.Unboxed
+    Data.Monoid.Linear.Orphans
+    Data.Set.Mutable.Linear.Extra
+    Data.Unrestricted.Linear.Orphans
+    Data.Vector.Mutable.Linear.Helpers
+    Debug.Trace.Lienar.Extra
+    Logic.Propositional.Classical.SAT.BruteForce
+    Logic.Propositional.Classical.SAT.CDCL
+    Logic.Propositional.Classical.SAT.CDCL.Types
+    Logic.Propositional.Classical.SAT.DPLL
+    Logic.Propositional.Classical.SAT.Format.DIMACS
+    Logic.Propositional.Classical.SAT.Tableaux
+    Logic.Propositional.Classical.SAT.Types
+    Logic.Propositional.Syntax.General
+    Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
+    Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive.Sudoku
+    Logic.Propositional.Syntax.Transformation.Claassical
+
+  -- cabal-gild: discover src --include=src/**/Internal.hs --include=src/**/Internal/**/*.hs
+  other-modules:
+  hs-source-dirs:
+    src
+
+  build-tool-depends:
+    cabal-gild:cabal-gild >=1.6.0.0
+
+  build-depends:
+    bitvec,
+    derive-storable,
+    derive-storable-plugin,
+    linear-array-extra,
+    linear-base,
+    linear-generics,
+    linear-memory,
+    linear-witness,
+    vector-th-unbox,
 
 library herbrand-bench
+  import: defaults
+  -- cabal-gild: discover libs/bench
   exposed-modules:
     Herbrand.Bench
-  other-modules:
-    Paths_herbrand
-  autogen-modules:
-    Paths_herbrand
+
   hs-source-dirs:
     libs/bench
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -flate-dmd-anal
+
   build-depends:
     Glob,
-    aeson,
-    attoparsec,
-    base >=4.7 && <5,
-    bifunctors,
-    bytestring,
-    containers,
-    data-fix,
-    deepseq,
     directory,
-    distributive,
-    dlist,
     filepath,
-    filtrable,
-    fmlist,
-    foldable1-classes-compat,
-    foldl,
-    generic-lens,
-    generically,
-    hashable,
     herbrand,
-    integer-logarithms,
-    lens,
-    parallel,
-    psqueues,
-    random,
-    recursion-schemes,
-    reflection,
     safe-exceptions,
-    semigroupoids,
-    strict,
     tasty,
     tasty-bench,
     tasty-expected-failure,
-    text,
-    transformers,
-    trie-simple,
-    unordered-containers,
-    vector
-  default-language: Haskell2010
 
 library herbrand-test-utils
+  import: defaults
+  -- cabal-gild: discover libs/test
   exposed-modules:
     Herbrand.Test
-  other-modules:
-    Paths_herbrand
-  autogen-modules:
-    Paths_herbrand
+
   hs-source-dirs:
     libs/test
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -flate-dmd-anal
+
   build-depends:
-    aeson,
-    attoparsec,
-    base >=4.7 && <5,
-    bifunctors,
-    bytestring,
-    containers,
-    data-fix,
-    deepseq,
     directory,
-    distributive,
-    dlist,
     falsify,
     filepath,
-    filtrable,
-    fmlist,
-    foldable1-classes-compat,
-    foldl,
-    generic-lens,
-    generically,
-    hashable,
     herbrand,
-    integer-logarithms,
-    lens,
-    parallel,
-    psqueues,
-    random,
-    recursion-schemes,
-    reflection,
-    semigroupoids,
-    strict,
     tasty,
-    text,
-    transformers,
-    trie-simple,
-    unordered-containers,
-    vector
-  default-language: Haskell2010
 
 executable bench-chart
+  import: defaults
   main-is: Main.hs
+  -- cabal-gild: discover app/bench-chart --exclude=app/bench-chart/Main.hs
   other-modules:
     Pages
     Parse
@@ -209,373 +174,175 @@ executable bench-chart
     Report
     Types
     Units
-    Paths_herbrand
-  autogen-modules:
-    Paths_herbrand
+
   hs-source-dirs:
     app/bench-chart
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -flate-dmd-anal "-with-rtsopts=--nonmoving-gc -N8" -fproc-alignment=64 -O2 -rtsopts -threaded
+
+  ghc-options:
+    "-with-rtsopts=--nonmoving-gc -N8"
+    -fproc-alignment=64
+    -O2
+    -rtsopts
+    -threaded
+
   build-depends:
     Glob,
-    aeson,
-    attoparsec,
-    base >=4.7 && <5,
-    bifunctors,
     blaze-markup,
-    bytestring,
     cassava,
     chart-svg,
-    containers,
-    data-fix,
-    deepseq,
     directory,
-    distributive,
-    dlist,
     filepath,
-    filtrable,
-    fmlist,
-    foldable1-classes-compat,
-    foldl,
-    generic-lens,
-    generically,
     githash,
-    hashable,
     herbrand,
-    integer-logarithms,
-    lens,
     lucid2,
     optparse-applicative,
-    parallel,
     path,
     path-io,
-    psqueues,
-    random,
-    recursion-schemes,
-    reflection,
     semialign,
-    semigroupoids,
-    strict,
-    text,
     these,
     time,
-    transformers,
-    trie-simple,
     unliftio,
-    unordered-containers,
-    vector
-  default-language: Haskell2010
+
   if flag(bench-chart)
     buildable: True
   else
     buildable: False
 
 executable cdcl-dry
+  import: defaults
   main-is: Main.hs
-  other-modules:
-    Paths_herbrand
-  autogen-modules:
-    Paths_herbrand
   hs-source-dirs:
     app/cdcl-dry
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -flate-dmd-anal "-with-rtsopts=--nonmoving-gc" -fproc-alignment=64 -O2 -rtsopts
+
+  ghc-options:
+    -with-rtsopts=--nonmoving-gc
+    -fproc-alignment=64
+    -O2
+    -rtsopts
+
   build-depends:
-    aeson,
-    attoparsec,
-    base >=4.7 && <5,
-    bifunctors,
-    bytestring,
-    containers,
-    data-fix,
-    deepseq,
-    distributive,
-    dlist,
-    filtrable,
-    fmlist,
-    foldable1-classes-compat,
-    foldl,
-    generic-lens,
-    generically,
-    hashable,
     herbrand,
-    integer-logarithms,
-    lens,
     optparse-applicative,
-    parallel,
-    psqueues,
-    random,
-    recursion-schemes,
-    reflection,
-    semigroupoids,
-    strict,
-    text,
-    transformers,
-    trie-simple,
-    unordered-containers,
-    vector
-  default-language: Haskell2010
 
 executable gen-sat
+  import: defaults
   main-is: Main.hs
-  other-modules:
-    Paths_herbrand
-  autogen-modules:
-    Paths_herbrand
   hs-source-dirs:
     app/gen-sat
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -flate-dmd-anal -O2
+
+  ghc-options:
+    -O2
+
   build-depends:
-    aeson,
-    attoparsec,
-    base >=4.7 && <5,
-    bifunctors,
-    bytestring,
-    containers,
-    data-fix,
-    deepseq,
     directory,
-    distributive,
-    dlist,
     falsify,
     filepath,
-    filtrable,
-    fmlist,
-    foldable1-classes-compat,
-    foldl,
-    generic-lens,
-    generically,
-    hashable,
     herbrand,
-    herbrand-test-utils,
-    integer-logarithms,
-    lens,
+    herbrand:herbrand-test-utils,
     optparse-applicative,
-    parallel,
     parser-combinators,
-    psqueues,
-    random,
-    recursion-schemes,
-    reflection,
-    semigroupoids,
-    strict,
-    text,
-    transformers,
-    trie-simple,
-    unordered-containers,
-    vector
-  default-language: Haskell2010
 
 executable sudoku
+  import: defaults
   main-is: Main.hs
-  other-modules:
-    Paths_herbrand
-  autogen-modules:
-    Paths_herbrand
   hs-source-dirs:
     app/sudoku
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -flate-dmd-anal -O2
+
+  ghc-options:
+    -O2
+
   build-depends:
-    aeson,
-    attoparsec,
-    base >=4.7 && <5,
-    bifunctors,
-    bytestring,
-    containers,
-    data-fix,
-    deepseq,
     directory,
-    distributive,
-    dlist,
     filepath,
-    filtrable,
-    fmlist,
-    foldable1-classes-compat,
-    foldl,
-    generic-lens,
-    generically,
-    hashable,
     herbrand,
-    integer-logarithms,
-    lens,
     optparse-applicative,
-    parallel,
     parser-combinators,
-    psqueues,
-    random,
-    recursion-schemes,
-    reflection,
-    semigroupoids,
-    strict,
-    text,
-    transformers,
-    trie-simple,
-    unordered-containers,
-    vector
-  default-language: Haskell2010
 
 test-suite herbrand-test
+  import: defaults
   type: exitcode-stdio-1.0
   main-is: Spec.hs
+  -- cabal-gild: discover test --exclude=test/Spec.hs
   other-modules:
     Logic.Propositional.Classical.SAT.CDCLSpec
     Logic.Propositional.Classical.SAT.DPLLSpec
     Logic.Propositional.Classical.SAT.TableauxSpec
     Logic.Propositional.Classical.Syntax.TestUtils
     Logic.Propositional.Syntax.NormalForm.Classical.ConjunctiveSpec
-    Paths_herbrand
-  autogen-modules:
-    Paths_herbrand
+
   hs-source-dirs:
     test
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -flate-dmd-anal -threaded -rtsopts -with-rtsopts=-N -O2
+
+  ghc-options:
+    -threaded
+    -rtsopts
+    -with-rtsopts=-N
+    -O2
+
   build-tool-depends:
     tasty-discover:tasty-discover
+
   build-depends:
-    aeson,
-    attoparsec,
-    base >=4.7 && <5,
-    bifunctors,
-    bytestring,
-    containers,
-    data-fix,
-    deepseq,
-    distributive,
-    dlist,
+    directory,
     falsify,
-    filtrable,
-    fmlist,
-    foldable1-classes-compat,
-    foldl,
-    generic-lens,
-    generically,
-    hashable,
+    filepath,
+    filepattern,
     herbrand,
-    herbrand-test-utils,
-    integer-logarithms,
-    lens,
-    parallel,
-    psqueues,
-    random,
-    recursion-schemes,
-    reflection,
-    semigroupoids,
-    strict,
+    herbrand:herbrand-test-utils,
     tasty,
     tasty-hunit,
     tasty-quickcheck,
-    text,
-    transformers,
-    trie-simple,
-    unordered-containers,
-    vector
-  default-language: Haskell2010
 
 benchmark herbrand-cnf-bench
+  import: defaults
   type: exitcode-stdio-1.0
   main-is: cnf.hs
-  other-modules:
-    Paths_herbrand
-  autogen-modules:
-    Paths_herbrand
   hs-source-dirs:
     bench
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -flate-dmd-anal "-with-rtsopts=-A32m -T --nonmoving-gc" -fproc-alignment=64 -O2
+
+  ghc-options:
+    "-with-rtsopts=-A32m -T --nonmoving-gc"
+    -fproc-alignment=64
+    -O2
+
   build-tool-depends:
     tasty-discover:tasty-discover
+
   build-depends:
-    aeson,
-    attoparsec,
-    base >=4.7 && <5,
-    bifunctors,
-    bytestring,
-    containers,
-    data-fix,
-    deepseq,
     directory,
-    distributive,
-    dlist,
     falsify,
     filepath,
-    filtrable,
-    fmlist,
-    foldable1-classes-compat,
-    foldl,
-    generic-lens,
-    generically,
-    hashable,
     herbrand,
-    herbrand-bench,
-    integer-logarithms,
-    lens,
-    parallel,
-    psqueues,
-    random,
-    recursion-schemes,
-    reflection,
-    semigroupoids,
-    strict,
+    herbrand:herbrand-bench,
     tasty,
     tasty-bench,
     tasty-bench-fit,
     tasty-expected-failure,
-    text,
-    transformers,
-    trie-simple,
-    unordered-containers,
-    vector
+
   buildable: False
-  default-language: Haskell2010
 
 benchmark herbrand-sat-bench
+  import: defaults
   type: exitcode-stdio-1.0
   main-is: sat.hs
-  other-modules:
-    Paths_herbrand
-  autogen-modules:
-    Paths_herbrand
   hs-source-dirs:
     bench
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -flate-dmd-anal "-with-rtsopts=-A32m -T --nonmoving-gc" -fproc-alignment=64 -O2
+
+  ghc-options:
+    "-with-rtsopts=-A32m -T --nonmoving-gc"
+    -fproc-alignment=64
+    -O2
+
   build-tool-depends:
     tasty-discover:tasty-discover
+
   build-depends:
-    aeson,
-    attoparsec,
-    base >=4.7 && <5,
-    bifunctors,
-    bytestring,
-    containers,
-    data-fix,
-    deepseq,
     directory,
-    distributive,
-    dlist,
     falsify,
     filepath,
-    filtrable,
-    fmlist,
-    foldable1-classes-compat,
-    foldl,
-    generic-lens,
-    generically,
-    hashable,
     herbrand,
-    herbrand-bench,
-    integer-logarithms,
-    lens,
-    parallel,
-    psqueues,
-    random,
-    recursion-schemes,
-    reflection,
-    semigroupoids,
-    strict,
+    herbrand:herbrand-bench,
     tasty,
     tasty-bench,
     tasty-bench-fit,
     tasty-expected-failure,
-    text,
-    transformers,
-    trie-simple,
-    unordered-containers,
-    vector
-  default-language: Haskell2010

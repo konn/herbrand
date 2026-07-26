@@ -1,7 +1,11 @@
 {
   "emeraldwalk.runonsave": {
     "commands": [
-      { "cmd": "hpack", "isAsync": true, "match": "(package\\.yaml|\\.l?hs)$" }
+      {
+        "cmd": "cabal-gild --io \"${file}\"",
+        "isAsync": true,
+        "match": "(\\.cabal|cabal\\.project(?:\\..*)?)$"
+      }
     ]
   },
   "haskell.formattingProvider": "fourmolu",
