@@ -326,7 +326,7 @@ instrumentationTests =
                   restartWitnessCNF
           assertBool "the threshold-1 witness must actually restart" $
             observedRestartCount stats > 0
-          seedScanCount stats @?= observedRestartCount stats + 1
+          seedScanCount stats @?= 1
           postDrainScanCount stats @?= 0
           assignmentCount stats @?= trailAppendCount stats
           assertBool "the restart witness must exercise conflict analysis" $
@@ -364,9 +364,14 @@ instrumentationTests =
             solveVarIdWithStats
               defaultOptions {restartStrategy = ExponentialRestart 1 2}
               restartWitnessCNF
+          (noOpResult, noOpStats) =
+            solveVarIdWithStats
+              defaultOptions {restartStrategy = ExponentialRestart 1 2}
+              allBinaryTwoCNF
       step $ "empty-root witness: " <> show stats
       step $ "root-prefix witness: " <> show rootStats
       step $ "restart witness: " <> show restartStats
+      step $ "no-op restart witness: " <> show noOpStats
       case result of
         Unsat -> assertFailure "backtrack witness must be satisfiable"
         Satisfiable {} -> pure ()
@@ -376,29 +381,56 @@ instrumentationTests =
       case restartResult of
         Unsat -> assertFailure "restart witness must be satisfiable"
         Satisfiable {} -> pure ()
+      noOpResult @?= Unsat
       assertBool "the witness must backtrack" $ backtrackCallCount stats > 0
       assertBool "the witness must undo assignments" $ backtrackClearedCount stats > 0
-      backtrackBoundaryReadCount stats @?= 0
-      assertBool "each backtrack may inspect at most one retained boundary literal" $
-        backtrackTrailReadCount stats
-          <= backtrackClearedCount stats + backtrackCallCount stats
-      backtrackValuationReadCount stats @?= backtrackTrailReadCount stats
+      backtrackBoundaryReadCount stats
+        @?= backtrackCallCount stats - backtrackNoOpCount stats
+      backtrackTrailReadCount stats @?= backtrackClearedCount stats
+      backtrackValuationReadCount stats @?= 0
       backtrackValuationWriteCount stats @?= backtrackClearedCount stats
       backtrackQueueRestoreCount stats @?= backtrackClearedCount stats
-      backtrackBoundaryProbeCount stats
-        @?= backtrackTrailReadCount stats - backtrackClearedCount stats
+      backtrackBoundaryProbeCount stats @?= 0
       ordinaryBacktrackCount stats @?= backtrackCallCount stats
       restartBacktrackCount stats @?= 0
-      assertBool "the root-prefix witness must inspect a retained boundary" $
-        backtrackBoundaryProbeCount rootStats > 0
+      assertBool "the root-prefix witness must use an indexed boundary" $
+        backtrackBoundaryReadCount rootStats > 0
+      backtrackBoundaryReadCount rootStats
+        @?= backtrackCallCount rootStats - backtrackNoOpCount rootStats
+      backtrackTrailReadCount rootStats @?= backtrackClearedCount rootStats
+      backtrackValuationReadCount rootStats @?= 0
+      backtrackBoundaryProbeCount rootStats @?= 0
       assertBool "the threshold-1 witness must perform a restart rollback" $
         restartBacktrackCount restartStats > 0
       ordinaryBacktrackCount restartStats + restartBacktrackCount restartStats
         @?= backtrackCallCount restartStats
+      backtrackBoundaryReadCount restartStats
+        @?= backtrackCallCount restartStats - backtrackNoOpCount restartStats
+      backtrackTrailReadCount restartStats
+        @?= backtrackClearedCount restartStats
+      backtrackValuationReadCount restartStats @?= 0
       backtrackValuationWriteCount restartStats
         @?= backtrackClearedCount restartStats
       backtrackQueueRestoreCount restartStats
         @?= backtrackClearedCount restartStats
+      backtrackBoundaryProbeCount restartStats @?= 0
+      seedScanCount restartStats @?= 1
+      assertBool "the root-level restart witness must exercise a no-op rollback" $
+        backtrackNoOpCount noOpStats > 0
+      assertBool "the no-op witness must perform a restart" $
+        restartBacktrackCount noOpStats > 0
+      assertBool "the no-op witness must observe restart scheduling" $
+        observedRestartCount noOpStats > 0
+      seedScanCount noOpStats @?= 1
+      backtrackBoundaryReadCount noOpStats
+        @?= backtrackCallCount noOpStats - backtrackNoOpCount noOpStats
+      backtrackTrailReadCount noOpStats @?= backtrackClearedCount noOpStats
+      backtrackValuationReadCount noOpStats @?= 0
+      backtrackValuationWriteCount noOpStats
+        @?= backtrackClearedCount noOpStats
+      backtrackQueueRestoreCount noOpStats
+        @?= backtrackClearedCount noOpStats
+      backtrackBoundaryProbeCount noOpStats @?= 0
   , testCase "bypasses CDCL state for sparse pure-literal formulas" $ do
       let (result, stats) = solveVarIdWithStats defaultOptions sparsePureLiteralCNF
       case result of

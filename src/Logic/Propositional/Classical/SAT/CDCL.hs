@@ -5,6 +5,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE LinearTypes #-}
 {-# LANGUAGE MonoLocalBinds #-}
+{-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE PartialTypeSignatures #-}
 {-# LANGUAGE QualifiedDo #-}
@@ -86,6 +87,25 @@ import Prelude qualified as P
 
 data FinalState = Ok | Failed
   deriving (Show, P.Eq, P.Ord, GHC.Generic)
+
+data PropagationStart
+  = SeedRootUnits
+  | EnqueueLit {-# UNPACK #-} !Lit {-# UNPACK #-} !ClauseId
+  | ResumePropagation
+  deriving (Show, P.Eq, P.Ord, GHC.Generic)
+
+data ClauseClassification
+  = ClauseSatisfied
+  | ClauseOpen
+  | ClauseUnit {-# UNPACK #-} !Lit
+  | ClauseConflict
+  deriving (Show, P.Eq, P.Ord, GHC.Generic)
+
+data ClauseScan = ClauseScan
+  { scanSatisfied :: !Bool
+  , scanUnassignedCount :: {-# UNPACK #-} !Int
+  , scanUnassignedLit :: !(Maybe Lit)
+  }
 
 solve :: (LHM.Keyed a) => CNF a -> SatResult (Model a)
 {-# INLINE solve #-}
@@ -255,7 +275,7 @@ solveStateWithStats ::
   CDCLState s %1 ->
   Ur (SatResult (Model VarId), SolverStats)
 #ifdef HERBRAND_CDCL_INSTRUMENTED
-solveStateWithStats = finalizeWithStats PL.. S.runState (solverLoop Nothing)
+solveStateWithStats = finalizeWithStats PL.. S.runState (solverLoop SeedRootUnits)
 
 finalizeWithStats ::
   (FinalState, CDCLState s) %1 ->
@@ -272,11 +292,11 @@ solveStateWithStats state =
 #endif
 
 solveState :: (Reifies s CDCLOptions) => CDCLState s %1 -> Ur (SatResult (Model VarId))
-solveState = toSatResult PL.. S.runState (solverLoop Nothing)
+solveState = toSatResult PL.. S.runState (solverLoop SeedRootUnits)
 
-solverLoop :: (Reifies s CDCLOptions, HasCallStack) => Maybe (Lit, ClauseId) -> S.State (CDCLState s) FinalState
-solverLoop = fix $ \go mlit -> S.do
-  resl <- propagateUnit mlit
+solverLoop :: (Reifies s CDCLOptions, HasCallStack) => PropagationStart -> S.State (CDCLState s) FinalState
+solverLoop = fix $ \go start -> S.do
+  resl <- propagateFrom start
   case resl of
     ConflictFound cid l ->
       move (cid, l) & \(Ur (cid, l)) -> S.do
@@ -288,8 +308,9 @@ solverLoop = fix $ \go mlit -> S.do
         Nothing -> S.pure Ok
         Just vid -> S.do
           bumpDecision
-          stepsL S.%= LUV.push 0
-          go (Just (NegL vid, -1))
+          Ur trailSize <- S.uses trailL LUV.size
+          levelStartsL S.%= LUV.push (fromIntegral trailSize)
+          go (EnqueueLit (NegL vid) (-1))
 
 backjump :: (Reifies s CDCLOptions) => ClauseId -> Lit -> S.State (CDCLState s) FinalState
 backjump confCls lit = S.do
@@ -312,37 +333,41 @@ backjump confCls lit = S.do
       backtrackTrail False decLvl
       restart <- tryRestart
       case restart of
-        Continued -> solverLoop $ Just (truth, reason)
+        Continued -> S.do
+          validateAssertingReason reason truth
+          solverLoop $ EnqueueLit truth reason
         Restarted -> S.do
           backtrackTrail True 0
-          qheadL S..= 0
-          solverLoop Nothing
+          Ur classification <- classifyClause reason
+          case classification of
+            ClauseConflict -> S.pure Failed
+            ClauseUnit unitLit -> solverLoop $ EnqueueLit unitLit reason
+            ClauseSatisfied -> solverLoop ResumePropagation
+            ClauseOpen -> solverLoop ResumePropagation
 
 backtrackTrail :: Bool -> DecideLevel -> S.State (CDCLState s) ()
 backtrackTrail isRestart target = S.do
-  stepsL S.%= LUV.slice 0 (unDecideLevel target + 1)
-  Ur len <- S.uses trailL LUV.size
-  Ur (cutoff, visits, undos) <-
-    fix
-      ( \go !i !visits !undos ->
-          if i < 0
-            then S.pure $ Ur (0, visits, undos)
-            else S.do
-              Ur lit <- S.uses trailL $ LUV.unsafeGet i
-              Ur var <- S.uses valuationL $ LUA.unsafeGet $ fromVarId $ litVar lit
-              if isAssignedAfter target var
-                then S.do
-                  valuationL S.%= LUA.unsafeSet (fromVarId $ litVar lit) Indefinite
-                  vsidsStateL S.%= moveToUnsatQueue (litVar lit)
-                  go (i - 1) (visits + 1) (undos + 1)
-                else S.pure $ Ur (i + 1, visits + 1, undos)
-      )
-      (len - 1)
-      0
-      0
-  trailL S.%= LUV.slice 0 cutoff
-  qheadL S..= cutoff
-  recordBacktrack isRestart 0 visits undos visits (visits - undos)
+  Ur currentLevel <- currentDecideLevel
+  Ur trailLength <- S.uses trailL LUV.size
+  Ur (cutoff, boundaryReads) <-
+    if target < currentLevel
+      then S.do
+        Ur levelStart <-
+          S.uses levelStartsL $
+            LUV.unsafeGet (unDecideLevel target + 1)
+        S.pure $ Ur (fromIntegral levelStart, 1)
+      else
+        if target == currentLevel
+          then S.pure $ Ur (trailLength, 0)
+          else
+            error $
+              "backtrack target exceeds current level: "
+                P.<> show (target, currentLevel)
+  levelStartsL S.%= LUV.slice 0 (unDecideLevel target + 1)
+  Ur oldQhead <- move C.<$> S.use qheadL
+  Ur cleared <- clearTrailSuffix cutoff
+  qheadL S..= P.min oldQhead cutoff
+  recordBacktrack isRestart boundaryReads cleared cleared 0 0
 
 findUIP1 ::
   forall s.
@@ -498,7 +523,7 @@ currentDecideLevel :: S.State (CDCLState s) (Ur DecideLevel)
 {-# INLINE currentDecideLevel #-}
 currentDecideLevel =
   Ur.lift (fromIntegral P.. P.subtract 1)
-    D.<$> S.uses stepsL LUV.size
+    D.<$> S.uses levelStartsL LUV.size
 
 #ifdef HERBRAND_CDCL_INSTRUMENTED
 validateFixpoint :: S.State (CDCLState s) ()
@@ -510,6 +535,7 @@ validateFixpoint = S.do
     else S.pure ()
 
   Ur currentLevel <- currentDecideLevel
+  checkLevelStarts currentLevel trailSize
   Ur seen <- checkTrail currentLevel trailSize 0 IS.empty (-1)
   Ur numVars <- S.uses valuationL LUA.size
   checkValuation currentLevel seen numVars 0
@@ -519,6 +545,102 @@ validateFixpoint = S.do
   checkActiveWatches numClauses watchOccurrences 0
   checkClauses numClauses 0
   where
+    checkLevelStarts ::
+      DecideLevel ->
+      Int ->
+      S.State (CDCLState s) ()
+    checkLevelStarts currentLevel trailSize = S.do
+      Ur levelCount <- S.uses levelStartsL LUV.size
+      if levelCount == unDecideLevel currentLevel + 1
+        then checkLevelStart levelCount trailSize 0 (-1)
+        else
+          error $
+            "decision-level boundary count mismatch: "
+              P.<> show (levelCount, currentLevel)
+
+    checkLevelStart ::
+      Int ->
+      Int ->
+      Int ->
+      Int ->
+      S.State (CDCLState s) ()
+    checkLevelStart levelCount trailSize level previousStart
+      | level == levelCount = S.pure ()
+      | otherwise = S.do
+          Ur boundaryStep <-
+            S.uses levelStartsL $
+              LUV.unsafeGet level
+          let boundary = fromIntegral boundaryStep
+          if
+            | level == 0 && boundary /= 0 ->
+                error $
+                  "root trail boundary is not zero: "
+                    P.<> show boundary
+            | level > 0
+                && ( boundary < previousStart
+                      || (level > 1 && boundary == previousStart)
+                      || boundary >= trailSize
+                   ) ->
+                error $
+                  "invalid decision-level trail boundary: "
+                    P.<> show
+                      ( level
+                      , boundary
+                      , previousStart
+                      , trailSize
+                      )
+            | boundary > trailSize ->
+                error $
+                  "decision-level trail boundary is out of bounds: "
+                    P.<> show (level, boundary, trailSize)
+            | otherwise -> S.pure ()
+          if level == 0
+            then S.pure ()
+            else S.do
+              Ur firstLit <- S.uses trailL $ LUV.unsafeGet boundary
+              Ur firstVariable <-
+                S.uses valuationL $
+                  LUA.unsafeGet (fromVarId $ litVar firstLit)
+              if boundary == 0
+                then case firstVariable of
+                  Definite {decideLevel = firstLevel}
+                    | level == 1 && firstLevel == 1 -> S.pure ()
+                  _ ->
+                    error $
+                      "first decision-level boundary has the wrong level: "
+                        P.<> show
+                          (level, boundary, firstLit, firstVariable)
+                else S.do
+                  Ur previousLit <-
+                    S.uses trailL $
+                      LUV.unsafeGet (boundary - 1)
+                  Ur previousVariable <-
+                    S.uses valuationL $
+                      LUA.unsafeGet (fromVarId $ litVar previousLit)
+                  case (firstVariable, previousVariable) of
+                    ( Definite {decideLevel = firstLevel}
+                      , Definite {decideLevel = previousLevel}
+                      )
+                        | firstLevel == fromIntegral level
+                            && previousLevel < firstLevel ->
+                            S.pure ()
+                    _ ->
+                      error $
+                        "decision-level boundary does not bracket its level: "
+                          P.<> show
+                            ( level
+                            , boundary
+                            , firstLit
+                            , firstVariable
+                            , previousLit
+                            , previousVariable
+                            )
+          checkLevelStart
+            levelCount
+            trailSize
+            (level + 1)
+            boundary
+
     checkTrail ::
       DecideLevel ->
       Int ->
@@ -545,6 +667,10 @@ validateFixpoint = S.do
                   error $
                     "non-monotone or future trail level: "
                       P.<> show (lit, previousLevel, decideLevel, currentLevel)
+              | decisionStep /= fromIntegral index ->
+                  error $
+                    "trail/valuation assignment-step mismatch: "
+                      P.<> show (lit, index, decisionStep)
               | otherwise ->
                   checkTrail
                     currentLevel
@@ -792,11 +918,18 @@ toSatResult (Ok, state) =
       . U.indexed
 
 propagateUnit :: (HasCallStack) => Maybe (Lit, ClauseId) -> S.State (CDCLState s) PropResult
-propagateUnit mlit = S.do
+propagateUnit mlit =
+  propagateFrom case mlit of
+    Nothing -> SeedRootUnits
+    Just (lit, reason) -> EnqueueLit lit reason
+
+propagateFrom :: (HasCallStack) => PropagationStart -> S.State (CDCLState s) PropResult
+propagateFrom start = S.do
   mconflict <-
-    case mlit of
-      Just (lit, reason) -> enqueue reason lit
-      Nothing -> seedRootUnits
+    case start of
+      SeedRootUnits -> seedRootUnits
+      EnqueueLit lit reason -> enqueue reason lit
+      ResumePropagation -> S.pure Nothing
   case mconflict of
     Just conflict -> S.pure conflict
     Nothing -> drainTrail
@@ -903,6 +1036,60 @@ propagateUnit mlit = S.do
           keepWatch lit occurrence
           restoreWatchChain lit nextOccurrence
 
+classifyClause :: ClauseId -> S.State (CDCLState s) (Ur ClauseClassification)
+classifyClause cid = S.do
+  Ur clauseLits <- S.zoom clausesL $ getClauseLits cid
+  Ur ClauseScan {..} <- S.uses valuationL \valuation ->
+    foldlLin'
+      valuation
+      ( \valuation (Ur scan) lit ->
+          LUA.unsafeGet (fromVarId $ litVar lit) valuation
+            & \(Ur variable, valuation) ->
+              let scan' =
+                    case variable of
+                      Indefinite ->
+                        scan
+                          { scanUnassignedCount = scanUnassignedCount scan + 1
+                          , scanUnassignedLit = Just lit
+                          }
+                      Definite {..}
+                        | value == isPositive lit ->
+                            scan {scanSatisfied = True}
+                        | otherwise -> scan
+               in (Ur scan', valuation)
+      )
+      (ClauseScan False 0 Nothing)
+      (U.toList clauseLits)
+  S.pure $
+    Ur $
+      if scanSatisfied
+        then ClauseSatisfied
+        else case scanUnassignedCount of
+          0 -> ClauseConflict
+          1 -> case scanUnassignedLit of
+            Just unitLit -> ClauseUnit unitLit
+            Nothing ->
+              error $ "classifyClause: missing unit literal " P.<> show cid
+          _ -> ClauseOpen
+
+#ifdef HERBRAND_CDCL_INSTRUMENTED
+validateAssertingReason :: ClauseId -> Lit -> S.State (CDCLState s) ()
+validateAssertingReason reason expected = S.do
+  Ur classification <- classifyClause reason
+  case classification of
+    ClauseUnit actual
+      | actual == expected -> S.pure ()
+    _ ->
+      error $
+        "non-asserting reason after backtrack: "
+          P.<> show (reason, expected, classification)
+#else
+validateAssertingReason :: ClauseId -> Lit -> S.State (CDCLState s) ()
+{-# INLINE validateAssertingReason #-}
+validateAssertingReason reason truth =
+  reason `lseq` truth `lseq` S.pure ()
+#endif
+
 updateWatchLit :: ClauseId -> WatchVar %1 -> Lit %1 -> Lit %1 -> Index %1 -> S.State (CDCLState s) ()
 {-# INLINE updateWatchLit #-}
 updateWatchLit cid w old new idx =
@@ -925,10 +1112,9 @@ assertLit ante lit = S.do
       let antecedent
             | ante < 0 = Nothing
             | otherwise = Just ante
-      Ur (decideLevel :!: decisionStep) <- S.zoom stepsL S.do
-        Ur len <- S.state LUV.size
-        let curStp = len - 1
-        S.state $ LUV.modify (\i -> (i + 1, fromIntegral curStp :!: i)) curStp
+      Ur decideLevel <- currentDecideLevel
+      Ur trailSize <- S.uses trailL LUV.size
+      let decisionStep = fromIntegral trailSize
       valuationL
         S.%= LUA.unsafeSet vid Definite {value = isPositive lit, ..}
       trailL S.%= LUV.push lit

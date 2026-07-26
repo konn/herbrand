@@ -21,7 +21,6 @@
 {-# OPTIONS_GHC -funbox-strict-fields #-}
 
 module Logic.Propositional.Classical.SAT.CDCL.Types (
-  isAssignedAfter,
   toCDCLState,
   extractValuation,
   CDCLState (..),
@@ -39,9 +38,10 @@ module Logic.Propositional.Classical.SAT.CDCL.Types (
   Valuation,
   Clauses,
   WatchMap,
-  stepsL,
+  levelStartsL,
   trailL,
   qheadL,
+  clearTrailSuffix,
   pushClause,
   getClauseLits,
   getClauseSearch,
@@ -157,6 +157,7 @@ import Data.Bits (popCount, xor, (.&.), (.|.))
 import Data.Coerce (coerce)
 import Data.DList qualified as DL
 import Data.Foldable qualified as F
+import Data.Function (fix)
 import Data.Functor.Linear qualified as D
 import Data.Generics.Labels ()
 import Data.Hashable (Hashable)
@@ -515,10 +516,6 @@ data Variable
   deriving (Show, Eq, Ord, Generic)
   deriving anyclass (NFData)
 
-isAssignedAfter :: DecideLevel -> Variable -> Bool
-isAssignedAfter _ Indefinite {} = False
-isAssignedAfter decLvl Definite {..} = decideLevel > decLvl
-
 deriveGeneric ''Variable
 
 deriving via L.AsMovable Variable instance PL.Consumable Variable
@@ -821,7 +818,7 @@ data CDCLState s where
   CDCLState ::
     -- | Number of original clauses
     {-# UNPACK #-} !Int %1 ->
-    -- | Level-wise maximum steps
+    -- | Trail start index for each decision level
     {-# UNPACK #-} !(LUV.Vector Step) %1 ->
     -- | Assigned literals in propagation order
     {-# UNPACK #-} !(LUV.Vector Lit) %1 ->
@@ -1015,9 +1012,9 @@ getNumClauses =
   S.uses clausesL \(Clauses litss bs) ->
     Clauses litss C.<$> LUV.size bs
 
-stepsL :: LinLens.Lens' (CDCLState s) (LUV.Vector Step)
-{-# INLINE stepsL #-}
-stepsL = LinLens.lens \(CDCLState numOrig ss trail qhead cs ws vs vids varQ rs) ->
+levelStartsL :: LinLens.Lens' (CDCLState s) (LUV.Vector Step)
+{-# INLINE levelStartsL #-}
+levelStartsL = LinLens.lens \(CDCLState numOrig ss trail qhead cs ws vs vids varQ rs) ->
   (ss, \ss -> CDCLState numOrig ss trail qhead cs ws vs vids varQ rs)
 
 trailL :: LinLens.Lens' (CDCLState s) (LUV.Vector Lit)
@@ -1029,6 +1026,46 @@ qheadL :: LinLens.Lens' (CDCLState s) Int
 {-# INLINE qheadL #-}
 qheadL = LinLens.lens \(CDCLState numOrig ss trail qhead cs ws vs vids varQ rs) ->
   (qhead, \qhead -> CDCLState numOrig ss trail qhead cs ws vs vids varQ rs)
+
+trailValuationVSIDSL ::
+  LinLens.Lens'
+    (CDCLState s)
+    (LUV.Vector Lit, Valuation, VSIDSState s)
+{-# INLINE trailValuationVSIDSL #-}
+trailValuationVSIDSL =
+  LinLens.lens \(CDCLState numOrig ss trail qhead cs ws vals vids varQ rs) ->
+    ( (trail, vals, varQ)
+    , \(trail, vals, varQ) ->
+        CDCLState numOrig ss trail qhead cs ws vals vids varQ rs
+    )
+
+clearTrailSuffix :: Int -> S.State (CDCLState s) (Ur Int)
+{-# INLINE clearTrailSuffix #-}
+clearTrailSuffix cutoff =
+  S.uses trailValuationVSIDSL \(trail, vals, varQ) ->
+    LUV.size trail & \(Ur trailLength, trail) ->
+      fix
+        ( \go !index !cleared trail vals varQ ->
+            if index < cutoff
+              then
+                ( Ur cleared
+                , (LUV.slice 0 cutoff trail, vals, varQ)
+                )
+              else
+                LUV.unsafeGet index trail & \(Ur lit, trail) ->
+                  LUA.unsafeSet (fromVarId $ litVar lit) Indefinite vals & \vals ->
+                    go
+                      (index - 1)
+                      (cleared + 1)
+                      trail
+                      vals
+                      (moveToUnsatQueue (litVar lit) varQ)
+        )
+        (trailLength - 1)
+        0
+        trail
+        vals
+        varQ
 
 numInitialClausesL :: LinLens.Lens' (CDCLState s) Int
 numInitialClausesL = LinLens.lens \(CDCLState numOrig ss trail qhead cs ws vs vids varQ rs) ->
@@ -1074,9 +1111,9 @@ clausesAndValsL = LinLens.lens \(CDCLState norig ss trail qhead cs ws vs vids va
   ((cs, vs), \(cs, vs) -> CDCLState norig ss trail qhead cs ws vs vids varQ rs)
 
 extractValuation :: CDCLState s %1 -> Valuation
-extractValuation (CDCLState numOrig steps trail qhead clauses watches vals vids varQs rs) =
+extractValuation (CDCLState numOrig levelStarts trail qhead clauses watches vals vids varQs rs) =
   numOrig `lseq`
-    steps `lseq`
+    levelStarts `lseq`
       trail `lseq`
         qhead `lseq`
           clauses `lseq`
@@ -1126,8 +1163,8 @@ toCDCLState (CNF cls) lin =
           | truth -> lin `lseq` Left (Ur (Satisfiable ()))
           | contradicting -> lin `lseq` Left (Ur Unsat)
         _ ->
-          besides lin (LUV.constantL (numVars + 1) 0) PL.& \(steps0, lin) ->
-            let steps = LUV.slice 0 1 steps0
+          besides lin (LUV.constantL (numVars + 1) 0) PL.& \(levelStarts0, lin) ->
+            let levelStarts = LUV.slice 0 1 levelStarts0
              in besides lin (LUV.constantL numVars (PosL 0)) PL.& \(trail0, lin) ->
                   let trail = LUV.slice 0 0 trail0
                    in besides lin (toClauses cls'') PL.& \(clauses, lin) ->
@@ -1136,7 +1173,7 @@ toCDCLState (CNF cls) lin =
                             Right PL.$
                               CDCLState
                                 numOrigCls
-                                steps
+                                levelStarts
                                 trail
                                 0
                                 clauses
