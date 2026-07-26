@@ -18,9 +18,9 @@ Use Cabal’s nix-style workflow:
 - `cabal test herbrand-test` — run the Tasty suite.
 - `cabal run cdcl-dry -- -i data/tests/small-01.cnf` — run the CDCL solver on a DIMACS file.
 - `cabal bench herbrand-sat-bench` — benchmark SAT implementations.
-- `hpack` — regenerate `herbrand.cabal` after every `package.yaml` change.
+- `cabal-gild --io herbrand.cabal` — format the package description after every metadata change.
 
-Build one component at a time. Do not use Stack or invoke GHC directly.
+`herbrand.cabal` is the package source of truth; do not recreate `package.yaml` or use Hpack. Build one component at a time. Do not use Stack or invoke GHC directly.
 
 ### Benchmark concurrency rule
 
@@ -30,7 +30,7 @@ Time performance is the primary optimization objective. Treat allocation and res
 
 ## Coding Style & Naming Conventions
 
-Format Haskell with Fourmolu using `fourmolu.yaml` (two-space indentation) and Cabal files with `cabal-gild`. Preserve linear ownership and use explicit strictness in hot paths. Always use `(<>)`, never `(++)`.
+Format Haskell with Fourmolu using `fourmolu.yaml` (two-space indentation) and Cabal files with `cabal-gild`. Keep component module lists behind `-- cabal-gild: discover` pragmas, using `--include` or `--exclude` for public/internal and driver-module boundaries. Preserve linear ownership and use explicit strictness in hot paths. Always use `(<>)`, never `(++)`.
 
 Use `UpperCamelCase` for types and modules, `lowerCamelCase` for values, and module-qualified imports where names would be ambiguous.
 
@@ -42,4 +42,4 @@ Tests use Tasty, Falsify, HUnit, and QuickCheck. Name modules `*Spec.hs` and exp
 
 Use narrowly scoped Conventional Commits, for example `perf: reduce trail allocations`. Include one valid `Co-authored-by: Name <email>` trailer per contributing LLM, naming its model. Never add `Codex-Session:`, session URLs, or internal metadata.
 
-Pull requests must explain the problem, tradeoffs, tests, and benchmark impact; link issues and call out dependency or generated-Cabal changes.
+Pull requests must explain the problem, tradeoffs, tests, and benchmark impact; link issues and call out dependency or Cabal metadata changes.
