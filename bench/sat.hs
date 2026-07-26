@@ -7,7 +7,6 @@ import Control.Exception (evaluate)
 import Herbrand.Bench
 import Logic.Propositional.Classical.SAT.CDCL (CDCLOptions (..), RestartStrategy (..), defaultAdaptiveFactor, defaultExponentialRestart, defaultLubyRestart)
 import qualified Logic.Propositional.Classical.SAT.CDCL as CDCL
-import qualified Logic.Propositional.Classical.SAT.Tableaux as Tableaux
 import Logic.Propositional.Syntax.General
 import Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive (CNF)
 import System.Mem (performGC)
@@ -21,13 +20,7 @@ main = do
   defaultMain
     [ bgroup
         "solve"
-        [ withCnfs "huge" huges $ \fml ->
-            [ allowFailureBecause "O(n^2)" $
-                timeout 30 $
-                  bench "tableaux" $
-                    nfAppIO (fmap $ Tableaux.solve . snd) fml
-            ]
-              <> cdclBenches fml
+        [ withCnfs "huge" huges cdclBenches
         , withCnfs "Sudoku" sudoku cdclBenches
         , withCnfs "SATLIB" satlib cdclBenches
         ]
