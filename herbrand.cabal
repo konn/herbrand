@@ -1,9 +1,7 @@
 cabal-version: 2.0
-
 -- This file has been generated from package.yaml by hpack version 0.38.1.
 --
 -- see: https://github.com/sol/hpack
-
 name: herbrand
 version: 0.1.0.0
 description: Please see the README on GitHub at <https://github.com/konn/herbrand#readme>
@@ -16,10 +14,11 @@ license: BSD3
 license-file: LICENSE
 build-type: Simple
 tested-with:
-  GHC == 9.12.4 || == 9.14.1
+  ghc ==9.12.4 || ==9.14.1
+
 extra-source-files:
-  README.md
   CHANGELOG.md
+  README.md
 
 source-repository head
   type: git
@@ -51,11 +50,25 @@ library
     Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
     Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive.Sudoku
     Logic.Propositional.Syntax.Transformation.Claassical
+
   other-modules:
     Logic.Propositional.Classical.SAT.CDCL.Types
+
   hs-source-dirs:
     src
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -flate-dmd-anal
+
+  ghc-options:
+    -Wall
+    -Wcompat
+    -Widentities
+    -Wincomplete-record-updates
+    -Wincomplete-uni-patterns
+    -Wmissing-export-lists
+    -Wmissing-home-modules
+    -Wpartial-fields
+    -Wredundant-constraints
+    -flate-dmd-anal
+
   build-depends:
     aeson,
     attoparsec,
@@ -97,18 +110,34 @@ library
     unordered-containers,
     vector,
     vector-th-unbox
+
   default-language: Haskell2010
 
 library herbrand-bench
   exposed-modules:
     Herbrand.Bench
+
   other-modules:
     Paths_herbrand
+
   autogen-modules:
     Paths_herbrand
+
   hs-source-dirs:
     libs/bench
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -flate-dmd-anal
+
+  ghc-options:
+    -Wall
+    -Wcompat
+    -Widentities
+    -Wincomplete-record-updates
+    -Wincomplete-uni-patterns
+    -Wmissing-export-lists
+    -Wmissing-home-modules
+    -Wpartial-fields
+    -Wredundant-constraints
+    -flate-dmd-anal
+
   build-depends:
     Glob,
     aeson,
@@ -149,18 +178,34 @@ library herbrand-bench
     trie-simple,
     unordered-containers,
     vector
+
   default-language: Haskell2010
 
 library herbrand-test-utils
   exposed-modules:
     Herbrand.Test
+
   other-modules:
     Paths_herbrand
+
   autogen-modules:
     Paths_herbrand
+
   hs-source-dirs:
     libs/test
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -flate-dmd-anal
+
+  ghc-options:
+    -Wall
+    -Wcompat
+    -Widentities
+    -Wincomplete-record-updates
+    -Wincomplete-uni-patterns
+    -Wmissing-export-lists
+    -Wmissing-home-modules
+    -Wpartial-fields
+    -Wredundant-constraints
+    -flate-dmd-anal
+
   build-depends:
     aeson,
     attoparsec,
@@ -198,6 +243,7 @@ library herbrand-test-utils
     trie-simple,
     unordered-containers,
     vector
+
   default-language: Haskell2010
 
 executable bench-chart
@@ -205,16 +251,35 @@ executable bench-chart
   other-modules:
     Pages
     Parse
+    Paths_herbrand
     Plot
     Report
     Types
     Units
-    Paths_herbrand
+
   autogen-modules:
     Paths_herbrand
+
   hs-source-dirs:
     app/bench-chart
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -flate-dmd-anal "-with-rtsopts=--nonmoving-gc -N8" -fproc-alignment=64 -O2 -rtsopts -threaded
+
+  ghc-options:
+    -Wall
+    -Wcompat
+    -Widentities
+    -Wincomplete-record-updates
+    -Wincomplete-uni-patterns
+    -Wmissing-export-lists
+    -Wmissing-home-modules
+    -Wpartial-fields
+    -Wredundant-constraints
+    -flate-dmd-anal
+    "-with-rtsopts=--nonmoving-gc -N8"
+    -fproc-alignment=64
+    -O2
+    -rtsopts
+    -threaded
+
   build-depends:
     Glob,
     aeson,
@@ -263,7 +328,9 @@ executable bench-chart
     unliftio,
     unordered-containers,
     vector
+
   default-language: Haskell2010
+
   if flag(bench-chart)
     buildable: True
   else
@@ -273,11 +340,29 @@ executable cdcl-dry
   main-is: Main.hs
   other-modules:
     Paths_herbrand
+
   autogen-modules:
     Paths_herbrand
+
   hs-source-dirs:
     app/cdcl-dry
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -flate-dmd-anal "-with-rtsopts=--nonmoving-gc" -fproc-alignment=64 -O2 -rtsopts
+
+  ghc-options:
+    -Wall
+    -Wcompat
+    -Widentities
+    -Wincomplete-record-updates
+    -Wincomplete-uni-patterns
+    -Wmissing-export-lists
+    -Wmissing-home-modules
+    -Wpartial-fields
+    -Wredundant-constraints
+    -flate-dmd-anal
+    -with-rtsopts=--nonmoving-gc
+    -fproc-alignment=64
+    -O2
+    -rtsopts
+
   build-depends:
     aeson,
     attoparsec,
@@ -312,17 +397,33 @@ executable cdcl-dry
     trie-simple,
     unordered-containers,
     vector
+
   default-language: Haskell2010
 
 executable gen-sat
   main-is: Main.hs
   other-modules:
     Paths_herbrand
+
   autogen-modules:
     Paths_herbrand
+
   hs-source-dirs:
     app/gen-sat
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -flate-dmd-anal -O2
+
+  ghc-options:
+    -Wall
+    -Wcompat
+    -Widentities
+    -Wincomplete-record-updates
+    -Wincomplete-uni-patterns
+    -Wmissing-export-lists
+    -Wmissing-home-modules
+    -Wpartial-fields
+    -Wredundant-constraints
+    -flate-dmd-anal
+    -O2
+
   build-depends:
     aeson,
     attoparsec,
@@ -362,17 +463,33 @@ executable gen-sat
     trie-simple,
     unordered-containers,
     vector
+
   default-language: Haskell2010
 
 executable sudoku
   main-is: Main.hs
   other-modules:
     Paths_herbrand
+
   autogen-modules:
     Paths_herbrand
+
   hs-source-dirs:
     app/sudoku
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -flate-dmd-anal -O2
+
+  ghc-options:
+    -Wall
+    -Wcompat
+    -Widentities
+    -Wincomplete-record-updates
+    -Wincomplete-uni-patterns
+    -Wmissing-export-lists
+    -Wmissing-home-modules
+    -Wpartial-fields
+    -Wredundant-constraints
+    -flate-dmd-anal
+    -O2
+
   build-depends:
     aeson,
     attoparsec,
@@ -410,6 +527,7 @@ executable sudoku
     trie-simple,
     unordered-containers,
     vector
+
   default-language: Haskell2010
 
 test-suite herbrand-test
@@ -422,13 +540,32 @@ test-suite herbrand-test
     Logic.Propositional.Classical.Syntax.TestUtils
     Logic.Propositional.Syntax.NormalForm.Classical.ConjunctiveSpec
     Paths_herbrand
+
   autogen-modules:
     Paths_herbrand
+
   hs-source-dirs:
     test
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -flate-dmd-anal -threaded -rtsopts -with-rtsopts=-N -O2
+
+  ghc-options:
+    -Wall
+    -Wcompat
+    -Widentities
+    -Wincomplete-record-updates
+    -Wincomplete-uni-patterns
+    -Wmissing-export-lists
+    -Wmissing-home-modules
+    -Wpartial-fields
+    -Wredundant-constraints
+    -flate-dmd-anal
+    -threaded
+    -rtsopts
+    -with-rtsopts=-N
+    -O2
+
   build-tool-depends:
     tasty-discover:tasty-discover
+
   build-depends:
     aeson,
     attoparsec,
@@ -467,6 +604,7 @@ test-suite herbrand-test
     trie-simple,
     unordered-containers,
     vector
+
   default-language: Haskell2010
 
 benchmark herbrand-cnf-bench
@@ -474,13 +612,31 @@ benchmark herbrand-cnf-bench
   main-is: cnf.hs
   other-modules:
     Paths_herbrand
+
   autogen-modules:
     Paths_herbrand
+
   hs-source-dirs:
     bench
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -flate-dmd-anal "-with-rtsopts=-A32m -T --nonmoving-gc" -fproc-alignment=64 -O2
+
+  ghc-options:
+    -Wall
+    -Wcompat
+    -Widentities
+    -Wincomplete-record-updates
+    -Wincomplete-uni-patterns
+    -Wmissing-export-lists
+    -Wmissing-home-modules
+    -Wpartial-fields
+    -Wredundant-constraints
+    -flate-dmd-anal
+    "-with-rtsopts=-A32m -T --nonmoving-gc"
+    -fproc-alignment=64
+    -O2
+
   build-tool-depends:
     tasty-discover:tasty-discover
+
   build-depends:
     aeson,
     attoparsec,
@@ -522,6 +678,7 @@ benchmark herbrand-cnf-bench
     trie-simple,
     unordered-containers,
     vector
+
   buildable: False
   default-language: Haskell2010
 
@@ -530,13 +687,31 @@ benchmark herbrand-sat-bench
   main-is: sat.hs
   other-modules:
     Paths_herbrand
+
   autogen-modules:
     Paths_herbrand
+
   hs-source-dirs:
     bench
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -flate-dmd-anal "-with-rtsopts=-A32m -T --nonmoving-gc" -fproc-alignment=64 -O2
+
+  ghc-options:
+    -Wall
+    -Wcompat
+    -Widentities
+    -Wincomplete-record-updates
+    -Wincomplete-uni-patterns
+    -Wmissing-export-lists
+    -Wmissing-home-modules
+    -Wpartial-fields
+    -Wredundant-constraints
+    -flate-dmd-anal
+    "-with-rtsopts=-A32m -T --nonmoving-gc"
+    -fproc-alignment=64
+    -O2
+
   build-tool-depends:
     tasty-discover:tasty-discover
+
   build-depends:
     aeson,
     attoparsec,
@@ -578,4 +753,5 @@ benchmark herbrand-sat-bench
     trie-simple,
     unordered-containers,
     vector
+
   default-language: Haskell2010
