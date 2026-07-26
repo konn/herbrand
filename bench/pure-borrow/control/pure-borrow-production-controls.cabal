@@ -1,0 +1,32 @@
+cabal-version: 3.0
+name: pure-borrow-production-controls
+version: 0.1.0.0
+synopsis: Focused production controls for the Herbrand Pure Borrow migration
+description: Standalone benchmark built unchanged against exact baseline and candidate Herbrand checkouts.
+category: Benchmark
+maintainer: konn.jinro_at_gmail.com
+license: BSD-3-Clause
+build-type: Simple
+
+executable pure-borrow-production-control-verifier
+  main-is: Verify.hs
+  hs-source-dirs: .
+  other-modules: Workloads
+  default-language: GHC2021
+  ghc-options: -O2
+  build-depends:
+    base >=4.7 && <5,
+    herbrand ==0.1.0.0,
+
+benchmark pure-borrow-production-controls
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  hs-source-dirs: .
+  other-modules: Workloads
+  default-language: GHC2021
+  ghc-options: -O2
+  build-depends:
+    base >=4.7 && <5,
+    deepseq,
+    herbrand ==0.1.0.0,
+    tasty-bench,

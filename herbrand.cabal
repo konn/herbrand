@@ -31,6 +31,11 @@ flag bench-chart
   manual: True
   default: False
 
+flag cdcl-instrumented
+  description: Enable checked CDCL instrumentation and trajectory tests
+  manual: True
+  default: False
+
 common defaults
   default-language: Haskell2010
   other-modules:
@@ -111,6 +116,19 @@ library
 
   -- cabal-gild: discover src --include=src/**/Internal.hs --include=src/**/Internal/**/*.hs
   other-modules:
+    Data.Array.Mutable.Linear.Unboxed.Borrow.Internal
+    Data.Vector.Mutable.Linear.Boxed.Borrow.Internal
+    Data.Vector.Mutable.Linear.Unboxed.Borrow.Internal
+    Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Analysis.Internal
+    Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Analysis.Kernel.Internal
+    Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Control.Internal
+    Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Propagation.Internal
+    Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Propagation.Kernel.Internal
+    Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Propagation.Production.Internal
+    Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Runtime.Internal
+    Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Solver.Internal
+    Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Store.Internal
+
   hs-source-dirs:
     src
 
@@ -126,7 +144,11 @@ library
     linear-generics,
     linear-memory,
     linear-witness,
+    pure-borrow ==0.0.0.0,
     vector-th-unbox,
+
+  if flag(cdcl-instrumented)
+    cpp-options: -DHERBRAND_CDCL_INSTRUMENTED
 
 library herbrand-bench
   import: defaults
@@ -292,6 +314,60 @@ test-suite herbrand-test
     tasty,
     tasty-hunit,
     tasty-quickcheck,
+
+  if flag(cdcl-instrumented)
+    cpp-options: -DHERBRAND_CDCL_INSTRUMENTED
+
+test-suite herbrand-pure-borrow-test
+  import: defaults
+  type: exitcode-stdio-1.0
+  main-is: Spec.hs
+  other-modules:
+    Data.Array.Mutable.Linear.Unboxed.Borrow.Internal
+    Data.Vector.Mutable.Linear.Boxed.Borrow.Internal
+    Data.Vector.Mutable.Linear.Unboxed.Borrow.Internal
+    Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Propagation.Internal
+    Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Store.Internal
+
+  hs-source-dirs:
+    test-pure-borrow
+    src
+
+  ghc-options:
+    -O2
+
+  build-depends:
+    linear-base,
+    pure-borrow ==0.0.0.0,
+    tasty,
+    tasty-hunit,
+    vector,
+
+benchmark herbrand-pure-borrow-spike-bench
+  import: defaults
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  other-modules:
+    Data.Array.Mutable.Linear.Unboxed.Borrow.Internal
+    Data.Vector.Mutable.Linear.Boxed.Borrow.Internal
+    Data.Vector.Mutable.Linear.Unboxed.Borrow.Internal
+    Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Propagation.Internal
+    Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Store.Internal
+
+  hs-source-dirs:
+    bench/pure-borrow
+    src
+
+  ghc-options:
+    -O2
+
+  build-depends:
+    linear-array-extra,
+    linear-base,
+    linear-witness,
+    pure-borrow ==0.0.0.0,
+    tasty-bench,
+    vector,
 
 benchmark herbrand-cnf-bench
   import: defaults
