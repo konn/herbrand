@@ -241,6 +241,8 @@ data SolverStats = SolverStats
   , analysisDuplicateMarkCount :: {-# UNPACK #-} !Int
   , analysisLearnedLiteralCount :: {-# UNPACK #-} !Int
   , analysisEpochClearCount :: {-# UNPACK #-} !Int
+  , analysisSortComparisonCount :: {-# UNPACK #-} !Int
+  , analysisSortSwapCount :: {-# UNPACK #-} !Int
   , analysisLastTargetLevel :: {-# UNPACK #-} !Int
   , analysisLastPivotTrace :: ![Literal Word]
   , analysisLastLearnedClause :: ![Literal Word]
@@ -295,6 +297,8 @@ zeroSolverStats =
     , analysisDuplicateMarkCount = 0
     , analysisLearnedLiteralCount = 0
     , analysisEpochClearCount = 0
+    , analysisSortComparisonCount = 0
+    , analysisSortSwapCount = 0
     , analysisLastTargetLevel = -1
     , analysisLastPivotTrace = []
     , analysisLastLearnedClause = []

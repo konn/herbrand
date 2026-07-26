@@ -33,6 +33,10 @@ module Logic.Propositional.Classical.SAT.CDCL (
   solveVarIdWithStats,
   solveState,
   propagateUnit,
+#ifdef HERBRAND_CDCL_INSTRUMENTED
+  sortLitPrefixForTest,
+  sortLitPrefixesForTest,
+#endif
 
   -- * Re-exports
   CNF (..),
@@ -58,6 +62,7 @@ import Data.HashSet qualified as HS
 import Data.Hashable
 #ifdef HERBRAND_CDCL_INSTRUMENTED
 import Data.IntSet qualified as IS
+import Data.List qualified as List
 #endif
 import Data.Proxy (Proxy (..))
 import Data.Reflection (Reifies, reflect, reify)
@@ -378,6 +383,8 @@ data AnalysisMetrics = AnalysisMetrics
   , metricMarkCount :: {-# UNPACK #-} !Int
   , metricDuplicateMarkCount :: {-# UNPACK #-} !Int
   , metricEpochClearCount :: {-# UNPACK #-} !Int
+  , metricSortComparisonCount :: {-# UNPACK #-} !Int
+  , metricSortSwapCount :: {-# UNPACK #-} !Int
   , metricPivotTraceRev :: ![Lit]
   }
 #else
@@ -388,7 +395,7 @@ data AnalysisAcc = AnalysisAcc
   { analysisPathCount :: {-# UNPACK #-} !Int
   , analysisScratchLength :: {-# UNPACK #-} !Int
   , analysisTargetLevel :: {-# UNPACK #-} !DecideLevel
-  , analysisTargetIndex :: {-# UNPACK #-} !Int
+  , analysisTargetLit :: {-# UNPACK #-} !Lit
   , analysisMetrics :: !AnalysisMetrics
   }
 
@@ -399,7 +406,7 @@ initialAnalysisAcc conflictLiteralCount epochCleared =
     { analysisPathCount = 0
     , analysisScratchLength = 0
     , analysisTargetLevel = -1
-    , analysisTargetIndex = -1
+    , analysisTargetLit = NegL (VarId maxBound)
     , analysisMetrics =
         AnalysisMetrics
           { metricConflictClauseVisitCount = 1
@@ -411,6 +418,8 @@ initialAnalysisAcc conflictLiteralCount epochCleared =
           , metricMarkCount = 0
           , metricDuplicateMarkCount = 0
           , metricEpochClearCount = if epochCleared then 1 else 0
+          , metricSortComparisonCount = 0
+          , metricSortSwapCount = 0
           , metricPivotTraceRev = []
           }
     }
@@ -420,7 +429,7 @@ initialAnalysisAcc _ _ =
     { analysisPathCount = 0
     , analysisScratchLength = 0
     , analysisTargetLevel = -1
-    , analysisTargetIndex = -1
+    , analysisTargetLit = NegL (VarId maxBound)
     , analysisMetrics = AnalysisMetrics
     }
 #endif
@@ -548,6 +557,10 @@ recordLearnedAnalysis target Clause {lits = learnedLits} AnalysisMetrics {..} =
             analysisLearnedLiteralCount stats + U.length learnedLits
         , analysisEpochClearCount =
             analysisEpochClearCount stats + metricEpochClearCount
+        , analysisSortComparisonCount =
+            analysisSortComparisonCount stats + metricSortComparisonCount
+        , analysisSortSwapCount =
+            analysisSortSwapCount stats + metricSortSwapCount
         , analysisLastTargetLevel = unDecideLevel target
         , analysisLastPivotTrace =
             P.map (fmap (fromIntegral P.. fromVarId) P.. decodeLit) $
@@ -922,13 +935,16 @@ scanAnalysisClause currentLevel epoch pivot lits initialAcc =
                                                         analysisScratchLength markedAcc
                                                       scratch' =
                                                         LUA.unsafeSet scratchIndex lit scratch
-                                                      (targetLevel, targetIndex)
-                                                        | analysisTargetIndex markedAcc < 0
-                                                            || decideLevel > analysisTargetLevel markedAcc =
-                                                            (decideLevel, scratchIndex)
+                                                      (targetLevel, targetLit)
+                                                        | analysisScratchLength markedAcc == 0
+                                                            || decideLevel > analysisTargetLevel markedAcc
+                                                            || ( decideLevel == analysisTargetLevel markedAcc
+                                                                   && lit < analysisTargetLit markedAcc
+                                                               ) =
+                                                            (decideLevel, lit)
                                                         | otherwise =
                                                             ( analysisTargetLevel markedAcc
-                                                            , analysisTargetIndex markedAcc
+                                                            , analysisTargetLit markedAcc
                                                             )
                                                    in go
                                                         (index + 1)
@@ -936,7 +952,7 @@ scanAnalysisClause currentLevel epoch pivot lits initialAcc =
                                                           { analysisScratchLength =
                                                               scratchIndex + 1
                                                           , analysisTargetLevel = targetLevel
-                                                          , analysisTargetIndex = targetIndex
+                                                          , analysisTargetLit = targetLit
                                                           }
                                                         pivotOccurrences
                                                         stamps'
@@ -957,65 +973,372 @@ finishAnalysis ::
   , (AnalysisScratch, LUV.Vector Lit, Clauses, Valuation, VSIDSState s)
   )
 finishAnalysis assertingLit AnalysisAcc {..} epoch stamps scratch trail clauses valuation vsids =
-  let learnedLength = analysisScratchLength + 1
-   in LUA.unsafeAllocBeside learnedLength scratch & \(output0, scratch) ->
-        let output = LUA.unsafeSet 0 assertingLit output0
-         in copyLowerLiterals
-              0
-              analysisScratchLength
-              analysisTargetIndex
-              scratch
-              output
-              & \(scratch, output) ->
-                LUA.freeze output & \(Ur learnedLits) ->
-                  let target
-                        | analysisScratchLength == 0 = 0
-                        | analysisTargetIndex >= 0 = analysisTargetLevel
-                        | otherwise =
-                            P.error "non-unit learned clause has no backjump target"
-                      clause =
-                        Clause
-                          { lits = learnedLits
-                          , watched1 = 0
-                          , watched2 = if learnedLength > 1 then 1 else -1
-                          }
-                   in ( Ur
-                          ( LearnedClause
-                              target
-                              clause
-                              assertingLit
-                              analysisMetrics
-                          )
-                      ,
-                        ( AnalysisScratch epoch stamps scratch
-                        , trail
-                        , clauses
-                        , valuation
-                        , vsids
-                        )
+  LUA.size scratch & \(Ur scratchCapacity, scratch) ->
+    if analysisScratchLength < 0 || analysisScratchLength > scratchCapacity
+      then
+        analysisFailure
+          ( "learned-literal scratch prefix is out of bounds: "
+              P.<> show (analysisScratchLength, scratchCapacity)
+          )
+          epoch
+          stamps
+          scratch
+          trail
+          clauses
+          valuation
+          vsids
+      else
+        let learnedLength = analysisScratchLength + 1
+         in heapSortLitPrefix analysisScratchLength emptySortMetrics scratch
+              & \(Ur sortMetrics, scratch) ->
+                let analysisMetrics' =
+                      recordAnalysisSortMetrics sortMetrics analysisMetrics
+                 in LUA.unsafeAllocBeside learnedLength scratch
+                      & \(output0, scratch) ->
+                        let output = LUA.unsafeSet 0 assertingLit output0
+                            hasLowerLiterals = analysisScratchLength > 0
+                            outputIndex = if hasLowerLiterals then 2 else 1
+                            output' =
+                              if hasLowerLiterals
+                                then LUA.unsafeSet 1 analysisTargetLit output
+                                else output
+                         in copyLowerLiterals
+                              0
+                              outputIndex
+                              analysisScratchLength
+                              analysisTargetLit
+                              0
+                              scratch
+                              output'
+                              & \(Ur (copiedLength, targetMatches), scratch, output) ->
+                                if
+                                  copiedLength /= learnedLength
+                                    || targetMatches /= if hasLowerLiterals then 1 else 0
+                                  then
+                                    analysisOutputFailure
+                                      ( "learned-clause copy invariant failed: "
+                                          P.<> show
+                                            ( copiedLength
+                                            , learnedLength
+                                            , targetMatches
+                                            , hasLowerLiterals
+                                            )
+                                      )
+                                      epoch
+                                      stamps
+                                      scratch
+                                      output
+                                      trail
+                                      clauses
+                                      valuation
+                                      vsids
+                                  else
+                                    LUA.freeze output & \(Ur learnedLits) ->
+                                      let target
+                                            | hasLowerLiterals = analysisTargetLevel
+                                            | otherwise = 0
+                                          clause =
+                                            Clause
+                                              { lits = learnedLits
+                                              , watched1 = 0
+                                              , watched2 =
+                                                  if learnedLength > 1 then 1 else -1
+                                              }
+                                       in ( Ur
+                                              ( LearnedClause
+                                                  target
+                                                  clause
+                                                  assertingLit
+                                                  analysisMetrics'
+                                              )
+                                          ,
+                                            ( AnalysisScratch epoch stamps scratch
+                                            , trail
+                                            , clauses
+                                            , valuation
+                                            , vsids
+                                            )
+                                          )
+
+#ifdef HERBRAND_CDCL_INSTRUMENTED
+data SortMetrics = SortMetrics
+  { sortComparisonCount :: {-# UNPACK #-} !Int
+  , sortSwapCount :: {-# UNPACK #-} !Int
+  }
+#else
+data SortMetrics = SortMetrics
+#endif
+
+emptySortMetrics :: SortMetrics
+#ifdef HERBRAND_CDCL_INSTRUMENTED
+emptySortMetrics = SortMetrics 0 0
+#else
+emptySortMetrics = SortMetrics
+#endif
+
+noteSortComparison :: SortMetrics -> SortMetrics
+#ifdef HERBRAND_CDCL_INSTRUMENTED
+noteSortComparison metrics =
+  metrics {sortComparisonCount = sortComparisonCount metrics + 1}
+#else
+{-# INLINE noteSortComparison #-}
+noteSortComparison metrics = metrics
+#endif
+
+noteSortSwap :: SortMetrics -> SortMetrics
+#ifdef HERBRAND_CDCL_INSTRUMENTED
+noteSortSwap metrics =
+  metrics {sortSwapCount = sortSwapCount metrics + 1}
+#else
+{-# INLINE noteSortSwap #-}
+noteSortSwap metrics = metrics
+#endif
+
+recordAnalysisSortMetrics :: SortMetrics -> AnalysisMetrics -> AnalysisMetrics
+#ifdef HERBRAND_CDCL_INSTRUMENTED
+recordAnalysisSortMetrics SortMetrics {..} metrics =
+  metrics
+    { metricSortComparisonCount =
+        metricSortComparisonCount metrics + sortComparisonCount
+    , metricSortSwapCount = metricSortSwapCount metrics + sortSwapCount
+    }
+#else
+{-# INLINE recordAnalysisSortMetrics #-}
+recordAnalysisSortMetrics SortMetrics metrics = metrics
+#endif
+
+heapSortLitPrefix ::
+  Int ->
+  SortMetrics ->
+  LUA.UArray Lit %1 ->
+  (Ur SortMetrics, LUA.UArray Lit)
+heapSortLitPrefix !count metrics array
+  | count P.<= 1 = (Ur metrics, array)
+  | otherwise = buildHeap (count `quot` 2 - 1) metrics array
+  where
+    buildHeap ::
+      Int ->
+      SortMetrics ->
+      LUA.UArray Lit %1 ->
+      (Ur SortMetrics, LUA.UArray Lit)
+    buildHeap !root !sortMetrics heap
+      | root < 0 = drainHeap (count - 1) sortMetrics heap
+      | otherwise =
+          siftDownLit root (count - 1) sortMetrics heap
+            & \(Ur sortMetrics', heap) ->
+              buildHeap (root - 1) sortMetrics' heap
+
+    drainHeap ::
+      Int ->
+      SortMetrics ->
+      LUA.UArray Lit %1 ->
+      (Ur SortMetrics, LUA.UArray Lit)
+    drainHeap !end !sortMetrics heap
+      | end P.<= 0 = (Ur sortMetrics, heap)
+      | otherwise =
+          swapLit 0 end sortMetrics heap
+            & \(Ur sortMetrics', heap) ->
+              siftDownLit 0 (end - 1) sortMetrics' heap
+                & \(Ur sortMetrics'', heap) ->
+                  drainHeap (end - 1) sortMetrics'' heap
+
+siftDownLit ::
+  Int ->
+  Int ->
+  SortMetrics ->
+  LUA.UArray Lit %1 ->
+  (Ur SortMetrics, LUA.UArray Lit)
+siftDownLit !root !end !metrics heap =
+  let leftChild = 2 P.* root + 1
+   in if leftChild > end
+        then (Ur metrics, heap)
+        else
+          LUA.unsafeGet leftChild heap & \(Ur leftLit, heap) ->
+            let rightChild = leftChild + 1
+             in if rightChild > end
+                  then swapIfGreater leftChild leftLit metrics heap
+                  else
+                    LUA.unsafeGet rightChild heap & \(Ur rightLit, heap) ->
+                      let metrics' = noteSortComparison metrics
+                       in if leftLit < rightLit
+                            then swapIfGreater rightChild rightLit metrics' heap
+                            else swapIfGreater leftChild leftLit metrics' heap
+  where
+    swapIfGreater ::
+      Int ->
+      Lit ->
+      SortMetrics ->
+      LUA.UArray Lit %1 ->
+      (Ur SortMetrics, LUA.UArray Lit)
+    swapIfGreater !child !childLit !sortMetrics heap =
+      LUA.unsafeGet root heap & \(Ur rootLit, heap) ->
+        let sortMetrics' = noteSortComparison sortMetrics
+         in if rootLit < childLit
+              then
+                LUA.unsafeSet root childLit (LUA.unsafeSet child rootLit heap)
+                  & siftDownLit child end (noteSortSwap sortMetrics')
+              else (Ur sortMetrics', heap)
+
+swapLit ::
+  Int ->
+  Int ->
+  SortMetrics ->
+  LUA.UArray Lit %1 ->
+  (Ur SortMetrics, LUA.UArray Lit)
+swapLit !left !right !metrics array
+  | left == right = (Ur metrics, array)
+  | otherwise =
+      LUA.unsafeGet left array & \(Ur leftLit, array) ->
+        LUA.unsafeGet right array & \(Ur rightLit, array) ->
+          ( Ur (noteSortSwap metrics)
+          , LUA.unsafeSet left rightLit (LUA.unsafeSet right leftLit array)
+          )
+
+#ifdef HERBRAND_CDCL_INSTRUMENTED
+sortLitPrefixForTest :: Int -> [Literal Word] -> [Literal Word]
+sortLitPrefixForTest prefixLength input =
+  case sortLitPrefixesForTest input [P.take prefixLength input] of
+    [(_, sorted)]
+      | prefixLength P.>= 0
+          P.&& prefixLength P.<= P.length input ->
+          sorted
+    _ ->
+      P.error $
+        "test sort prefix is out of bounds: "
+          P.<> show (prefixLength, P.length input)
+
+sortLitPrefixesForTest ::
+  [Literal Word] ->
+  [[Literal Word]] ->
+  [((Int, Int), [Literal Word])]
+sortLitPrefixesForTest initial rewrites =
+  unur PL.$ linearly \linearToken ->
+    LUA.fromListL
+      (P.map encodeTestLiteral initial)
+      linearToken
+      & \array ->
+        go (P.length initial) rewrites [] array
+  where
+    go ::
+      Int ->
+      [[Literal Word]] ->
+      [((Int, Int), [Literal Word])] ->
+      LUA.UArray Lit %1 ->
+      Ur [((Int, Int), [Literal Word])]
+    go _ [] results array =
+      LUA.freeze array & \(Ur _) -> Ur (P.reverse results)
+    go !capacity (rewrite : rest) results array
+      | P.length rewrite > capacity =
+          array `lseq`
+            P.error
+              ( "test sort prefix is out of bounds: "
+                  P.<> show (P.length rewrite, capacity)
+              )
+      | otherwise =
+          writePrefix 0 rewrite array
+            & heapSortLitPrefix (P.length rewrite) emptySortMetrics
+            & \(Ur sortMetrics, array) ->
+              snapshotArray capacity 0 [] array
+                & \(Ur snapshot, array) ->
+                  go
+                    capacity
+                    rest
+                    ( ( sortMetricsCounts sortMetrics
+                      , P.map decodeTestLiteral snapshot
                       )
+                        : results
+                    )
+                    array
+
+    writePrefix ::
+      Int ->
+      [Literal Word] ->
+      LUA.UArray Lit %1 ->
+      LUA.UArray Lit
+    writePrefix !_ [] array = array
+    writePrefix !index (lit : lits) array =
+      writePrefix
+        (index + 1)
+        lits
+        (LUA.unsafeSet index (encodeTestLiteral lit) array)
+
+    snapshotArray ::
+      Int ->
+      Int ->
+      [Lit] ->
+      LUA.UArray Lit %1 ->
+      (Ur [Lit], LUA.UArray Lit)
+    snapshotArray !capacity !index snapshot array
+      | index == capacity = (Ur (P.reverse snapshot), array)
+      | otherwise =
+          LUA.unsafeGet index array & \(Ur lit, array) ->
+            snapshotArray capacity (index + 1) (lit : snapshot) array
+
+    encodeTestLiteral = encodeLit P.. fmap VarId
+    decodeTestLiteral =
+      fmap (fromIntegral P.. fromVarId) P.. decodeLit
+
+    sortMetricsCounts SortMetrics {..} =
+      (sortComparisonCount, sortSwapCount)
+#endif
 
 copyLowerLiterals ::
   Int ->
   Int ->
   Int ->
+  Lit ->
+  Int ->
   LUA.UArray Lit %1 ->
   LUA.UArray Lit %1 ->
-  (LUA.UArray Lit, LUA.UArray Lit)
-copyLowerLiterals !index !count !targetIndex scratch output
-  | index == count = (scratch, output)
+  (Ur (Int, Int), LUA.UArray Lit, LUA.UArray Lit)
+copyLowerLiterals !index !outputIndex !count !targetLit !targetMatches scratch output
+  | index == count = (Ur (outputIndex, targetMatches), scratch, output)
   | otherwise =
-      let sourceIndex
-            | index == 0 = targetIndex
-            | index == targetIndex = 0
-            | otherwise = index
-       in LUA.unsafeGet sourceIndex scratch & \(Ur lit, scratch) ->
+      LUA.unsafeGet index scratch & \(Ur lit, scratch) ->
+        if lit == targetLit
+          then
             copyLowerLiterals
               (index + 1)
+              outputIndex
               count
-              targetIndex
+              targetLit
+              (targetMatches + 1)
               scratch
-              (LUA.unsafeSet (index + 1) lit output)
+              output
+          else
+            copyLowerLiterals
+              (index + 1)
+              (outputIndex + 1)
+              count
+              targetLit
+              targetMatches
+              scratch
+              ( if outputIndex P.<= count
+                  then LUA.unsafeSet outputIndex lit output
+                  else output
+              )
+
+analysisOutputFailure ::
+  String ->
+  Word64 ->
+  LUA.UArray Word64 %1 ->
+  LUA.UArray Lit %1 ->
+  LUA.UArray Lit %1 ->
+  LUV.Vector Lit %1 ->
+  Clauses %1 ->
+  Valuation %1 ->
+  VSIDSState s %1 ->
+  a
+analysisOutputFailure message epoch stamps scratch output trail clauses valuation vsids =
+  epoch `lseq`
+    stamps `lseq`
+      scratch `lseq`
+        output `lseq`
+          trail `lseq`
+            clauses `lseq`
+              valuation `lseq`
+                vsids `lseq`
+                  P.error message
 
 analysisFailure ::
   String ->
@@ -1131,11 +1454,11 @@ validateLearnedAnalysis currentLevel target Clause {..} assertingLit
                         (secondLit, decideLevel, target, U.toList lits)
               | otherwise -> S.pure ()
         else S.pure ()
-      Ur (currentLevelLiterals, maximumLowerLevel, seenVariables) <-
+      Ur (currentLevelLiterals, maximumLowerLevel, seenVariables, leastTargetLit) <-
         S.uses valuationL \valuation ->
           foldlLin'
             valuation
-            ( \valuation (Ur (!currentCount, !maxLower, !seen)) lit ->
+            ( \valuation (Ur (!currentCount, !maxLower, !seen, !leastTarget)) lit ->
                 let variableIndex = fromVarId $ litVar lit
                  in if IS.member variableIndex seen
                       then
@@ -1168,14 +1491,22 @@ validateLearnedAnalysis currentLevel target Clause {..} assertingLit
                                         ( currentCount + 1
                                         , maxLower
                                         , IS.insert variableIndex seen
+                                        , leastTarget
                                         )
                                     , valuation
                                     )
                                 | decideLevel < currentLevel ->
+                                    let leastTarget'
+                                          | decideLevel /= target = leastTarget
+                                          | otherwise =
+                                              Just $
+                                                P.maybe lit (P.min lit) leastTarget
+                                     in
                                     ( Ur
                                         ( currentCount
                                         , P.max maxLower decideLevel
                                         , IS.insert variableIndex seen
+                                        , leastTarget'
                                         )
                                     , valuation
                                     )
@@ -1187,8 +1518,13 @@ validateLearnedAnalysis currentLevel target Clause {..} assertingLit
                                       )
                                       valuation
             )
-            (0, 0, IS.empty)
+            (0, 0, IS.empty, Nothing)
             (U.toList lits)
+      let secondLit =
+            if U.length lits > 1
+              then Just $ U.unsafeIndex lits 1
+              else Nothing
+          orderedRemainder = P.drop 2 $ U.toList lits
       if
         | currentLevelLiterals /= 1 ->
             error $
@@ -1204,12 +1540,20 @@ validateLearnedAnalysis currentLevel target Clause {..} assertingLit
                   )
         | IS.size seenVariables /= U.length lits ->
             error "learned-clause variable accounting mismatch"
+        | secondLit /= leastTargetLit ->
+            error $
+              "learned clause second watch is not the least target-level literal: "
+                P.<> show (secondLit, leastTargetLit, U.toList lits)
+        | orderedRemainder /= List.sort orderedRemainder ->
+            error $
+              "learned clause lower-literal remainder is not ordered: "
+                P.<> show (U.toList lits)
         | otherwise -> S.pure ()
   where
     learnedValidationFailure ::
       String ->
       Valuation %1 ->
-      (Ur (Int, DecideLevel, IS.IntSet), Valuation)
+      (Ur (Int, DecideLevel, IS.IntSet, Maybe Lit), Valuation)
     learnedValidationFailure message valuation =
       valuation `lseq` P.error message
 
