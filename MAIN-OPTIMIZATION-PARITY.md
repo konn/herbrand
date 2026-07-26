@@ -56,20 +56,22 @@ analysis transaction.
   - deterministic ordered learned remainders;
   - bounded-random learned-clause entailment and asserting polarity.
 
-## Historical performance evidence and final protocol
+## Exact current-main performance evidence
 
-The first paired `-O2` comparison against the polished reference is retained
-as historical evidence in `bench/pure-borrow/PARITY-BENCHMARK.md`. Independent
-review rejected it as final provenance, so these figures are not the final
-campaign:
+The final paired `-O2` comparison uses current `main` commit
+`57e6917cf61f89a6e152aa3793cc749894ae9a4d` as the baseline and candidate
+commit `0a5efdd3311c19bf64666b44a47f7fbf6578ca5f`. Both clean source trees were
+built explicitly at `-O2`, without a local Cabal overlay. The completed
+campaign is recorded in `bench/pure-borrow/PARITY-BENCHMARK.md`:
 
 - all 294 SAT/UNSAT results match;
-- 12/14 per-case elapsed gates pass;
-- combined candidate/baseline elapsed geomean: 1.1359;
-- combined 95% upper confidence bound: 1.1663;
+- 10/14 per-case elapsed gates pass;
+- combined candidate/baseline elapsed geomean: 1.1589;
+- combined 95% upper confidence bound: 1.1818;
 - the Pure Borrow candidate allocates less in every case/GC stratum;
-- the aggregate failure is dominated numerically by the watch-heavy `3blocks`
-  case, at 6.83x under nonmoving GC and 10.11x under copying GC.
+- the two substantive workload failures are `flat200` and the watch-heavy
+  `3blocks` case; `3blocks` is 6.82x under nonmoving GC and 8.96x under
+  copying GC.
 
 The first-UIP algorithmic gap is therefore closed on the Herbrand side. The
 remaining outlier is not caused by the removed `Set` analyzer. Current evidence
@@ -88,10 +90,17 @@ The focused 4,096-occurrence architecture control measured 25.9 us for direct
 IO, 375 us for the legacy linear path, and 287 us for the rank-2 Pure Borrow
 path. Its variance is high and it does not reproduce the full production
 enqueue/resume path; it is retained only as a control showing that the pin
-architecture improves on per-operation linear access. The fresh exact-commit
-294-pair production campaign remains the landing evidence. Candidate-only
-production timings were rejected. A replacement standalone tracked harness is
-built unchanged against both exact source trees and runs three alternating
-fresh-process pairs for a pre-built 4,096-variable root-propagation chain and
-PHP(7,6) conflict analysis/learned insertion. Exact-checkpoint results remain
-pending.
+architecture improves on per-operation linear access.
+
+The replacement standalone production harness was built unchanged against the
+same two exact source trees. Both instrumented trajectory verifiers passed.
+Across three alternating fresh-process pairs, the complete 4,096-variable
+root-propagation chain was 12.4291x baseline, while PHP(7,6) conflict analysis
+and learned insertion was 0.3308x baseline. This diagnostic is not the
+acceptance estimator, but it supports localization to the propagation path
+without claiming intrinsic `BO` overhead or assigning the entire factor to
+one inner kernel.
+
+All raw final outputs, provenance, and manifests are kept in ignored
+`workspace/pure-borrow-benchmark`. This follows the workspace-artifact policy;
+the tracked rendered report records their SHA-256 hashes.

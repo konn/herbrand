@@ -1,4 +1,9 @@
-# Pure Borrow paired benchmark
+# Historical initial Pure Borrow paired benchmark
+
+Status: superseded. This campaign compares the initial port with the
+pre-migration baseline `0565411`; it is retained as migration history. The
+exact final comparison against current `main` is
+`bench/pure-borrow/PARITY-BENCHMARK.md`.
 
 ## Identity and protocol
 
@@ -67,7 +72,6 @@ a908c9452a5707d4b3b5c10df3696b9ca66ee39bcc1e7513259de018a9b97bd3  final-candidat
 
 UCB method: percentile bootstrap, resampling paired runs within each case/GC stratum; 100000 deterministic resamples.
 
-The port is correct but performance-regressive under the predeclared gate.
-The aggregate regression is dominated by `3blocks`; candidate allocation is
-lower on every case, so allocation reduction does not compensate for that
-elapsed-time result.
+This historical port was correct but performance-regressive under the
+predeclared gate. Later Herbrand-side analyzer work substantially improved
+these numbers, but did not remove the propagation-heavy `3blocks` regression.
