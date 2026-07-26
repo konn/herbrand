@@ -1,4 +1,4 @@
-module.exports = async ({ core, glob, os, ghc, projects, prefix }) => {
+module.exports = async ({ os, plan, path, core, glob }) => {
   function build_keys(comps) {
     const fallbacks = comps
       .reduce((accum, cur) => [accum[0].concat([cur])].concat(accum), [[]])
@@ -7,20 +7,10 @@ module.exports = async ({ core, glob, os, ghc, projects, prefix }) => {
 
     return { key: comps.join("-"), restore: fallbacks.join("\n") };
   }
-  core.info(`os: ${JSON.stringify(os)}`);
-  core.info(`ghc: ${JSON.stringify(ghc)}`);
-  core.info(`projects: ${JSON.stringify(projects)}`);
-  core.info(`prefix: ${JSON.stringify(prefix)}`);
-
-  prefix = prefix == null ? "" : `${prefix}-`;
-  core.info(`New prefix: ${JSON.stringify(prefix)}`);
-  core.info(`New projects: ${JSON.stringify(projects)}`);
-  const project_hash = await glob.hashFiles(...projects);
-  core.info(`project_hash: ${JSON.stringify(project_hash)}`);
+  const project_hash = await glob.hashFiles("cabal.project", path);
   core.setOutput("project", project_hash);
 
   const package_hash = await glob.hashFiles("**/package.yaml", "**/*.cabal");
-  core.info(`package_hash: ${JSON.stringify(package_hash)}`);
   core.setOutput("package", package_hash);
 
   const source_hash = await glob.hashFiles(
@@ -35,13 +25,13 @@ module.exports = async ({ core, glob, os, ghc, projects, prefix }) => {
   );
   core.setOutput("source", source_hash);
 
-  const store_prefix = `${prefix}store-${os}-${ghc}`;
+  const store_prefix = `store-${os}-${plan}`;
   core.setOutput("store-prefix", store_prefix);
   const store_keys = build_keys([store_prefix, project_hash, package_hash]);
   core.setOutput("store", store_keys.key);
   core.setOutput("store-restore", store_keys.restore);
 
-  const dist_prefix = `${prefix}dist-${os}-${ghc}`;
+  const dist_prefix = `dist-${os}-${plan}`;
   core.setOutput("dist-prefix", dist_prefix);
   const dist_key_comps = [dist_prefix, project_hash, package_hash, source_hash];
   const dist_keys = build_keys(dist_key_comps);

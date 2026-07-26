@@ -59,7 +59,9 @@ module.exports = async ({
     const {
       data: { artifacts },
     } = await github.request(runs[0].artifacts_url);
-    const csvArt = artifacts.find((art) => art.name == `artifacts`);
+    const csvArt = artifacts.find(
+      (art) => art.name == "artifact-ghc-9.12.4"
+    );
     if (csvArt !== undefined) {
       core.info(`Downloading artifact: ${csvArt.id}`);
       const { url } = await github.rest.actions.downloadArtifact({
@@ -81,7 +83,7 @@ module.exports = async ({
       await exec.exec("unzip", [zip_path, "-d", base_art_dir]);
       await exec.exec("tar", [
         "xvf",
-        `${base_art_dir}/artifacts.tar.zst`,
+        `${base_art_dir}/artifact-ghc-9.12.4.tar.zst`,
         `--directory=${base_art_dir}`,
       ]);
 
@@ -90,7 +92,7 @@ module.exports = async ({
       core.info("Running the original benchmark first...");
       // FIXME: Checkout data directory for completeness
       await exec.exec(
-        `${base_art_dir}/artifacts/benchs/${bench_name}`,
+        `${base_art_dir}/artifact-ghc-9.12.4/benchs/${bench_name}`,
         ["-j1", "--csv", base_csv_path, "--svg", base_svg_path],
         { ignoreReturnCode: true }
       );
@@ -112,7 +114,7 @@ module.exports = async ({
   }
 
   const bench_args = ["-j1"];
-  const exe = `./artifacts/benchs/${bench_name}`;
+  const exe = `./artifact-ghc-9.12.4/benchs/${bench_name}`;
   if (base_csv_path !== undefined) {
     exec.exec("head", ["-n", 5, base_csv_path]);
     core.info(`Taking benchmark comparing with ${base_csv_path}`);
