@@ -38,6 +38,7 @@ const gcModes = [
 ];
 const header =
   "case,run,result,gc_mode,allocated_bytes,copied_bytes,max_residency_bytes,mut_elapsed_s,total_elapsed_s\n";
+const pairedRunsPerStratum = 32;
 const rows = { baseline: [], candidate: [] };
 const executables = { baseline: baselineExe, candidate: candidateExe };
 const provenance = JSON.parse(fs.readFileSync(provenancePath, "utf8"));
@@ -118,13 +119,16 @@ function capture(command, args, options = {}) {
   return result.stdout.trim();
 }
 
+const sha256Text = (value) =>
+  crypto.createHash("sha256").update(value).digest("hex");
+
 function validateSource(side) {
   const source = provenance[side];
   if (
     typeof source !== "object" ||
     !/^[0-9a-f]{40}$/.test(source.commit) ||
     !/^[0-9a-f]{40}$/.test(source.tree) ||
-    source.cleanWorktree !== true ||
+    typeof source.cleanWorktree !== "boolean" ||
     typeof source.buildCommand !== "string" ||
     source.buildCommand.length === 0 ||
     typeof source.sourceDirectory !== "string" ||
@@ -147,14 +151,41 @@ function validateSource(side) {
     ["status", "--porcelain=v1", "--untracked-files=all"],
     { cwd: source.sourceDirectory },
   );
-  if (
-    actualCommit !== source.commit ||
-    actualTree !== source.tree ||
-    status.length !== 0
-  ) {
+  if (actualCommit !== source.commit || actualTree !== source.tree) {
     throw new Error(
-      `${side} source checkout does not match its clean commit/tree provenance`,
+      `${side} source checkout does not match its commit/tree provenance`,
     );
+  }
+  if (source.cleanWorktree) {
+    if (status.length !== 0) {
+      throw new Error(`${side} source checkout is not clean`);
+    }
+    return;
+  }
+  const patch = capture("git", ["diff", "--binary", "HEAD"], {
+    cwd: source.sourceDirectory,
+  });
+  if (
+    !/^[0-9a-f]{64}$/.test(source.statusSha256 ?? "") ||
+    !/^[0-9a-f]{64}$/.test(source.patchSha256 ?? "") ||
+    source.statusSha256 !== sha256Text(status) ||
+    source.patchSha256 !== sha256Text(patch) ||
+    typeof source.untrackedFiles !== "object" ||
+    source.untrackedFiles === null
+  ) {
+    throw new Error(`${side} dirty-source provenance does not match`);
+  }
+  for (const [relative, expectedSha256] of Object.entries(
+    source.untrackedFiles,
+  )) {
+    const absolute = path.join(source.sourceDirectory, relative);
+    if (
+      !/^[0-9a-f]{64}$/.test(expectedSha256) ||
+      !fs.existsSync(absolute) ||
+      sha256(absolute) !== expectedSha256
+    ) {
+      throw new Error(`${side} untracked source differs: ${relative}`);
+    }
   }
 }
 
@@ -236,7 +267,7 @@ const manifest = {
     cases,
     collectors: Object.fromEntries(gcModes),
     warmupRunsPerStratum: 1,
-    pairedRunsPerStratum: 21,
+    pairedRunsPerStratum,
     timeoutSecondsPerObservation: 120,
     order:
       "odd runs baseline/candidate; even runs candidate/baseline; fresh process per observation",
@@ -346,7 +377,7 @@ for (const [gcMode, gcFlag] of gcModes) {
     runOne("candidate", input, 0, gcMode, gcFlag);
     rows.baseline.pop();
     rows.candidate.pop();
-    for (let run = 1; run <= 21; run += 1) {
+    for (let run = 1; run <= pairedRunsPerStratum; run += 1) {
       const order =
         run % 2 === 0
           ? ["candidate", "baseline"]
@@ -355,7 +386,9 @@ for (const [gcMode, gcFlag] of gcModes) {
         runOne(side, input, run, gcMode, gcFlag);
       }
       flush();
-      console.log(`${gcMode} ${input} ${run}/21`);
+      console.log(
+        `${gcMode} ${input} ${run}/${pairedRunsPerStratum}`,
+      );
     }
   }
 }

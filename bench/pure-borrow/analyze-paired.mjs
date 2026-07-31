@@ -12,6 +12,7 @@ const bootstrapIterations = 100_000;
 const confidence = 0.95;
 const ucbLimit = 1.02;
 const bootstrapSeed = 20_260_726;
+const pairedRunsPerStratum = 32;
 const expectedColumns = [
   "case",
   "run",
@@ -39,7 +40,10 @@ const expectedResults = new Map([
   ["workspace/tuning-corpus/php-7-6-unsat.cnf", "UNSAT"],
 ]);
 const expectedGcModes = ["nonmoving", "copying"];
-const expectedRuns = Array.from({ length: 21 }, (_, index) => index + 1);
+const expectedRuns = Array.from(
+  { length: pairedRunsPerStratum },
+  (_, index) => index + 1,
+);
 const rowKey = (row) => `${row.case}\0${row.gc_mode}\0${row.run}`;
 const expectedKeys = new Set(
   [...expectedResults.keys()].flatMap((input) =>
@@ -69,7 +73,11 @@ const readCsv = (file, label) => {
       throw new Error(`${label} has an unexpected case: ${row.case}`);
     }
     const run = Number(row.run);
-    if (!Number.isInteger(run) || run < 1 || run > 21) {
+    if (
+      !Number.isInteger(run) ||
+      run < 1 ||
+      run > pairedRunsPerStratum
+    ) {
       throw new Error(`${label} has an invalid run number: ${row.run}`);
     }
     if (row.result !== expectedResult) {
@@ -209,13 +217,34 @@ for (const pair of paired) {
 }
 if (
   strata.size !== 14 ||
-  [...strata.values()].some((rows) => rows.length !== 21)
+  [...strata.values()].some(
+    (rows) => rows.length !== pairedRunsPerStratum,
+  )
 ) {
-  throw new Error("expected 14 case/GC strata with 21 pairs each");
+  throw new Error(
+    `expected 14 case/GC strata with ${pairedRunsPerStratum} pairs each`,
+  );
 }
 
 const numberField = (rows, side, field) =>
   rows.map((row) => Number(row[side][field]));
+const memoryGate = (baselineValues, candidateValues, allowanceBytes) => {
+  const baselineMedian = median(baselineValues);
+  const candidateMedian = median(candidateValues);
+  const baselineMad = mad(baselineValues);
+  const candidateMad = mad(candidateValues);
+  const limit =
+    1.02 * baselineMedian + baselineMad + candidateMad + allowanceBytes;
+  return {
+    baselineMedian,
+    baselineMad,
+    candidateMedian,
+    candidateMad,
+    allowanceBytes,
+    limit,
+    pass: candidateMedian <= limit,
+  };
+};
 const summaries = [...strata.values()].map((rows) => {
   const baselineElapsed = numberField(rows, "baseline", "total_elapsed_s");
   const candidateElapsed = numberField(rows, "candidate", "total_elapsed_s");
@@ -241,6 +270,17 @@ const summaries = [...strata.values()].map((rows) => {
   const candidateMad = mad(candidateElapsed);
   const elapsedLimit =
     1.05 * baselineMedian + baselineMad + candidateMad + 0.001;
+  const allocatedGate = memoryGate(
+    baselineAllocated,
+    candidateAllocated,
+    4096,
+  );
+  const copiedGate = memoryGate(baselineCopied, candidateCopied, 4096);
+  const residencyGate = memoryGate(
+    baselineResidency,
+    candidateResidency,
+    65536,
+  );
   return {
     case: rows[0].case,
     gcMode: rows[0].gcMode,
@@ -267,6 +307,13 @@ const summaries = [...strata.values()].map((rows) => {
     medianResidencyRatio: medianRatio(candidateResidency, baselineResidency),
     elapsedLimitSeconds: elapsedLimit,
     elapsedGatePass: candidateMedian <= elapsedLimit,
+    memoryGates: {
+      allocatedBytes: allocatedGate,
+      copiedBytes: copiedGate,
+      maximumResidencyBytes: residencyGate,
+    },
+    allMemoryGatesPass:
+      allocatedGate.pass && copiedGate.pass && residencyGate.pass,
   };
 });
 
@@ -324,12 +371,13 @@ const aggregates = [
 const report = {
   baselinePath,
   candidatePath,
-  expectedPairs: 294,
+  expectedPairs: expectedKeys.size,
   observedPairs: paired.length,
   bootstrapSeed,
   allResultsMatch: true,
   allPerCaseElapsedGatesPass: summaries.every((row) => row.elapsedGatePass),
   allAggregateUcbGatesPass: aggregates.every((row) => row.ucbGatePass),
+  allMemoryGatesPass: summaries.every((row) => row.allMemoryGatesPass),
   summaries,
   aggregates,
 };
@@ -343,6 +391,7 @@ const markdown = [
   `- Results matched: ${report.allResultsMatch}`,
   `- Per-case elapsed gates: ${summaries.filter((row) => row.elapsedGatePass).length}/${summaries.length}`,
   `- Aggregate UCB gates: ${aggregates.filter((row) => row.ucbGatePass).length}/${aggregates.length}`,
+  `- Memory gates: ${summaries.filter((row) => row.allMemoryGatesPass).length}/${summaries.length} strata pass all three`,
   "",
   "| Aggregate | Pairs | Geomean ratio | 95% UCB | Limit | Pass |",
   "| --- | ---: | ---: | ---: | ---: | :---: |",
@@ -356,6 +405,13 @@ const markdown = [
   ...summaries.map(
     (row) =>
       `| ${row.case} | ${row.gcMode} | ${format(row.medianAllocationRatio)} | ${format(row.medianCopiedRatio)} | ${format(row.medianResidencyRatio)} | ${format(row.medianMutationTimeRatio)} | ${format(row.baselineMedianMutationSeconds, 3)} | ${format(row.candidateMedianMutationSeconds, 3)} | ${format(row.pairedElapsedGeometricMeanRatio)} | ${format(row.baselineMedianElapsedSeconds, 3)} | ${format(row.candidateMedianElapsedSeconds, 3)} | ${row.elapsedGatePass ? "yes" : "no"} |`,
+  ),
+  "",
+  "| Case | GC | Allocated median / limit (bytes) | Copied median / limit (bytes) | Residency median / limit (bytes) | Pass |",
+  "| --- | --- | ---: | ---: | ---: | :---: |",
+  ...summaries.map(
+    (row) =>
+      `| ${row.case} | ${row.gcMode} | ${format(row.memoryGates.allocatedBytes.candidateMedian, 0)} / ${format(row.memoryGates.allocatedBytes.limit, 0)} | ${format(row.memoryGates.copiedBytes.candidateMedian, 0)} / ${format(row.memoryGates.copiedBytes.limit, 0)} | ${format(row.memoryGates.maximumResidencyBytes.candidateMedian, 0)} / ${format(row.memoryGates.maximumResidencyBytes.limit, 0)} | ${row.allMemoryGatesPass ? "yes" : "no"} |`,
   ),
   "",
   `UCB method: ${aggregates[0].bootstrapMethod}; seed ${bootstrapSeed}; ${bootstrapIterations} deterministic resamples.`,

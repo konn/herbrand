@@ -109,7 +109,7 @@ fs.writeFileSync(jsonPath, `${JSON.stringify(report, null, 2)}\n`);
 const markdown = [
   "# Focused production-control comparison",
   "",
-  "Diagnostic only; the 294-pair whole-solver campaign is the acceptance benchmark.",
+  "Diagnostic only; the 448-pair whole-solver campaign is the acceptance benchmark.",
   "",
   "| workload | baseline median | candidate median | paired candidate/baseline geomean |",
   "| --- | ---: | ---: | ---: |",

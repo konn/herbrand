@@ -7,10 +7,13 @@
 
 module Main (main) where
 
+import CdfMultiStoreScan qualified as MultiStore
+import Control.Exception (SomeException, displayException, evaluate, try)
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
 import Control.Syntax.DataFlow qualified as DataFlow
 import Data.Array.Mutable.Linear.Unboxed.Borrow.Internal qualified as Fixed
+import Data.List (isInfixOf)
 import Data.Vector qualified as V
 import Data.Vector.Mutable.Linear.Boxed.Borrow.Internal qualified as Boxed
 import Data.Vector.Mutable.Linear.Unboxed.Borrow.Internal qualified as Grow
@@ -19,7 +22,7 @@ import Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Propagation.Internal qu
 import Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Store.Internal qualified as Store
 import Prelude.Linear
 import Test.Tasty (defaultMain, testGroup)
-import Test.Tasty.HUnit (testCase, (@?=))
+import Test.Tasty.HUnit (assertBool, testCase, (@?=))
 import Prelude qualified as NonLinear
 
 main :: NonLinear.IO ()
@@ -30,6 +33,69 @@ main =
       [ testCase "fixed write/read/reclaim" $
           fixedRoundTrip
             @?= (17, U.fromList [0, 17, 0])
+      , testCase "cdf direct control preserves the frozen evidence" $
+          let !evidence =
+                MultiStore.directEvidenceRoot MultiStore.standardInput
+              !output = MultiStore.evidenceOutput evidence
+           in ( MultiStore.evidenceVisitedIndices evidence
+              , V.length (MultiStore.evidenceEvents evidence)
+              , MultiStore.evidenceEventDigest evidence
+              , MultiStore.evidenceElementReads evidence
+              , MultiStore.evidenceElementWrites evidence
+              , MultiStore.evidenceHeaderReads evidence
+              , MultiStore.evidenceValidationReads evidence
+              , MultiStore.outputDigest output
+              )
+                @?= ( U.fromList [0 .. 4095]
+                    , 26318
+                    , -6999049615496738955
+                    , 24576
+                    , 1742
+                    , 3
+                    , 8198
+                    , 7192365686207673759
+                    )
+      , testCase "cdf multi-store transactions match the direct root" $
+          let !direct = MultiStore.directRoot MultiStore.standardInput
+           in ( MultiStore.directHeaderMatchedRoot MultiStore.standardInput
+              , MultiStore.pureBorrowDirectRoot MultiStore.standardInput
+              , MultiStore.pureBorrowNestedRoot MultiStore.standardInput
+              , MultiStore.pureBorrowUnrestrictedDirectRoot
+                  MultiStore.standardInput
+              , MultiStore.pureBorrowUnrestrictedNestedRoot
+                  MultiStore.standardInput
+              )
+                @?= (direct, direct, direct, direct, direct)
+      , testCase "cdf multi-store transactions preserve the exact trajectory" $
+          let !direct =
+                MultiStore.directEvidenceRoot MultiStore.standardInput
+              !output = MultiStore.evidenceOutput direct
+              !marksDigest =
+                MultiStore.outputVectorDigest
+                  (MultiStore.outputMarks output)
+              !scoresDigest =
+                MultiStore.outputVectorDigest
+                  (MultiStore.outputScores output)
+           in ( MultiStore.pureBorrowDirectEvidenceRoot
+                  MultiStore.standardInput
+              , MultiStore.pureBorrowNestedEvidenceRoot
+                  MultiStore.standardInput
+              , MultiStore.pureBorrowUnrestrictedDirectEvidenceRoot
+                  MultiStore.standardInput
+              , MultiStore.pureBorrowUnrestrictedNestedEvidenceRoot
+                  MultiStore.standardInput
+              , marksDigest
+              , scoresDigest
+              )
+                @?= ( direct
+                    , direct
+                    , direct
+                    , direct
+                    , -5655863917889937928
+                    , -1217547283655932101
+                    )
+      , testCase "cdf multi-store roots reject invalid input" $
+          assertInvalidMultiStoreInputs
       , testCase "unboxed forced growth preserves prefix" $
           growRoundTrip
             @?= U.fromList [0 .. 127]
@@ -38,7 +104,7 @@ main =
             @?= V.fromList [0 .. 127]
       , testCase "one pin spans a long no-growth write/read loop" $
           pinnedRoundTrip
-            @?= (128, 256, 142, U.fromList [16 .. 143])
+            @?= (256, 256, 142, U.fromList [16 .. 271])
       , testCase "optimized allocations remain distinct" $
           distinctRoundTrip
             @?= (U.singleton 11, U.singleton 22)
@@ -70,6 +136,44 @@ main =
             assertionConflictSeed
             @?= assertionConflictExpected
       ]
+
+assertInvalidMultiStoreInputs :: NonLinear.IO ()
+assertInvalidMultiStoreInputs = do
+  let standard = MultiStore.standardInput
+      expectedDiagnostic =
+        "multi-store scan requires six 4096-element vectors, in-range next indices, and zero links"
+      invalidInputs =
+        [ standard {MultiStore.inputNext = U.replicate 4095 0}
+        , standard {MultiStore.inputWeight = U.replicate 4097 0}
+        , standard {MultiStore.inputMark = U.replicate 4095 0}
+        , standard {MultiStore.inputPayload = V.replicate 4097 (0, 0)}
+        , standard {MultiStore.inputScore = U.replicate 4095 0}
+        , standard {MultiStore.inputLink = U.replicate 4097 0}
+        , standard {MultiStore.inputNext = U.replicate 4096 (-1)}
+        , standard {MultiStore.inputNext = U.replicate 4096 4096}
+        , standard {MultiStore.inputLink = U.replicate 4096 1}
+        ]
+  NonLinear.mapM_
+    ( \root ->
+        NonLinear.mapM_
+          ( \input -> do
+              outcome <- try @SomeException (evaluate (root input))
+              case outcome of
+                NonLinear.Left exception ->
+                  let !diagnostic = displayException exception
+                   in assertBool
+                        ( "unexpected invalid-input diagnostic: "
+                            <> diagnostic
+                        )
+                        (expectedDiagnostic `isInfixOf` diagnostic)
+                NonLinear.Right _ ->
+                  NonLinear.error "invalid multi-store input was accepted"
+          )
+          invalidInputs
+    )
+    [ MultiStore.pureBorrowUnrestrictedDirectRoot
+    , MultiStore.pureBorrowUnrestrictedNestedRoot
+    ]
 
 fixedRoundTrip :: (Int, U.Vector Int)
 fixedRoundTrip =
@@ -181,10 +285,8 @@ pinnedRoundTrip =
           Grow.withPinned
             ( \initialPinned -> Control.do
                 modifiedPinned <- modifyPinned 0 initialPinned
-                let %1 !truncatedPinned =
-                      Grow.pinnedTruncate 128 modifiedPinned
                 let %1 !(Ur logicalSize, sizedPinned) =
-                      Grow.pinnedSize truncatedPinned
+                      Grow.pinnedSize modifiedPinned
                 let %1 !(Ur capacity, capacityPinned) =
                       Grow.pinnedCapacity sizedPinned
                 (Ur observed, finalPinned) <-
@@ -206,8 +308,8 @@ pinnedRoundTrip =
 
 modifyPinned ::
   Int ->
-  Grow.Pinned pin Int %1 ->
-  BO scope (Grow.Pinned pin Int)
+  Grow.Pinned α Int %1 ->
+  BO α (Grow.Pinned α Int)
 modifyPinned iteration pinned
   | iteration == 4096 = Control.pure pinned
   | otherwise = Control.do

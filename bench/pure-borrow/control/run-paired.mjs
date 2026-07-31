@@ -311,9 +311,27 @@ function runOne(side, run) {
 
 writeManifest();
 try {
-  for (const side of ["baseline", "candidate"]) {
-    capture(verifiers[side], [], { timeout: 120_000 });
+  const verifierOutputs = Object.fromEntries(
+    ["baseline", "candidate"].map((side) => [
+      side,
+      capture(verifiers[side], [], { timeout: 120_000 }),
+    ]),
+  );
+  if (verifierOutputs.baseline !== verifierOutputs.candidate) {
+    throw new Error(
+      `baseline and candidate trajectory transcripts differ:\n--- baseline ---\n${verifierOutputs.baseline}\n--- candidate ---\n${verifierOutputs.candidate}`,
+    );
   }
+  manifest.verifierOutputs = Object.fromEntries(
+    Object.entries(verifierOutputs).map(([side, output]) => [
+      side,
+      {
+        stdout: output,
+        sha256: crypto.createHash("sha256").update(output).digest("hex"),
+      },
+    ]),
+  );
+  writeManifest();
   for (let run = 1; run <= repetitions; run += 1) {
     const order =
       run % 2 === 0

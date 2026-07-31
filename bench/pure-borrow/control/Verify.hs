@@ -9,11 +9,13 @@ import Workloads (learnedInsertionCNF, propagationCNF)
 
 main :: IO ()
 main = do
-  verifyRootPropagation
-  verifyConflictAnalysis
+  rootStats <- verifyRootPropagation
+  analysisStats <- verifyConflictAnalysis
+  putStrLn $ "root-propagation stats: " <> show rootStats
+  putStrLn $ "analysis-insertion stats: " <> show analysisStats
   putStrLn "production-control trajectory verification passed"
 
-verifyRootPropagation :: IO ()
+verifyRootPropagation :: IO SolverStats
 verifyRootPropagation =
   case CDCL.solveVarIdWithStats CDCL.defaultOptions propagationCNF of
     (Unsat, stats)
@@ -22,13 +24,13 @@ verifyRootPropagation =
       , analysisRootConflictCount stats > 0
       , analysisLearnedLiteralCount stats == 0
       , ordinaryBacktrackCount stats == 0 ->
-          pure ()
+          pure stats
       | otherwise ->
           error $ "root-propagation stats do not prove the expected path: " <> show stats
     (Satisfiable _, _) ->
       error "root-propagation control unexpectedly returned SAT"
 
-verifyConflictAnalysis :: IO ()
+verifyConflictAnalysis :: IO SolverStats
 verifyConflictAnalysis =
   case CDCL.solveVarIdWithStats CDCL.defaultOptions learnedInsertionCNF of
     (Unsat, stats)
@@ -36,7 +38,7 @@ verifyConflictAnalysis =
       , analysisCount stats > 0
       , analysisLearnedLiteralCount stats > 0
       , ordinaryBacktrackCount stats > 0 ->
-          pure ()
+          pure stats
       | otherwise ->
           error $ "PHP stats do not prove conflict analysis and learning: " <> show stats
     (Satisfiable _, _) ->

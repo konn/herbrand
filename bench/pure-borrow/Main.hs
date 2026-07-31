@@ -6,6 +6,7 @@
 
 module Main (main) where
 
+import CdfMultiStoreScan qualified as MultiStore
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
 import Control.Syntax.DataFlow qualified as DataFlow
@@ -26,7 +27,19 @@ import Prelude qualified as NonLinear
 main :: NonLinear.IO ()
 main =
   defaultMain
-    [ bench "direct-io-watch-kernel/4096" $
+    [ bench "multi-store-scan/direct/4096" $
+        nf MultiStore.directRoot MultiStore.standardInput
+    , bench "multi-store-scan/direct-header-matched/4096" $
+        nf MultiStore.directHeaderMatchedRoot MultiStore.standardInput
+    , bench "multi-store-scan/pure-borrow-direct/4096" $
+        nf MultiStore.pureBorrowDirectRoot MultiStore.standardInput
+    , bench "multi-store-scan/pure-borrow-nested/4096" $
+        nf MultiStore.pureBorrowNestedRoot MultiStore.standardInput
+    , bench "multi-store-scan/pure-borrow-unrestricted-direct/4096" $
+        nf MultiStore.pureBorrowUnrestrictedDirectRoot MultiStore.standardInput
+    , bench "multi-store-scan/pure-borrow-unrestricted-nested/4096" $
+        nf MultiStore.pureBorrowUnrestrictedNestedRoot MultiStore.standardInput
+    , bench "direct-io-watch-kernel/4096" $
         nf baselineWatchCount 4096
     , bench "legacy-linear-watch-kernel/4096" $
         nf legacyWatchCount 4096

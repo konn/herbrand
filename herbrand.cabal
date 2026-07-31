@@ -323,6 +323,7 @@ test-suite herbrand-pure-borrow-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
+    CdfMultiStoreScan
     Data.Array.Mutable.Linear.Unboxed.Borrow.Internal
     Data.Vector.Mutable.Linear.Boxed.Borrow.Internal
     Data.Vector.Mutable.Linear.Unboxed.Borrow.Internal
@@ -330,6 +331,7 @@ test-suite herbrand-pure-borrow-test
     Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Store.Internal
 
   hs-source-dirs:
+    bench/pure-borrow
     test-pure-borrow
     src
 
@@ -337,6 +339,7 @@ test-suite herbrand-pure-borrow-test
     -O2
 
   build-depends:
+    deepseq,
     linear-base,
     pure-borrow ==0.0.0.0,
     tasty,
@@ -348,6 +351,7 @@ benchmark herbrand-pure-borrow-spike-bench
   type: exitcode-stdio-1.0
   main-is: Main.hs
   other-modules:
+    CdfMultiStoreScan
     Data.Array.Mutable.Linear.Unboxed.Borrow.Internal
     Data.Vector.Mutable.Linear.Boxed.Borrow.Internal
     Data.Vector.Mutable.Linear.Unboxed.Borrow.Internal
@@ -362,6 +366,7 @@ benchmark herbrand-pure-borrow-spike-bench
     -O2
 
   build-depends:
+    deepseq,
     linear-array-extra,
     linear-base,
     linear-witness,

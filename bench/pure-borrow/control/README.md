@@ -42,5 +42,5 @@ reports paired candidate/baseline geometric-mean ratios. This focused result is
 diagnostic and has no independent acceptance threshold.
 
 These controls diagnose where whole-solver performance changes occur. The
-seven-case, two-GC, 294-pair `cdcl-dry` campaign remains the acceptance
+seven-case, two-GC, 448-pair `cdcl-dry` campaign remains the acceptance
 benchmark.
