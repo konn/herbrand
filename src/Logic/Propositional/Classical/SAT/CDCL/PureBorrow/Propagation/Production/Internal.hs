@@ -49,36 +49,36 @@ propagateFrom meta start =
   withPropagationTransaction (propagationWorker meta start)
 
 -- All hot stores stay pinned for one propagation transaction.
-data KernelStores headsPin tailsPin valuationPin trailPin literalsPin bodiesPin nextsPin s where
+data KernelStores α s where
   KernelStores ::
     VSIDSState s %1 ->
-    Fixed.Pinned headsPin Int %1 ->
-    Fixed.Pinned tailsPin Int %1 ->
-    Fixed.Pinned valuationPin Variable %1 ->
-    Fixed.Pinned trailPin Lit %1 ->
-    Boxed.PinnedBuffer literalsPin (Ur (U.Vector Lit)) %1 ->
-    Grow.PinnedBuffer bodiesPin ClauseBody %1 ->
-    Grow.PinnedBuffer nextsPin Int %1 ->
-    KernelStores headsPin tailsPin valuationPin trailPin literalsPin bodiesPin nextsPin s
+    Fixed.Pinned α Int %1 ->
+    Fixed.Pinned α Int %1 ->
+    Fixed.Pinned α Variable %1 ->
+    Fixed.Pinned α Lit %1 ->
+    Boxed.PinnedBuffer α (Ur (U.Vector Lit)) %1 ->
+    Grow.PinnedBuffer α ClauseBody %1 ->
+    Grow.PinnedBuffer α Int %1 ->
+    KernelStores α s
 
 withPropagationTransaction ::
-  ( forall local headsPin tailsPin valuationPin trailPin literalsPin bodiesPin nextsPin.
+  ( forall local.
     control %1 ->
-    KernelStores headsPin tailsPin valuationPin trailPin literalsPin bodiesPin nextsPin s %1 ->
+    KernelStores local s %1 ->
     BO
       local
       ( result
       , control
-      , KernelStores headsPin tailsPin valuationPin trailPin literalsPin bodiesPin nextsPin s
+      , KernelStores local s
       )
   ) %1 ->
   control %1 ->
-  Mut lifetime (Runtime.CDCLStore s) %1 ->
+  Mut α (Runtime.CDCLStore s) %1 ->
   BO
-    lifetime
+    α
     ( result
     , control
-    , Mut lifetime (Runtime.CDCLStore s)
+    , Mut α (Runtime.CDCLStore s)
     )
 {-# INLINE withPropagationTransaction #-}
 withPropagationTransaction worker control store = Control.do
@@ -103,300 +103,60 @@ withPropagationTransaction worker control store = Control.do
               .@ ( Runtime.clauseLiteralsField
                  , Runtime.clauseBodiesField
                  )
-      ( ( result
-          , finalControl
-          , watchHeads
-          , watchTails
-          , valuation
-          , trail
-          , clauseLiterals
-          , clauseBodies
-          , watchNexts
-          )
-        , vsids
-        ) <-
-        RefBorrow.update
-          ( \vsidsState -> Control.do
-              ( ( result
-                  , finalControl
-                  , vsidsState
-                  , watchHeads
-                  , watchTails
-                  , valuation
-                  , trail
-                  )
-                , (clauseLiterals, clauseBodies, watchNexts)
-                ) <-
-                withPinnedStores
-                  ( \literalsPinned bodiesPinned nextsPinned -> Control.do
-                      ( ( result
-                          , finalControl
-                          , vsidsState
-                          , literalsPinned
-                          , bodiesPinned
-                          , nextsPinned
-                          )
-                        , (watchHeads, watchTails, valuation, trail)
-                        ) <-
-                        withPinnedFixedStores
-                          ( \headsPinned tailsPinned valuationPinned trailPinned -> Control.do
-                              ( result
-                                , finalControl
-                                , KernelStores
-                                    vsidsState
-                                    headsPinned
-                                    tailsPinned
-                                    valuationPinned
-                                    trailPinned
-                                    literalsPinned
-                                    bodiesPinned
-                                    nextsPinned
-                                ) <-
-                                worker
-                                  control
-                                  ( KernelStores
-                                      vsidsState
-                                      headsPinned
-                                      tailsPinned
-                                      valuationPinned
-                                      trailPinned
-                                      literalsPinned
-                                      bodiesPinned
-                                      nextsPinned
-                                  )
-                              Control.pure
-                                (
-                                  ( result
-                                  , finalControl
-                                  , vsidsState
-                                  , literalsPinned
-                                  , bodiesPinned
-                                  , nextsPinned
-                                  )
-                                ,
-                                  ( headsPinned
-                                  , tailsPinned
-                                  , valuationPinned
-                                  , trailPinned
-                                  )
-                                )
-                          )
-                          watchHeads
-                          watchTails
-                          valuation
-                          trail
-                      Control.pure
-                        (
-                          ( result
-                          , finalControl
-                          , vsidsState
-                          , watchHeads
-                          , watchTails
-                          , valuation
-                          , trail
-                          )
-                        , (literalsPinned, bodiesPinned, nextsPinned)
+      Boxed.getContents clauseLiterals & \literalContents ->
+        Grow.getContents clauseBodies & \bodyContents ->
+          Grow.getContents watchNexts & \nextContents -> Control.do
+            ((result, finalControl), vsids) <-
+              RefBorrow.update
+                ( \vsidsState -> Control.do
+                    ( result
+                      , finalControl
+                      , KernelStores
+                          vsidsState
+                          (Fixed.Pinned watchHeads)
+                          (Fixed.Pinned watchTails)
+                          (Fixed.Pinned valuation)
+                          (Fixed.Pinned trail)
+                          (Boxed.PinnedBuffer literalContents)
+                          (Grow.PinnedBuffer bodyContents)
+                          (Grow.PinnedBuffer nextContents)
+                      ) <-
+                      worker
+                        control
+                        ( KernelStores
+                            vsidsState
+                            (Fixed.Pinned watchHeads)
+                            (Fixed.Pinned watchTails)
+                            (Fixed.Pinned valuation)
+                            (Fixed.Pinned trail)
+                            (Boxed.PinnedBuffer literalContents)
+                            (Grow.PinnedBuffer bodyContents)
+                            (Grow.PinnedBuffer nextContents)
                         )
-                  )
-                  clauseLiterals
-                  clauseBodies
-                  watchNexts
-              Control.pure
-                (
-                  ( result
-                  , finalControl
-                  , watchHeads
-                  , watchTails
-                  , valuation
-                  , trail
-                  , clauseLiterals
-                  , clauseBodies
-                  , watchNexts
-                  )
-                , vsidsState
+                    let !(Ur _) = share watchHeads
+                    let !(Ur _) = share watchTails
+                    let !(Ur _) = share valuation
+                    let !(Ur _) = share trail
+                    let !(Ur _) = share literalContents
+                    let !(Ur _) = share bodyContents
+                    let !(Ur _) = share nextContents
+                    Control.pure ((result, finalControl), vsidsState)
                 )
-          )
-          vsids
-      let !(Ur _) = share watchHeads
-      let !(Ur _) = share watchTails
-      let !(Ur _) = share valuation
-      let !(Ur _) = share trail
-      let !(Ur _) = share clauseLiterals
-      let !(Ur _) = share clauseBodies
-      let !(Ur _) = share watchNexts
-      let !(Ur _) = share vsids
-      Control.pure (result, finalControl)
+                vsids
+            let !(Ur _) = share vsids
+            Control.pure (result, finalControl)
   Control.pure (result, finalControl, store)
-
-withPinnedFixedStores ::
-  (lifetime >= scope) =>
-  ( forall headsPin tailsPin valuationPin trailPin.
-    Fixed.Pinned headsPin Int %1 ->
-    Fixed.Pinned tailsPin Int %1 ->
-    Fixed.Pinned valuationPin Variable %1 ->
-    Fixed.Pinned trailPin Lit %1 ->
-    BO
-      scope
-      ( result
-      , ( Fixed.Pinned headsPin Int
-        , Fixed.Pinned tailsPin Int
-        , Fixed.Pinned valuationPin Variable
-        , Fixed.Pinned trailPin Lit
-        )
-      )
-  ) %1 ->
-  Mut lifetime (Fixed.UArray Int) %1 ->
-  Mut lifetime (Fixed.UArray Int) %1 ->
-  Mut lifetime (Fixed.UArray Variable) %1 ->
-  Mut lifetime (Fixed.UArray Lit) %1 ->
-  BO
-    scope
-    ( result
-    , ( Mut lifetime (Fixed.UArray Int)
-      , Mut lifetime (Fixed.UArray Int)
-      , Mut lifetime (Fixed.UArray Variable)
-      , Mut lifetime (Fixed.UArray Lit)
-      )
-    )
-{-# INLINE withPinnedFixedStores #-}
-withPinnedFixedStores action heads tails valuation trail = Control.do
-  ((result, tails, valuation, trail), heads) <-
-    Fixed.withPinned
-      ( \headsPinned -> Control.do
-          ((result, headsPinned, valuation, trail), tails) <-
-            Fixed.withPinned
-              ( \tailsPinned -> Control.do
-                  ((result, headsPinned, tailsPinned, trail), valuation) <-
-                    Fixed.withPinned
-                      ( \valuationPinned -> Control.do
-                          ((result, headsPinned, tailsPinned, valuationPinned), trail) <-
-                            Fixed.withPinned
-                              ( \trailPinned -> Control.do
-                                  ( result
-                                    , ( headsPinned
-                                        , tailsPinned
-                                        , valuationPinned
-                                        , trailPinned
-                                        )
-                                    ) <-
-                                    action
-                                      headsPinned
-                                      tailsPinned
-                                      valuationPinned
-                                      trailPinned
-                                  Control.pure
-                                    (
-                                      ( result
-                                      , headsPinned
-                                      , tailsPinned
-                                      , valuationPinned
-                                      )
-                                    , trailPinned
-                                    )
-                              )
-                              trail
-                          Control.pure
-                            (
-                              ( result
-                              , headsPinned
-                              , tailsPinned
-                              , trail
-                              )
-                            , valuationPinned
-                            )
-                      )
-                      valuation
-                  Control.pure
-                    ( (result, headsPinned, valuation, trail)
-                    , tailsPinned
-                    )
-              )
-              tails
-          Control.pure
-            ( (result, tails, valuation, trail)
-            , headsPinned
-            )
-      )
-      heads
-  Control.pure (result, (heads, tails, valuation, trail))
-
-withPinnedStores ::
-  (lifetime >= scope) =>
-  ( forall literalsPin bodiesPin nextsPin.
-    Boxed.PinnedBuffer literalsPin (Ur (U.Vector Lit)) %1 ->
-    Grow.PinnedBuffer bodiesPin ClauseBody %1 ->
-    Grow.PinnedBuffer nextsPin Int %1 ->
-    BO
-      scope
-      ( result
-      , ( Boxed.PinnedBuffer literalsPin (Ur (U.Vector Lit))
-        , Grow.PinnedBuffer bodiesPin ClauseBody
-        , Grow.PinnedBuffer nextsPin Int
-        )
-      )
-  ) %1 ->
-  Mut lifetime (Boxed.Vector (Ur (U.Vector Lit))) %1 ->
-  Mut lifetime (Grow.Vector ClauseBody) %1 ->
-  Mut lifetime (Grow.Vector Int) %1 ->
-  BO
-    scope
-    ( result
-    , ( Mut lifetime (Boxed.Vector (Ur (U.Vector Lit)))
-      , Mut lifetime (Grow.Vector ClauseBody)
-      , Mut lifetime (Grow.Vector Int)
-      )
-    )
-{-# INLINE withPinnedStores #-}
-withPinnedStores action literals bodies nexts = Control.do
-  ((result, bodies, nexts), literals) <-
-    Boxed.withPinnedBuffer
-      ( \_ literalsPinned -> Control.do
-          ((result, literalsPinned, nexts), bodies) <-
-            Grow.withPinnedBuffer
-              ( \_ bodiesPinned -> Control.do
-                  ((result, literalsPinned, bodiesPinned), nexts) <-
-                    Grow.withPinnedBuffer
-                      ( \_ nextsPinned -> Control.do
-                          ( result
-                            , ( literalsPinned
-                                , bodiesPinned
-                                , nextsPinned
-                                )
-                            ) <-
-                            action
-                              literalsPinned
-                              bodiesPinned
-                              nextsPinned
-                          Control.pure
-                            ( (result, literalsPinned, bodiesPinned)
-                            , nextsPinned
-                            )
-                      )
-                      nexts
-                  Control.pure
-                    ( (result, literalsPinned, nexts)
-                    , bodiesPinned
-                    )
-              )
-              bodies
-          Control.pure
-            ( (result, bodies, nexts)
-            , literalsPinned
-            )
-      )
-      literals
-  Control.pure (result, (literals, bodies, nexts))
 
 propagationWorker ::
   Runtime.SolverMeta ->
   PropagationStart ->
   SolverControl.SolverControl %1 ->
-  KernelStores headsPin tailsPin valuationPin trailPin literalsPin bodiesPin nextsPin s %1 ->
+  KernelStores α s %1 ->
   BO
-    scope
+    α
     ( Ur PropResult
     , SolverControl.SolverControl
-    , KernelStores headsPin tailsPin valuationPin trailPin literalsPin bodiesPin nextsPin s
+    , KernelStores α s
     )
 {-# INLINE propagationWorker #-}
 propagationWorker meta start control stores =
@@ -428,12 +188,12 @@ seedRootUnits ::
   Runtime.SolverMeta ->
   Int ->
   SolverControl.SolverControl %1 ->
-  KernelStores headsPin tailsPin valuationPin trailPin literalsPin bodiesPin nextsPin s %1 ->
+  KernelStores α s %1 ->
   BO
-    scope
+    α
     ( Ur PropResult
     , SolverControl.SolverControl
-    , KernelStores headsPin tailsPin valuationPin trailPin literalsPin bodiesPin nextsPin s
+    , KernelStores α s
     )
 {-# INLINE seedRootUnits #-}
 seedRootUnits meta !clauseIndex control stores =
@@ -549,12 +309,12 @@ enqueueLiteral ::
   ClauseId ->
   Lit ->
   SolverControl.SolverControl %1 ->
-  KernelStores headsPin tailsPin valuationPin trailPin literalsPin bodiesPin nextsPin s %1 ->
+  KernelStores α s %1 ->
   BO
-    scope
+    α
     ( Ur AssertionResult
     , SolverControl.SolverControl
-    , KernelStores headsPin tailsPin valuationPin trailPin literalsPin bodiesPin nextsPin s
+    , KernelStores α s
     )
 {-# INLINE enqueueLiteral #-}
 enqueueLiteral
@@ -632,28 +392,28 @@ enqueueLiteral
                   nexts
               )
 
-type KernelResult result headsPin tailsPin valuationPin trailPin literalsPin bodiesPin nextsPin s =
+type KernelResult result α s =
   ( Ur result
   , SolverControl.SolverControl
   , VSIDSState s
-  , Fixed.Pinned headsPin Int
-  , Fixed.Pinned tailsPin Int
-  , Fixed.Pinned valuationPin Variable
-  , Fixed.Pinned trailPin Lit
-  , Boxed.PinnedBuffer literalsPin (Ur (U.Vector Lit))
-  , Grow.PinnedBuffer bodiesPin ClauseBody
-  , Grow.PinnedBuffer nextsPin Int
+  , Fixed.Pinned α Int
+  , Fixed.Pinned α Int
+  , Fixed.Pinned α Variable
+  , Fixed.Pinned α Lit
+  , Boxed.PinnedBuffer α (Ur (U.Vector Lit))
+  , Grow.PinnedBuffer α ClauseBody
+  , Grow.PinnedBuffer α Int
   )
 
 drainTrail ::
   Runtime.SolverMeta ->
   SolverControl.SolverControl %1 ->
-  KernelStores headsPin tailsPin valuationPin trailPin literalsPin bodiesPin nextsPin s %1 ->
+  KernelStores α s %1 ->
   BO
-    scope
+    α
     ( Ur PropResult
     , SolverControl.SolverControl
-    , KernelStores headsPin tailsPin valuationPin trailPin literalsPin bodiesPin nextsPin s
+    , KernelStores α s
     )
 {-# INLINE drainTrail #-}
 drainTrail
@@ -700,16 +460,16 @@ drainTrailRaw ::
   Runtime.SolverMeta ->
   SolverControl.SolverControl %1 ->
   VSIDSState s %1 ->
-  Fixed.Pinned headsPin Int %1 ->
-  Fixed.Pinned tailsPin Int %1 ->
-  Fixed.Pinned valuationPin Variable %1 ->
-  Fixed.Pinned trailPin Lit %1 ->
-  Boxed.PinnedBuffer literalsPin (Ur (U.Vector Lit)) %1 ->
-  Grow.PinnedBuffer bodiesPin ClauseBody %1 ->
-  Grow.PinnedBuffer nextsPin Int %1 ->
+  Fixed.Pinned α Int %1 ->
+  Fixed.Pinned α Int %1 ->
+  Fixed.Pinned α Variable %1 ->
+  Fixed.Pinned α Lit %1 ->
+  Boxed.PinnedBuffer α (Ur (U.Vector Lit)) %1 ->
+  Grow.PinnedBuffer α ClauseBody %1 ->
+  Grow.PinnedBuffer α Int %1 ->
   BO
-    scope
-    (KernelResult PropResult headsPin tailsPin valuationPin trailPin literalsPin bodiesPin nextsPin s)
+    α
+    (KernelResult PropResult α s)
 {-# INLINE drainTrailRaw #-}
 drainTrailRaw meta control vsids heads tails valuation trail literals bodies nexts =
   case SolverControl.propagationCursor control of
@@ -768,16 +528,16 @@ processOccurrencesRaw ::
   Int ->
   SolverControl.SolverControl %1 ->
   VSIDSState s %1 ->
-  Fixed.Pinned headsPin Int %1 ->
-  Fixed.Pinned tailsPin Int %1 ->
-  Fixed.Pinned valuationPin Variable %1 ->
-  Fixed.Pinned trailPin Lit %1 ->
-  Boxed.PinnedBuffer literalsPin (Ur (U.Vector Lit)) %1 ->
-  Grow.PinnedBuffer bodiesPin ClauseBody %1 ->
-  Grow.PinnedBuffer nextsPin Int %1 ->
+  Fixed.Pinned α Int %1 ->
+  Fixed.Pinned α Int %1 ->
+  Fixed.Pinned α Variable %1 ->
+  Fixed.Pinned α Lit %1 ->
+  Boxed.PinnedBuffer α (Ur (U.Vector Lit)) %1 ->
+  Grow.PinnedBuffer α ClauseBody %1 ->
+  Grow.PinnedBuffer α Int %1 ->
   BO
-    scope
-    (KernelResult PropResult headsPin tailsPin valuationPin trailPin literalsPin bodiesPin nextsPin s)
+    α
+    (KernelResult PropResult α s)
 {-# INLINE processOccurrencesRaw #-}
 processOccurrencesRaw meta falseLiteral !occurrence control vsids heads tails valuation trail literals bodies nexts =
   Control.do
@@ -911,14 +671,14 @@ applyKernelDelta (Kernel.KernelDelta visitedOccurrences movedWatches inspectedLi
 appendOccurrence ::
   Lit ->
   Int ->
-  Fixed.Pinned headsPin Int %1 ->
-  Fixed.Pinned tailsPin Int %1 ->
-  Grow.PinnedBuffer nextsPin Int %1 ->
+  Fixed.Pinned α Int %1 ->
+  Fixed.Pinned α Int %1 ->
+  Grow.PinnedBuffer α Int %1 ->
   BO
-    scope
-    ( Fixed.Pinned headsPin Int
-    , Fixed.Pinned tailsPin Int
-    , Grow.PinnedBuffer nextsPin Int
+    α
+    ( Fixed.Pinned α Int
+    , Fixed.Pinned α Int
+    , Grow.PinnedBuffer α Int
     )
 {-# INLINE appendOccurrence #-}
 appendOccurrence literal occurrence heads tails nexts = Control.do
@@ -941,14 +701,14 @@ appendOccurrence literal occurrence heads tails nexts = Control.do
 restoreOccurrenceChain ::
   Lit ->
   Int ->
-  Fixed.Pinned headsPin Int %1 ->
-  Fixed.Pinned tailsPin Int %1 ->
-  Grow.PinnedBuffer nextsPin Int %1 ->
+  Fixed.Pinned α Int %1 ->
+  Fixed.Pinned α Int %1 ->
+  Grow.PinnedBuffer α Int %1 ->
   BO
-    scope
-    ( Fixed.Pinned headsPin Int
-    , Fixed.Pinned tailsPin Int
-    , Grow.PinnedBuffer nextsPin Int
+    α
+    ( Fixed.Pinned α Int
+    , Fixed.Pinned α Int
+    , Grow.PinnedBuffer α Int
     )
 {-# INLINE restoreOccurrenceChain #-}
 restoreOccurrenceChain literal !occurrence heads tails nexts =

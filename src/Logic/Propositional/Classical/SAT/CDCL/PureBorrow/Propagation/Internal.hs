@@ -141,16 +141,16 @@ propagateWatchSpike start =
   withPropagationTransaction (watchKernel start)
 
 withPropagationTransaction ::
-  ( forall local literalsPin bodiesPin nextsPin.
+  ( forall local.
     control %1 ->
     Store.VSIDSState s %1 ->
     Mut local (Fixed.UArray Int) %1 ->
     Mut local (Fixed.UArray Int) %1 ->
     Mut local (Fixed.UArray Int) %1 ->
     Mut local (Fixed.UArray Int) %1 ->
-    Boxed.PinnedBuffer literalsPin (Ur (U.Vector Int)) %1 ->
-    Grow.PinnedBuffer bodiesPin Int %1 ->
-    Grow.PinnedBuffer nextsPin Int %1 ->
+    Boxed.PinnedBuffer local (Ur (U.Vector Int)) %1 ->
+    Grow.PinnedBuffer local Int %1 ->
+    Grow.PinnedBuffer local Int %1 ->
     BO
       local
       ( result
@@ -160,18 +160,18 @@ withPropagationTransaction ::
       , Mut local (Fixed.UArray Int)
       , Mut local (Fixed.UArray Int)
       , Mut local (Fixed.UArray Int)
-      , Boxed.PinnedBuffer literalsPin (Ur (U.Vector Int))
-      , Grow.PinnedBuffer bodiesPin Int
-      , Grow.PinnedBuffer nextsPin Int
+      , Boxed.PinnedBuffer local (Ur (U.Vector Int))
+      , Grow.PinnedBuffer local Int
+      , Grow.PinnedBuffer local Int
       )
   ) %1 ->
   control %1 ->
-  Mut lifetime (Store.CDCLStore s) %1 ->
+  Mut α (Store.CDCLStore s) %1 ->
   BO
-    lifetime
+    α
     ( result
     , control
-    , Mut lifetime (Store.CDCLStore s)
+    , Mut α (Store.CDCLStore s)
     )
 {-# INLINE withPropagationTransaction #-}
 withPropagationTransaction worker control store = Control.do
@@ -196,162 +196,70 @@ withPropagationTransaction worker control store = Control.do
               .@ ( Store.clauseLiteralsField
                  , Store.clauseBodiesField
                  )
-      ( ( result
-          , finalControl
-          , watchHeads
-          , watchTails
-          , valuation
-          , trail
-          , clauseLiterals
-          , clauseBodies
-          , watchNexts
-          )
-        , vsids
-        ) <-
-        RefBorrow.update
-          ( \vsidsState -> Control.do
-              ( ( result
-                  , finalControl
-                  , vsidsState
-                  , watchHeads
-                  , watchTails
-                  , valuation
-                  , trail
-                  )
-                , (clauseLiterals, clauseBodies, watchNexts)
-                ) <-
-                withPinnedStores
-                  ( \literalsPinned bodiesPinned nextsPinned -> Control.do
-                      ( result
+      Boxed.getContents clauseLiterals & \literalContents ->
+        Grow.getContents clauseBodies & \bodyContents ->
+          Grow.getContents watchNexts & \nextContents -> Control.do
+            ( ( result
+                , finalControl
+                , watchHeads
+                , watchTails
+                , valuation
+                , trail
+                , Boxed.PinnedBuffer literalContents
+                , Grow.PinnedBuffer bodyContents
+                , Grow.PinnedBuffer nextContents
+                )
+              , vsids
+              ) <-
+              RefBorrow.update
+                ( \vsidsState -> Control.do
+                    ( result
+                      , finalControl
+                      , vsidsState
+                      , watchHeads
+                      , watchTails
+                      , valuation
+                      , trail
+                      , literals
+                      , bodies
+                      , nexts
+                      ) <-
+                      worker
+                        control
+                        vsidsState
+                        watchHeads
+                        watchTails
+                        valuation
+                        trail
+                        (Boxed.PinnedBuffer literalContents)
+                        (Grow.PinnedBuffer bodyContents)
+                        (Grow.PinnedBuffer nextContents)
+                    Control.pure
+                      (
+                        ( result
                         , finalControl
-                        , vsidsState
                         , watchHeads
                         , watchTails
                         , valuation
                         , trail
-                        , literalsPinned
-                        , bodiesPinned
-                        , nextsPinned
-                        ) <-
-                        worker
-                          control
-                          vsidsState
-                          watchHeads
-                          watchTails
-                          valuation
-                          trail
-                          literalsPinned
-                          bodiesPinned
-                          nextsPinned
-                      Control.pure
-                        (
-                          ( result
-                          , finalControl
-                          , vsidsState
-                          , watchHeads
-                          , watchTails
-                          , valuation
-                          , trail
-                          )
-                        , (literalsPinned, bodiesPinned, nextsPinned)
+                        , literals
+                        , bodies
+                        , nexts
                         )
-                  )
-                  clauseLiterals
-                  clauseBodies
-                  watchNexts
-              Control.pure
-                (
-                  ( result
-                  , finalControl
-                  , watchHeads
-                  , watchTails
-                  , valuation
-                  , trail
-                  , clauseLiterals
-                  , clauseBodies
-                  , watchNexts
-                  )
-                , vsidsState
-                )
-          )
-          vsids
-      let !(Ur _) = share watchHeads
-      let !(Ur _) = share watchTails
-      let !(Ur _) = share valuation
-      let !(Ur _) = share trail
-      let !(Ur _) = share clauseLiterals
-      let !(Ur _) = share clauseBodies
-      let !(Ur _) = share watchNexts
-      let !(Ur _) = share vsids
-      Control.pure (result, finalControl)
-  Control.pure (result, finalControl, store)
-
-withPinnedStores ::
-  (lifetime >= scope) =>
-  ( forall literalsPin bodiesPin nextsPin.
-    Boxed.PinnedBuffer literalsPin (Ur (U.Vector Int)) %1 ->
-    Grow.PinnedBuffer bodiesPin Int %1 ->
-    Grow.PinnedBuffer nextsPin Int %1 ->
-    BO
-      scope
-      ( result
-      , ( Boxed.PinnedBuffer literalsPin (Ur (U.Vector Int))
-        , Grow.PinnedBuffer bodiesPin Int
-        , Grow.PinnedBuffer nextsPin Int
-        )
-      )
-  ) %1 ->
-  Mut lifetime (Boxed.Vector (Ur (U.Vector Int))) %1 ->
-  Mut lifetime (Grow.Vector Int) %1 ->
-  Mut lifetime (Grow.Vector Int) %1 ->
-  BO
-    scope
-    ( result
-    , ( Mut lifetime (Boxed.Vector (Ur (U.Vector Int)))
-      , Mut lifetime (Grow.Vector Int)
-      , Mut lifetime (Grow.Vector Int)
-      )
-    )
-{-# INLINE withPinnedStores #-}
-withPinnedStores action literals bodies nexts = Control.do
-  ((result, bodies, nexts), literals) <-
-    Boxed.withPinnedBuffer
-      ( \_ literalsPinned -> Control.do
-          ((result, literalsPinned, nexts), bodies) <-
-            Grow.withPinnedBuffer
-              ( \_ bodiesPinned -> Control.do
-                  ((result, literalsPinned, bodiesPinned), nexts) <-
-                    Grow.withPinnedBuffer
-                      ( \_ nextsPinned -> Control.do
-                          ( result
-                            , ( literalsPinned
-                                , bodiesPinned
-                                , nextsPinned
-                                )
-                            ) <-
-                            action
-                              literalsPinned
-                              bodiesPinned
-                              nextsPinned
-                          Control.pure
-                            ( (result, literalsPinned, bodiesPinned)
-                            , nextsPinned
-                            )
+                      , vsidsState
                       )
-                      nexts
-                  Control.pure
-                    ( (result, literalsPinned, nexts)
-                    , bodiesPinned
-                    )
-              )
-              bodies
-          Control.pure
-            ( (result, bodies, nexts)
-            , literalsPinned
-            )
-      )
-      literals
-  Control.pure (result, (literals, bodies, nexts))
+                )
+                vsids
+            let !(Ur _) = share watchHeads
+            let !(Ur _) = share watchTails
+            let !(Ur _) = share valuation
+            let !(Ur _) = share trail
+            let !(Ur _) = share literalContents
+            let !(Ur _) = share bodyContents
+            let !(Ur _) = share nextContents
+            let !(Ur _) = share vsids
+            Control.pure (result, finalControl)
+  Control.pure (result, finalControl, store)
 
 data SpikeAssertion
   = NewlyAsserted
@@ -359,29 +267,28 @@ data SpikeAssertion
   | ContradictingAssertion
 
 watchKernel ::
-  (lifetime >= scope) =>
   PropagationStart ->
   PropagationControl %1 ->
   Store.VSIDSState s %1 ->
-  Mut lifetime (Fixed.UArray Int) %1 ->
-  Mut lifetime (Fixed.UArray Int) %1 ->
-  Mut lifetime (Fixed.UArray Int) %1 ->
-  Mut lifetime (Fixed.UArray Int) %1 ->
-  Boxed.PinnedBuffer literalsPin (Ur (U.Vector Int)) %1 ->
-  Grow.PinnedBuffer bodiesPin Int %1 ->
-  Grow.PinnedBuffer nextsPin Int %1 ->
+  Mut α (Fixed.UArray Int) %1 ->
+  Mut α (Fixed.UArray Int) %1 ->
+  Mut α (Fixed.UArray Int) %1 ->
+  Mut α (Fixed.UArray Int) %1 ->
+  Boxed.PinnedBuffer α (Ur (U.Vector Int)) %1 ->
+  Grow.PinnedBuffer α Int %1 ->
+  Grow.PinnedBuffer α Int %1 ->
   BO
-    scope
+    α
     ( Ur KernelEvidence
     , PropagationControl
     , Store.VSIDSState s
-    , Mut lifetime (Fixed.UArray Int)
-    , Mut lifetime (Fixed.UArray Int)
-    , Mut lifetime (Fixed.UArray Int)
-    , Mut lifetime (Fixed.UArray Int)
-    , Boxed.PinnedBuffer literalsPin (Ur (U.Vector Int))
-    , Grow.PinnedBuffer bodiesPin Int
-    , Grow.PinnedBuffer nextsPin Int
+    , Mut α (Fixed.UArray Int)
+    , Mut α (Fixed.UArray Int)
+    , Mut α (Fixed.UArray Int)
+    , Mut α (Fixed.UArray Int)
+    , Boxed.PinnedBuffer α (Ur (U.Vector Int))
+    , Grow.PinnedBuffer α Int
+    , Grow.PinnedBuffer α Int
     )
 {-# INLINE watchKernel #-}
 watchKernel start control vsids watchHeads watchTails valuation trail literals bodies nexts =
@@ -457,31 +364,30 @@ watchKernel start control vsids watchHeads watchTails valuation trail literals b
             nexts
 
 drainTrail ::
-  (lifetime >= scope) =>
   Int ->
   Int ->
   Int ->
   PropagationControl %1 ->
   Store.VSIDSState s %1 ->
-  Mut lifetime (Fixed.UArray Int) %1 ->
-  Mut lifetime (Fixed.UArray Int) %1 ->
-  Mut lifetime (Fixed.UArray Int) %1 ->
-  Mut lifetime (Fixed.UArray Int) %1 ->
-  Boxed.PinnedBuffer literalsPin (Ur (U.Vector Int)) %1 ->
-  Grow.PinnedBuffer bodiesPin Int %1 ->
-  Grow.PinnedBuffer nextsPin Int %1 ->
+  Mut α (Fixed.UArray Int) %1 ->
+  Mut α (Fixed.UArray Int) %1 ->
+  Mut α (Fixed.UArray Int) %1 ->
+  Mut α (Fixed.UArray Int) %1 ->
+  Boxed.PinnedBuffer α (Ur (U.Vector Int)) %1 ->
+  Grow.PinnedBuffer α Int %1 ->
+  Grow.PinnedBuffer α Int %1 ->
   BO
-    scope
+    α
     ( Ur KernelEvidence
     , PropagationControl
     , Store.VSIDSState s
-    , Mut lifetime (Fixed.UArray Int)
-    , Mut lifetime (Fixed.UArray Int)
-    , Mut lifetime (Fixed.UArray Int)
-    , Mut lifetime (Fixed.UArray Int)
-    , Boxed.PinnedBuffer literalsPin (Ur (U.Vector Int))
-    , Grow.PinnedBuffer bodiesPin Int
-    , Grow.PinnedBuffer nextsPin Int
+    , Mut α (Fixed.UArray Int)
+    , Mut α (Fixed.UArray Int)
+    , Mut α (Fixed.UArray Int)
+    , Mut α (Fixed.UArray Int)
+    , Boxed.PinnedBuffer α (Ur (U.Vector Int))
+    , Grow.PinnedBuffer α Int
+    , Grow.PinnedBuffer α Int
     )
 {-# INLINE drainTrail #-}
 drainTrail !visited !moves !enqueues control vsids watchHeads watchTails valuation trail literals bodies nexts =
@@ -582,7 +488,6 @@ drainTrail !visited !moves !enqueues control vsids watchHeads watchTails valuati
                 nexts
 
 processOccurrences ::
-  (lifetime >= scope) =>
   Int ->
   Int ->
   Int ->
@@ -590,25 +495,25 @@ processOccurrences ::
   Int ->
   PropagationControl %1 ->
   Store.VSIDSState s %1 ->
-  Mut lifetime (Fixed.UArray Int) %1 ->
-  Mut lifetime (Fixed.UArray Int) %1 ->
-  Mut lifetime (Fixed.UArray Int) %1 ->
-  Mut lifetime (Fixed.UArray Int) %1 ->
-  Boxed.PinnedBuffer literalsPin (Ur (U.Vector Int)) %1 ->
-  Grow.PinnedBuffer bodiesPin Int %1 ->
-  Grow.PinnedBuffer nextsPin Int %1 ->
+  Mut α (Fixed.UArray Int) %1 ->
+  Mut α (Fixed.UArray Int) %1 ->
+  Mut α (Fixed.UArray Int) %1 ->
+  Mut α (Fixed.UArray Int) %1 ->
+  Boxed.PinnedBuffer α (Ur (U.Vector Int)) %1 ->
+  Grow.PinnedBuffer α Int %1 ->
+  Grow.PinnedBuffer α Int %1 ->
   BO
-    scope
+    α
     ( Ur (Maybe (ConflictExit, Int, Int), Int, Int, Int)
     , PropagationControl
     , Store.VSIDSState s
-    , Mut lifetime (Fixed.UArray Int)
-    , Mut lifetime (Fixed.UArray Int)
-    , Mut lifetime (Fixed.UArray Int)
-    , Mut lifetime (Fixed.UArray Int)
-    , Boxed.PinnedBuffer literalsPin (Ur (U.Vector Int))
-    , Grow.PinnedBuffer bodiesPin Int
-    , Grow.PinnedBuffer nextsPin Int
+    , Mut α (Fixed.UArray Int)
+    , Mut α (Fixed.UArray Int)
+    , Mut α (Fixed.UArray Int)
+    , Mut α (Fixed.UArray Int)
+    , Boxed.PinnedBuffer α (Ur (U.Vector Int))
+    , Grow.PinnedBuffer α Int
+    , Grow.PinnedBuffer α Int
     )
 {-# INLINE processOccurrences #-}
 processOccurrences !falseLiteral !occurrence !visited !moves !enqueues control vsids watchHeads watchTails valuation trail literals bodies nexts
@@ -849,10 +754,9 @@ processOccurrences !falseLiteral !occurrence !visited !moves !enqueues control v
                             nexts
 
 evalLiteral ::
-  (lifetime >= scope) =>
   Int ->
-  Mut lifetime (Fixed.UArray Int) %1 ->
-  BO scope (Ur Int, Mut lifetime (Fixed.UArray Int))
+  Mut α (Fixed.UArray Int) %1 ->
+  BO α (Ur Int, Mut α (Fixed.UArray Int))
 {-# INLINE evalLiteral #-}
 evalLiteral literal valuation = Control.do
   (Ur variableValue, valuation) <-
@@ -864,15 +768,14 @@ evalLiteral literal valuation = Control.do
   Control.pure (Ur literalValue, valuation)
 
 findReplacement ::
-  (lifetime >= scope) =>
   U.Vector Int ->
   Int ->
   Int ->
   Int ->
-  Mut lifetime (Fixed.UArray Int) %1 ->
+  Mut α (Fixed.UArray Int) %1 ->
   BO
-    scope
-    (Ur (Maybe (Int, Int)), Mut lifetime (Fixed.UArray Int))
+    α
+    (Ur (Maybe (Int, Int)), Mut α (Fixed.UArray Int))
 {-# INLINE findReplacement #-}
 findReplacement clause watched1 watched2 !index valuation
   | index >= U.length clause =
@@ -899,19 +802,18 @@ findReplacement clause watched1 watched2 !index valuation
             valuation
 
 enqueueLiteral ::
-  (lifetime >= scope) =>
   Int ->
   PropagationControl %1 ->
   Store.VSIDSState s %1 ->
-  Mut lifetime (Fixed.UArray Int) %1 ->
-  Mut lifetime (Fixed.UArray Int) %1 ->
+  Mut α (Fixed.UArray Int) %1 ->
+  Mut α (Fixed.UArray Int) %1 ->
   BO
-    scope
+    α
     ( Ur SpikeAssertion
     , PropagationControl
     , Store.VSIDSState s
-    , Mut lifetime (Fixed.UArray Int)
-    , Mut lifetime (Fixed.UArray Int)
+    , Mut α (Fixed.UArray Int)
+    , Mut α (Fixed.UArray Int)
     )
 {-# INLINE enqueueLiteral #-}
 enqueueLiteral literal control vsids valuation trail =
@@ -952,17 +854,16 @@ enqueueLiteral literal control vsids valuation trail =
             )
 
 appendOccurrence ::
-  (lifetime >= scope) =>
   Int ->
   Int ->
-  Mut lifetime (Fixed.UArray Int) %1 ->
-  Mut lifetime (Fixed.UArray Int) %1 ->
-  Grow.PinnedBuffer nextsPin Int %1 ->
+  Mut α (Fixed.UArray Int) %1 ->
+  Mut α (Fixed.UArray Int) %1 ->
+  Grow.PinnedBuffer α Int %1 ->
   BO
-    scope
-    ( Mut lifetime (Fixed.UArray Int)
-    , Mut lifetime (Fixed.UArray Int)
-    , Grow.PinnedBuffer nextsPin Int
+    α
+    ( Mut α (Fixed.UArray Int)
+    , Mut α (Fixed.UArray Int)
+    , Grow.PinnedBuffer α Int
     )
 {-# INLINE appendOccurrence #-}
 appendOccurrence literal occurrence watchHeads watchTails nexts = Control.do
@@ -985,17 +886,16 @@ appendOccurrence literal occurrence watchHeads watchTails nexts = Control.do
       Control.pure (watchHeads, watchTails, nexts)
 
 restoreOccurrenceChain ::
-  (lifetime >= scope) =>
   Int ->
   Int ->
-  Mut lifetime (Fixed.UArray Int) %1 ->
-  Mut lifetime (Fixed.UArray Int) %1 ->
-  Grow.PinnedBuffer nextsPin Int %1 ->
+  Mut α (Fixed.UArray Int) %1 ->
+  Mut α (Fixed.UArray Int) %1 ->
+  Grow.PinnedBuffer α Int %1 ->
   BO
-    scope
-    ( Mut lifetime (Fixed.UArray Int)
-    , Mut lifetime (Fixed.UArray Int)
-    , Grow.PinnedBuffer nextsPin Int
+    α
+    ( Mut α (Fixed.UArray Int)
+    , Mut α (Fixed.UArray Int)
+    , Grow.PinnedBuffer α Int
     )
 {-# INLINE restoreOccurrenceChain #-}
 restoreOccurrenceChain literal occurrence watchHeads watchTails nexts
@@ -1030,30 +930,29 @@ decodeBody encoded =
   (encoded `div` bodyBase - 1, encoded `mod` bodyBase - 1)
 
 propagationLoop ::
-  (lifetime >= scope) =>
   Int ->
   Int ->
   PropagationControl %1 ->
   Store.VSIDSState s %1 ->
-  Mut lifetime (Fixed.UArray Int) %1 ->
-  Mut lifetime (Fixed.UArray Int) %1 ->
-  Mut lifetime (Fixed.UArray Int) %1 ->
-  Mut lifetime (Fixed.UArray Int) %1 ->
-  Boxed.PinnedBuffer literalsPin (Ur (U.Vector Int)) %1 ->
-  Grow.PinnedBuffer bodiesPin Int %1 ->
-  Grow.PinnedBuffer nextsPin Int %1 ->
+  Mut α (Fixed.UArray Int) %1 ->
+  Mut α (Fixed.UArray Int) %1 ->
+  Mut α (Fixed.UArray Int) %1 ->
+  Mut α (Fixed.UArray Int) %1 ->
+  Boxed.PinnedBuffer α (Ur (U.Vector Int)) %1 ->
+  Grow.PinnedBuffer α Int %1 ->
+  Grow.PinnedBuffer α Int %1 ->
   BO
-    scope
+    α
     ( Ur PropagationEvidence
     , PropagationControl
     , Store.VSIDSState s
-    , Mut lifetime (Fixed.UArray Int)
-    , Mut lifetime (Fixed.UArray Int)
-    , Mut lifetime (Fixed.UArray Int)
-    , Mut lifetime (Fixed.UArray Int)
-    , Boxed.PinnedBuffer literalsPin (Ur (U.Vector Int))
-    , Grow.PinnedBuffer bodiesPin Int
-    , Grow.PinnedBuffer nextsPin Int
+    , Mut α (Fixed.UArray Int)
+    , Mut α (Fixed.UArray Int)
+    , Mut α (Fixed.UArray Int)
+    , Mut α (Fixed.UArray Int)
+    , Boxed.PinnedBuffer α (Ur (U.Vector Int))
+    , Grow.PinnedBuffer α Int
+    , Grow.PinnedBuffer α Int
     )
 {-# INLINE propagationLoop #-}
 propagationLoop !visited !checksum control vsids watchHeads watchTails valuation trail literals bodies nexts =

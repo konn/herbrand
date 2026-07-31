@@ -3,6 +3,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE LinearTypes #-}
 {-# LANGUAGE OverloadedLabels #-}
+{-# LANGUAGE QualifiedDo #-}
 {-# LANGUAGE RoleAnnotations #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 
@@ -42,8 +43,9 @@ module Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Runtime.Internal (
   watchNextsField,
 ) where
 
-import Control.Monad.Borrow.Pure (Linearly)
-import Control.Monad.ST (runST)
+import Control.Functor.Linear qualified as Control
+import Control.Monad.Borrow.Pure
+import Control.Syntax.DataFlow qualified as DataFlow
 import Data.Array.Mutable.Linear.Unboxed.Borrow.Internal qualified as Fixed
 import Data.IntPSQ qualified as PSQ
 import Data.List qualified as List
@@ -54,7 +56,6 @@ import Data.Vector qualified as V
 import Data.Vector.Mutable.Linear.Boxed.Borrow.Internal qualified as Boxed
 import Data.Vector.Mutable.Linear.Unboxed.Borrow.Internal qualified as Grow
 import Data.Vector.Unboxed qualified as U
-import Data.Vector.Unboxed.Mutable qualified as UM
 import Data.Word (Word64)
 import GHC.Exts qualified as GHC
 import Logic.Propositional.Classical.SAT.CDCL.Types hiding (WatchMap)
@@ -197,38 +198,137 @@ buildWatchVectors ::
   Int ->
   [Clause] ->
   (U.Vector Int, U.Vector Int, U.Vector Int)
-buildWatchVectors variableCount initialClauses = runST do
-  heads <- UM.replicate (2 * variableCount) (-1)
-  tails <- UM.replicate (2 * variableCount) (-1)
-  nexts <- UM.replicate (2 * NonLinear.length initialClauses) (-1)
-  let add occurrence literal = do
-        let !bucket = litBucketIndex literal
-        oldTail <- UM.unsafeRead tails bucket
-        if oldTail < 0
-          then UM.unsafeWrite heads bucket occurrence
-          else UM.unsafeWrite nexts oldTail occurrence
-        UM.unsafeWrite tails bucket occurrence
-  NonLinear.mapM_
-    ( \(clauseIndex, Clause {lits, watched1, watched2}) -> do
-        let !clauseId = ClauseId clauseIndex
-        if watched1 >= 0
-          then
-            add
-              (watchOccurrence clauseId W1)
-              (U.unsafeIndex lits watched1)
-          else NonLinear.pure ()
-        if watched2 >= 0
-          then
-            add
-              (watchOccurrence clauseId W2)
-              (U.unsafeIndex lits watched2)
-          else NonLinear.pure ()
+buildWatchVectors variableCount initialClauses =
+  linearly \linear -> DataFlow.do
+    (headsLinear, rest1) <- dup linear
+    (tailsLinear, rest2) <- dup rest1
+    (nextsLinear, runLinear) <- dup rest2
+    runBO runLinear Control.do
+      (heads, headsLender) <-
+        borrowM (Fixed.constant (2 * variableCount) (-1) headsLinear)
+      (tails, tailsLender) <-
+        borrowM (Fixed.constant (2 * variableCount) (-1) tailsLinear)
+      (nexts, nextsLender) <-
+        borrowM
+          ( Fixed.constant
+              (2 * NonLinear.length initialClauses)
+              (-1)
+              nextsLinear
+          )
+      (heads, tails, nexts) <-
+        seedWatchClauses
+          0
+          initialClauses
+          heads
+          tails
+          nexts
+      let !() = consume heads
+      let !() = consume tails
+      let !() = consume nexts
+      pureAfter
+        ( case Fixed.toVector (reclaim headsLender) of
+            Ur frozenHeads ->
+              case Fixed.toVector (reclaim tailsLender) of
+                Ur frozenTails ->
+                  case Fixed.toVector (reclaim nextsLender) of
+                    Ur frozenNexts ->
+                      (frozenHeads, frozenTails, frozenNexts)
+        )
+
+seedWatchClauses ::
+  Int ->
+  [Clause] ->
+  Mut α (Fixed.UArray Int) %1 ->
+  Mut α (Fixed.UArray Int) %1 ->
+  Mut α (Fixed.UArray Int) %1 ->
+  BO
+    α
+    ( Mut α (Fixed.UArray Int)
+    , Mut α (Fixed.UArray Int)
+    , Mut α (Fixed.UArray Int)
     )
-    (NonLinear.zip [0 ..] initialClauses)
-  (,,)
-    NonLinear.<$> U.unsafeFreeze heads
-    NonLinear.<*> U.unsafeFreeze tails
-    NonLinear.<*> U.unsafeFreeze nexts
+seedWatchClauses !_ [] heads tails nexts =
+  Control.pure (heads, tails, nexts)
+seedWatchClauses
+  !clauseIndex
+  (Clause {lits, watched1, watched2} : rest)
+  heads
+  tails
+  nexts = Control.do
+    (heads, tails, nexts) <-
+      seedWatchedLiteral
+        (ClauseId clauseIndex)
+        W1
+        watched1
+        lits
+        heads
+        tails
+        nexts
+    (heads, tails, nexts) <-
+      seedWatchedLiteral
+        (ClauseId clauseIndex)
+        W2
+        watched2
+        lits
+        heads
+        tails
+        nexts
+    seedWatchClauses
+      (clauseIndex + 1)
+      rest
+      heads
+      tails
+      nexts
+
+seedWatchedLiteral ::
+  ClauseId ->
+  WatchVar ->
+  Int ->
+  U.Vector Lit ->
+  Mut α (Fixed.UArray Int) %1 ->
+  Mut α (Fixed.UArray Int) %1 ->
+  Mut α (Fixed.UArray Int) %1 ->
+  BO
+    α
+    ( Mut α (Fixed.UArray Int)
+    , Mut α (Fixed.UArray Int)
+    , Mut α (Fixed.UArray Int)
+    )
+seedWatchedLiteral clauseId slot watchedIndex lits heads tails nexts
+  | watchedIndex < 0 = Control.pure (heads, tails, nexts)
+  | otherwise =
+      seedWatchOccurrence
+        (watchOccurrence clauseId slot)
+        (U.unsafeIndex lits watchedIndex)
+        heads
+        tails
+        nexts
+
+seedWatchOccurrence ::
+  Int ->
+  Lit ->
+  Mut α (Fixed.UArray Int) %1 ->
+  Mut α (Fixed.UArray Int) %1 ->
+  Mut α (Fixed.UArray Int) %1 ->
+  BO
+    α
+    ( Mut α (Fixed.UArray Int)
+    , Mut α (Fixed.UArray Int)
+    , Mut α (Fixed.UArray Int)
+    )
+seedWatchOccurrence occurrence literal heads tails nexts = Control.do
+  let !bucket = litBucketIndex literal
+  (Ur oldTail, tails) <- Fixed.unsafeCopyAtMut bucket tails
+  (heads, nexts) <-
+    if oldTail < 0
+      then Control.do
+        heads <- Fixed.unsafeWrite bucket occurrence heads
+        Control.pure (heads, nexts)
+      else Control.do
+        nexts <- Fixed.unsafeWrite oldTail occurrence nexts
+        Control.pure (heads, nexts)
+  tails <- Fixed.unsafeWrite bucket occurrence tails
+  Control.pure (heads, tails, nexts)
 
 newCDCLStore :: PreparedCDCL -> Linearly %1 -> CDCLStore s
 {-# NOINLINE newCDCLStore #-}

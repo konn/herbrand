@@ -2,15 +2,14 @@
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE LinearTypes #-}
+{-# LANGUAGE QualifiedDo #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 
 {- |
-Low-level bulk primitive for the CDCL watch loop.
+The public-operation bulk kernel for the CDCL watch loop.
 
-The caller has already split the independently owned stores and opened
-rank-2 pins. This module is the sole unsafe boundary that temporarily exposes
-those pins to one 'IO' loop. The pin tokens are returned unchanged, so no
-backing buffer can escape its local borrow scope.
+Every fixed alias is split by the caller from one locally reborrowed
+`CDCLStore`. The recurrence threads and returns each alias linearly.
 -}
 module Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Propagation.Kernel.Internal (
   KernelPins (..),
@@ -19,28 +18,25 @@ module Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Propagation.Kernel.Inte
   scanOccurrenceChain,
 ) where
 
+import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
-import Control.Monad.Borrow.Pure.BO.Unsafe (unsafeSystemIOToBO)
 import Data.Array.Mutable.Linear.Unboxed.Borrow.Internal qualified as Fixed
-import Data.Vector.Mutable qualified as MV
 import Data.Vector.Mutable.Linear.Boxed.Borrow.Internal qualified as Boxed
 import Data.Vector.Mutable.Linear.Unboxed.Borrow.Internal qualified as Grow
 import Data.Vector.Unboxed qualified as U
-import Data.Vector.Unboxed.Mutable qualified as UM
 import Logic.Propositional.Classical.SAT.CDCL.Types
 import Prelude.Linear
-import Unsafe.Linear qualified as Unsafe
 import Prelude qualified as NonLinear
 
-data KernelPins headsPin tailsPin valuationPin literalsPin bodiesPin nextsPin where
+data KernelPins α where
   KernelPins ::
-    Fixed.Pinned headsPin Int %1 ->
-    Fixed.Pinned tailsPin Int %1 ->
-    Fixed.Pinned valuationPin Variable %1 ->
-    Boxed.PinnedBuffer literalsPin (Ur (U.Vector Lit)) %1 ->
-    Grow.PinnedBuffer bodiesPin ClauseBody %1 ->
-    Grow.PinnedBuffer nextsPin Int %1 ->
-    KernelPins headsPin tailsPin valuationPin literalsPin bodiesPin nextsPin
+    Fixed.Pinned α Int %1 ->
+    Fixed.Pinned α Int %1 ->
+    Fixed.Pinned α Variable %1 ->
+    Boxed.PinnedBuffer α (Ur (U.Vector Lit)) %1 ->
+    Grow.PinnedBuffer α ClauseBody %1 ->
+    Grow.PinnedBuffer α Int %1 ->
+    KernelPins α
 
 data KernelDelta = KernelDelta
   { visitedOccurrences :: {-# UNPACK #-} !Int
@@ -63,221 +59,259 @@ scanOccurrenceChain ::
   Int ->
   Lit ->
   Int ->
-  KernelPins headsPin tailsPin valuationPin literalsPin bodiesPin nextsPin %1 ->
+  KernelPins α %1 ->
   BO
-    scope
+    α
     ( Ur KernelOutcome
-    , KernelPins headsPin tailsPin valuationPin literalsPin bodiesPin nextsPin
+    , KernelPins α
     )
 {-# NOINLINE scanOccurrenceChain #-}
-scanOccurrenceChain =
-  \numInitialClauses falseLiteral firstOccurrence ->
-    Unsafe.toLinear
-      \pins@(KernelPins (Fixed.Pinned heads) (Fixed.Pinned tails) (Fixed.Pinned valuation) (Boxed.PinnedBuffer literals) (Grow.PinnedBuffer bodies) (Grow.PinnedBuffer nexts)) ->
-        unsafeSystemIOToBO do
-          !outcome <-
-            scan
-              numInitialClauses
-              falseLiteral
-              firstOccurrence
-              heads
-              tails
-              valuation
-              literals
-              bodies
-              nexts
-          NonLinear.pure (Ur outcome, pins)
-
-scan ::
-  Int ->
-  Lit ->
-  Int ->
-  UM.IOVector Int ->
-  UM.IOVector Int ->
-  UM.IOVector Variable ->
-  MV.IOVector (Ur (U.Vector Lit)) ->
-  UM.IOVector ClauseBody ->
-  UM.IOVector Int ->
-  NonLinear.IO KernelOutcome
-{-# NOINLINE scan #-}
-scan numInitialClauses falseLiteral =
+scanOccurrenceChain numInitialClauses falseLiteral =
   go 0 0 0
   where
-    go !visited !moved !inspected !occurrence heads tails valuation literals bodies nexts
+    go !visited !moved !inspected !occurrence pins
       | occurrence < 0 =
-          NonLinear.pure
-            (ChainDrained (KernelDelta visited moved inspected))
-      | otherwise = do
-          !nextOccurrence <- UM.unsafeRead nexts occurrence
-          let !clauseId = watchOccurrenceClause occurrence
-              !watchSlot = watchOccurrenceSlot occurrence
-              !clauseIndex = unClauseId clauseId
-          !body@ClauseBody {wat1, wat2} <-
-            UM.unsafeRead bodies clauseIndex
-          Ur clause <- MV.unsafeRead literals clauseIndex
-          let !watchedIndex =
-                case watchSlot of
-                  W1 -> wat1
-                  W2 -> wat2
-              !otherIndex =
-                case watchSlot of
-                  W1 -> wat2
-                  W2 -> wat1
-              !watchedLiteral =
-                U.unsafeIndex clause watchedIndex
-              !visited' = visited + 1
-          if watchedLiteral NonLinear./= falseLiteral
-            then
-              NonLinear.error
-                ( "watch occurrence is in the wrong literal bucket: "
-                    <> NonLinear.show
-                      (clauseId, watchSlot, falseLiteral, watchedLiteral)
-                )
-            else do
-              !other <-
-                if otherIndex < 0
-                  then NonLinear.pure Nothing
-                  else do
-                    let !otherLiteral = U.unsafeIndex clause otherIndex
-                    !otherValue <- evalLiteralIO otherLiteral valuation
-                    NonLinear.pure (Just (otherLiteral, otherValue))
-              case other of
-                Just (_, Just True) -> do
-                  appendOccurrenceIO
-                    falseLiteral
-                    occurrence
-                    heads
-                    tails
-                    nexts
-                  go
-                    visited'
-                    moved
-                    inspected
-                    nextOccurrence
+          Control.pure
+            ( Ur (ChainDrained (KernelDelta visited moved inspected))
+            , pins
+            )
+      | otherwise =
+          case pins of
+            KernelPins heads tails valuation literals bodies nexts -> Control.do
+              (Ur nextOccurrence, nexts) <-
+                Grow.pinnedBufferUnsafeCopyAt occurrence nexts
+              let !clauseId = watchOccurrenceClause occurrence
+                  !watchSlot = watchOccurrenceSlot occurrence
+                  !clauseIndex = unClauseId clauseId
+              (Ur body@ClauseBody {wat1, wat2}, bodies) <-
+                Grow.pinnedBufferUnsafeCopyAt clauseIndex bodies
+              (Ur (Ur clause), literals) <-
+                Boxed.pinnedBufferUnsafeCopyAt clauseIndex literals
+              let !watchedIndex =
+                    case watchSlot of
+                      W1 -> wat1
+                      W2 -> wat2
+                  !otherIndex =
+                    case watchSlot of
+                      W1 -> wat2
+                      W2 -> wat1
+                  !watchedLiteral =
+                    U.unsafeIndex clause watchedIndex
+                  !visited' = visited + 1
+              if watchedLiteral NonLinear./= falseLiteral
+                then
+                  error
+                    ( "watch occurrence is in the wrong literal bucket: "
+                        <> NonLinear.show
+                          (clauseId, watchSlot, falseLiteral, watchedLiteral)
+                    )
                     heads
                     tails
                     valuation
                     literals
                     bodies
                     nexts
-                _ -> do
-                  (!replacement, !newInspections) <-
-                    findReplacementIO
-                      numInitialClauses
-                      clauseId
-                      watchSlot
-                      clause
-                      body
-                      valuation
-                  let !inspected' = inspected + newInspections
-                  case replacement of
-                    Just (replacementIndex, replacementLiteral) -> do
-                      let !updatedBody =
-                            case watchSlot of
-                              W1 -> body {wat1 = replacementIndex}
-                              W2 -> body {wat2 = replacementIndex}
-                      UM.unsafeWrite bodies clauseIndex updatedBody
-                      linkOccurrenceIO
-                        replacementLiteral
-                        occurrence
-                        heads
-                        tails
-                        nexts
+                else Control.do
+                  (Ur other, valuation) <-
+                    if otherIndex < 0
+                      then Control.pure (Ur Nothing, valuation)
+                      else Control.do
+                        let !otherLiteral = U.unsafeIndex clause otherIndex
+                        (Ur otherValue, valuation) <-
+                          evalLiteral otherLiteral valuation
+                        Control.pure
+                          (Ur (Just (otherLiteral, otherValue)), valuation)
+                  case other of
+                    Just (_, Just True) -> Control.do
+                      (heads, tails, nexts) <-
+                        appendOccurrence
+                          falseLiteral
+                          occurrence
+                          heads
+                          tails
+                          nexts
                       go
                         visited'
-                        (moved + 1)
-                        inspected'
+                        moved
+                        inspected
                         nextOccurrence
-                        heads
-                        tails
-                        valuation
-                        literals
-                        bodies
-                        nexts
-                    Nothing ->
-                      case other of
-                        Nothing -> do
-                          appendOccurrenceIO
-                            falseLiteral
-                            occurrence
-                            heads
-                            tails
-                            nexts
-                          restoreOccurrenceChainIO
-                            falseLiteral
+                        (KernelPins heads tails valuation literals bodies nexts)
+                    _ -> Control.do
+                      (Ur (replacement, newInspections), valuation) <-
+                        findReplacement
+                          numInitialClauses
+                          clauseId
+                          watchSlot
+                          clause
+                          body
+                          valuation
+                      let !inspected' = inspected + newInspections
+                      case replacement of
+                        Just (replacementIndex, replacementLiteral) -> Control.do
+                          let !updatedBody =
+                                case watchSlot of
+                                  W1 -> body {wat1 = replacementIndex}
+                                  W2 -> body {wat2 = replacementIndex}
+                          bodies <-
+                            Grow.pinnedBufferUnsafeWrite
+                              clauseIndex
+                              updatedBody
+                              bodies
+                          (heads, tails, nexts) <-
+                            linkOccurrence
+                              replacementLiteral
+                              occurrence
+                              heads
+                              tails
+                              nexts
+                          go
+                            visited'
+                            (moved + 1)
+                            inspected'
                             nextOccurrence
-                            heads
-                            tails
-                            nexts
-                          NonLinear.pure
-                            ( ConflictDetected
-                                clauseId
-                                watchedLiteral
-                                (KernelDelta visited' moved inspected')
+                            ( KernelPins
+                                heads
+                                tails
+                                valuation
+                                literals
+                                bodies
+                                nexts
                             )
-                        Just (otherLiteral, Nothing) -> do
-                          appendOccurrenceIO
-                            falseLiteral
-                            occurrence
-                            heads
-                            tails
-                            nexts
-                          NonLinear.pure
-                            ( UnitRequired
-                                clauseId
-                                otherLiteral
-                                nextOccurrence
-                                (KernelDelta visited' moved inspected')
-                            )
-                        Just (otherLiteral, Just False) -> do
-                          !conflictLiteral <-
-                            selectConflictLiteralIO
-                              watchedLiteral
-                              otherLiteral
-                              valuation
-                          appendOccurrenceIO
-                            falseLiteral
-                            occurrence
-                            heads
-                            tails
-                            nexts
-                          restoreOccurrenceChainIO
-                            falseLiteral
-                            nextOccurrence
-                            heads
-                            tails
-                            nexts
-                          NonLinear.pure
-                            ( ConflictDetected
-                                clauseId
-                                conflictLiteral
-                                (KernelDelta visited' moved inspected')
-                            )
+                        Nothing ->
+                          case other of
+                            Nothing -> Control.do
+                              (heads, tails, nexts) <-
+                                appendOccurrence
+                                  falseLiteral
+                                  occurrence
+                                  heads
+                                  tails
+                                  nexts
+                              (heads, tails, nexts) <-
+                                restoreOccurrenceChain
+                                  falseLiteral
+                                  nextOccurrence
+                                  heads
+                                  tails
+                                  nexts
+                              Control.pure
+                                ( Ur
+                                    ( ConflictDetected
+                                        clauseId
+                                        watchedLiteral
+                                        ( KernelDelta
+                                            visited'
+                                            moved
+                                            inspected'
+                                        )
+                                    )
+                                , KernelPins
+                                    heads
+                                    tails
+                                    valuation
+                                    literals
+                                    bodies
+                                    nexts
+                                )
+                            Just (otherLiteral, Nothing) -> Control.do
+                              (heads, tails, nexts) <-
+                                appendOccurrence
+                                  falseLiteral
+                                  occurrence
+                                  heads
+                                  tails
+                                  nexts
+                              Control.pure
+                                ( Ur
+                                    ( UnitRequired
+                                        clauseId
+                                        otherLiteral
+                                        nextOccurrence
+                                        ( KernelDelta
+                                            visited'
+                                            moved
+                                            inspected'
+                                        )
+                                    )
+                                , KernelPins
+                                    heads
+                                    tails
+                                    valuation
+                                    literals
+                                    bodies
+                                    nexts
+                                )
+                            Just (otherLiteral, Just False) -> Control.do
+                              (Ur conflictLiteral, valuation) <-
+                                selectConflictLiteral
+                                  watchedLiteral
+                                  otherLiteral
+                                  valuation
+                              (heads, tails, nexts) <-
+                                appendOccurrence
+                                  falseLiteral
+                                  occurrence
+                                  heads
+                                  tails
+                                  nexts
+                              (heads, tails, nexts) <-
+                                restoreOccurrenceChain
+                                  falseLiteral
+                                  nextOccurrence
+                                  heads
+                                  tails
+                                  nexts
+                              Control.pure
+                                ( Ur
+                                    ( ConflictDetected
+                                        clauseId
+                                        conflictLiteral
+                                        ( KernelDelta
+                                            visited'
+                                            moved
+                                            inspected'
+                                        )
+                                    )
+                                , KernelPins
+                                    heads
+                                    tails
+                                    valuation
+                                    literals
+                                    bodies
+                                    nexts
+                                )
 
-evalLiteralIO ::
+evalLiteral ::
   Lit ->
-  UM.IOVector Variable ->
-  NonLinear.IO (Maybe Bool)
-{-# INLINE evalLiteralIO #-}
-evalLiteralIO literal valuation = do
-  !variable <-
-    UM.unsafeRead valuation (fromVarId (litVar literal))
-  NonLinear.pure
-    case variable of
-      Indefinite -> Nothing
-      Definite {value} ->
-        Just (isPositive literal == value)
+  Fixed.Pinned α Variable %1 ->
+  BO α (Ur (Maybe Bool), Fixed.Pinned α Variable)
+{-# INLINE evalLiteral #-}
+evalLiteral literal valuation = Control.do
+  (Ur variable, valuation) <-
+    Fixed.pinnedUnsafeCopyAt (fromVarId (litVar literal)) valuation
+  Control.pure
+    ( Ur
+        case variable of
+          Indefinite -> Nothing
+          Definite {value} ->
+            Just (isPositive literal == value)
+    , valuation
+    )
 
-findReplacementIO ::
+findReplacement ::
   Int ->
   ClauseId ->
   WatchVar ->
   U.Vector Lit ->
   ClauseBody ->
-  UM.IOVector Variable ->
-  NonLinear.IO (Maybe (Index, Lit), Int)
-{-# INLINE findReplacementIO #-}
-findReplacementIO numInitialClauses clauseId watchSlot clause ClauseBody {wat1, wat2} valuation =
+  Fixed.Pinned α Variable %1 ->
+  BO
+    α
+    ( Ur (Maybe (Index, Lit), Int)
+    , Fixed.Pinned α Variable
+    )
+{-# INLINE findReplacement #-}
+findReplacement numInitialClauses clauseId watchSlot clause ClauseBody {wat1, wat2} =
   search 0 Nothing 0
   where
     !watchedIndex =
@@ -292,9 +326,9 @@ findReplacementIO numInitialClauses clauseId watchSlot clause ClauseBody {wat1, 
       | otherwise = watchedIndex + 1
     !preferSatisfied = clauseLength <= 8 || isLearnt
 
-    search !offset undetermined !inspected
+    search !offset undetermined !inspected valuation
       | offset == clauseLength =
-          NonLinear.pure (undetermined, inspected)
+          Control.pure (Ur (undetermined, inspected), valuation)
       | otherwise =
           let !rawIndex = cursor + offset
               !index =
@@ -302,17 +336,22 @@ findReplacementIO numInitialClauses clauseId watchSlot clause ClauseBody {wat1, 
                   then rawIndex
                   else rawIndex - clauseLength
            in if index == wat1 || index == wat2
-                then search (offset + 1) undetermined inspected
-                else do
+                then search (offset + 1) undetermined inspected valuation
+                else Control.do
                   let !candidate = U.unsafeIndex clause index
-                  !candidateValue <- evalLiteralIO candidate valuation
+                  (Ur candidateValue, valuation) <-
+                    evalLiteral candidate valuation
                   let !inspected' = inspected + 1
                   case candidateValue of
                     Just False ->
-                      search (offset + 1) undetermined inspected'
+                      search
+                        (offset + 1)
+                        undetermined
+                        inspected'
+                        valuation
                     Just True ->
-                      NonLinear.pure
-                        (Just (index, candidate), inspected')
+                      Control.pure
+                        (Ur (Just (index, candidate), inspected'), valuation)
                     Nothing
                       | preferSatisfied ->
                           search
@@ -321,25 +360,33 @@ findReplacementIO numInitialClauses clauseId watchSlot clause ClauseBody {wat1, 
                               Nothing -> Just (index, candidate)
                               Just {} -> undetermined
                             inspected'
+                            valuation
                       | otherwise ->
-                          NonLinear.pure
-                            (Just (index, candidate), inspected')
+                          Control.pure
+                            (Ur (Just (index, candidate), inspected'), valuation)
 
-selectConflictLiteralIO ::
+selectConflictLiteral ::
   Lit ->
   Lit ->
-  UM.IOVector Variable ->
-  NonLinear.IO Lit
-{-# INLINE selectConflictLiteralIO #-}
-selectConflictLiteralIO first second valuation = do
-  !firstVariable <-
-    UM.unsafeRead valuation (fromVarId (litVar first))
-  !secondVariable <-
-    UM.unsafeRead valuation (fromVarId (litVar second))
-  NonLinear.pure
-    ( if introduced firstVariable NonLinear.> introduced secondVariable
-        then first
-        else second
+  Fixed.Pinned α Variable %1 ->
+  BO α (Ur Lit, Fixed.Pinned α Variable)
+{-# INLINE selectConflictLiteral #-}
+selectConflictLiteral first second valuation = Control.do
+  (Ur firstVariable, valuation) <-
+    Fixed.pinnedUnsafeCopyAt
+      (fromVarId (litVar first))
+      valuation
+  (Ur secondVariable, valuation) <-
+    Fixed.pinnedUnsafeCopyAt
+      (fromVarId (litVar second))
+      valuation
+  Control.pure
+    ( Ur
+        ( if introduced firstVariable NonLinear.> introduced secondVariable
+            then first
+            else second
+        )
+    , valuation
     )
 
 introduced :: Variable -> (DecideLevel, Step)
@@ -348,67 +395,90 @@ introduced Indefinite = (-1, -1)
 introduced Definite {decideLevel, decisionStep} =
   (decideLevel, decisionStep)
 
-appendOccurrenceIO ::
+appendOccurrence ::
   Lit ->
   Int ->
-  UM.IOVector Int ->
-  UM.IOVector Int ->
-  UM.IOVector Int ->
-  NonLinear.IO ()
-{-# INLINE appendOccurrenceIO #-}
-appendOccurrenceIO literal occurrence heads tails nexts = do
+  Fixed.Pinned α Int %1 ->
+  Fixed.Pinned α Int %1 ->
+  Grow.PinnedBuffer α Int %1 ->
+  BO
+    α
+    ( Fixed.Pinned α Int
+    , Fixed.Pinned α Int
+    , Grow.PinnedBuffer α Int
+    )
+{-# INLINE appendOccurrence #-}
+appendOccurrence literal occurrence heads tails nexts = Control.do
   let !bucket = litBucketIndex literal
-  !oldTail <- UM.unsafeRead tails bucket
-  UM.unsafeWrite nexts occurrence (-1)
+  (Ur oldTail, tails) <- Fixed.pinnedUnsafeCopyAt bucket tails
+  nexts <- Grow.pinnedBufferUnsafeWrite occurrence (-1) nexts
   if oldTail < 0
-    then do
-      UM.unsafeWrite heads bucket occurrence
-      UM.unsafeWrite tails bucket occurrence
-    else do
-      UM.unsafeWrite nexts oldTail occurrence
-      UM.unsafeWrite tails bucket occurrence
+    then Control.do
+      heads <- Fixed.pinnedUnsafeWrite bucket occurrence heads
+      tails <- Fixed.pinnedUnsafeWrite bucket occurrence tails
+      Control.pure (heads, tails, nexts)
+    else Control.do
+      nexts <- Grow.pinnedBufferUnsafeWrite oldTail occurrence nexts
+      tails <- Fixed.pinnedUnsafeWrite bucket occurrence tails
+      Control.pure (heads, tails, nexts)
 
-linkOccurrenceIO ::
+linkOccurrence ::
   Lit ->
   Int ->
-  UM.IOVector Int ->
-  UM.IOVector Int ->
-  UM.IOVector Int ->
-  NonLinear.IO ()
-{-# INLINE linkOccurrenceIO #-}
-linkOccurrenceIO literal occurrence heads tails nexts = do
+  Fixed.Pinned α Int %1 ->
+  Fixed.Pinned α Int %1 ->
+  Grow.PinnedBuffer α Int %1 ->
+  BO
+    α
+    ( Fixed.Pinned α Int
+    , Fixed.Pinned α Int
+    , Grow.PinnedBuffer α Int
+    )
+{-# INLINE linkOccurrence #-}
+linkOccurrence literal occurrence heads tails nexts = Control.do
   let !bucket = litBucketIndex literal
-  !oldHead <- UM.unsafeRead heads bucket
-  !oldTail <- UM.unsafeRead tails bucket
+  (Ur oldHead, heads) <- Fixed.pinnedUnsafeCopyAt bucket heads
+  (Ur oldTail, tails) <- Fixed.pinnedUnsafeCopyAt bucket tails
   if oldTail < 0
-    then do
-      UM.unsafeWrite heads bucket occurrence
-      UM.unsafeWrite tails bucket occurrence
-      UM.unsafeWrite nexts occurrence (-1)
+    then Control.do
+      heads <- Fixed.pinnedUnsafeWrite bucket occurrence heads
+      tails <- Fixed.pinnedUnsafeWrite bucket occurrence tails
+      nexts <- Grow.pinnedBufferUnsafeWrite occurrence (-1) nexts
+      Control.pure (heads, tails, nexts)
     else
       if occurrence < oldHead
-        then do
-          UM.unsafeWrite heads bucket occurrence
-          UM.unsafeWrite nexts occurrence oldHead
-        else do
-          UM.unsafeWrite tails bucket occurrence
-          UM.unsafeWrite nexts occurrence (-1)
-          UM.unsafeWrite nexts oldTail occurrence
+        then Control.do
+          heads <- Fixed.pinnedUnsafeWrite bucket occurrence heads
+          nexts <- Grow.pinnedBufferUnsafeWrite occurrence oldHead nexts
+          Control.pure (heads, tails, nexts)
+        else Control.do
+          tails <- Fixed.pinnedUnsafeWrite bucket occurrence tails
+          nexts <- Grow.pinnedBufferUnsafeWrite occurrence (-1) nexts
+          nexts <- Grow.pinnedBufferUnsafeWrite oldTail occurrence nexts
+          Control.pure (heads, tails, nexts)
 
-restoreOccurrenceChainIO ::
+restoreOccurrenceChain ::
   Lit ->
   Int ->
-  UM.IOVector Int ->
-  UM.IOVector Int ->
-  UM.IOVector Int ->
-  NonLinear.IO ()
-{-# INLINE restoreOccurrenceChainIO #-}
-restoreOccurrenceChainIO literal =
+  Fixed.Pinned α Int %1 ->
+  Fixed.Pinned α Int %1 ->
+  Grow.PinnedBuffer α Int %1 ->
+  BO
+    α
+    ( Fixed.Pinned α Int
+    , Fixed.Pinned α Int
+    , Grow.PinnedBuffer α Int
+    )
+{-# INLINE restoreOccurrenceChain #-}
+restoreOccurrenceChain literal =
   go
   where
     go !occurrence heads tails nexts
-      | occurrence < 0 = NonLinear.pure ()
-      | otherwise = do
-          !nextOccurrence <- UM.unsafeRead nexts occurrence
-          appendOccurrenceIO literal occurrence heads tails nexts
+      | occurrence < 0 =
+          Control.pure (heads, tails, nexts)
+      | otherwise = Control.do
+          (Ur nextOccurrence, nexts) <-
+            Grow.pinnedBufferUnsafeCopyAt occurrence nexts
+          (heads, tails, nexts) <-
+            appendOccurrence literal occurrence heads tails nexts
           go nextOccurrence heads tails nexts

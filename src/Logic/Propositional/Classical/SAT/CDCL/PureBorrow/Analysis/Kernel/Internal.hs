@@ -4,14 +4,12 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE LinearTypes #-}
+{-# LANGUAGE QualifiedDo #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 
 {- |
-Canonical first-UIP analysis over already-split, rank-2 pinned stores.
-
-This is the analysis counterpart of the propagation kernel: it is the sole
-unsafe boundary for the bulk loop, and every pin is returned unchanged.
+Canonical first-UIP analysis over locally split borrowed stores.
 -}
 module Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Analysis.Kernel.Internal (
   AnalysisPins (..),
@@ -20,34 +18,31 @@ module Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Analysis.Kernel.Interna
   applyAnalysisStats,
 ) where
 
+import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
-import Control.Monad.Borrow.Pure.BO.Unsafe (unsafeSystemIOToBO)
 import Data.Array.Mutable.Linear.Unboxed.Borrow.Internal qualified as Fixed
 import Data.IntPSQ qualified as PSQ
 import Data.Ord (Down (..))
 import Data.Semigroup (Max (..))
-import Data.Vector.Mutable qualified as MV
 import Data.Vector.Mutable.Linear.Boxed.Borrow.Internal qualified as Boxed
 import Data.Vector.Unboxed qualified as U
-import Data.Vector.Unboxed.Mutable qualified as UM
 import Data.Word (Word64)
 import Logic.Propositional.Classical.SAT.CDCL.Types
 #ifdef HERBRAND_CDCL_INSTRUMENTED
 import Logic.Propositional.Syntax.General (Literal)
 #endif
 import Prelude.Linear
-import Unsafe.Linear qualified as Unsafe
 import Prelude qualified as NonLinear
 
-data AnalysisPins literalsPin valuationPin trailPin epochPin stampsPin scratchPin where
+data AnalysisPins α where
   AnalysisPins ::
-    Boxed.PinnedBuffer literalsPin (Ur (U.Vector Lit)) %1 ->
-    Fixed.Pinned valuationPin Variable %1 ->
-    Fixed.Pinned trailPin Lit %1 ->
-    Fixed.Pinned epochPin Word64 %1 ->
-    Fixed.Pinned stampsPin Word64 %1 ->
-    Fixed.Pinned scratchPin Lit %1 ->
-    AnalysisPins literalsPin valuationPin trailPin epochPin stampsPin scratchPin
+    Boxed.PinnedBuffer α (Ur (U.Vector Lit)) %1 ->
+    Fixed.Pinned α Variable %1 ->
+    Fixed.Pinned α Lit %1 ->
+    Fixed.Pinned α Word64 %1 ->
+    Fixed.Pinned α Word64 %1 ->
+    Fixed.Pinned α Lit %1 ->
+    AnalysisPins α
 
 data ConflictAnalysis
   = RootConflict {-# UNPACK #-} !Int
@@ -90,65 +85,58 @@ analyzeConflict ::
   Int ->
   ClauseId ->
   VSIDSState s %1 ->
-  AnalysisPins literalsPin valuationPin trailPin epochPin stampsPin scratchPin %1 ->
+  AnalysisPins α %1 ->
   BO
-    scope
+    α
     ( Ur ConflictAnalysis
     , VSIDSState s
-    , AnalysisPins literalsPin valuationPin trailPin epochPin stampsPin scratchPin
+    , AnalysisPins α
     )
 {-# NOINLINE analyzeConflict #-}
-analyzeConflict options currentLevel trailLength conflictClause =
-  Unsafe.toLinear \vsids ->
-    Unsafe.toLinear
-      \pins@(AnalysisPins (Boxed.PinnedBuffer literals) (Fixed.Pinned valuation) (Fixed.Pinned trail) (Fixed.Pinned epochStore) (Fixed.Pinned stamps) (Fixed.Pinned scratch)) ->
-        unsafeSystemIOToBO do
-          !oldEpoch <- UM.unsafeRead epochStore 0
-          (!result, !newEpoch, !updatedVSIDS) <-
-            analyzeIO
-              options
-              currentLevel
-              trailLength
-              conflictClause
-              oldEpoch
-              vsids
-              literals
-              valuation
-              trail
-              stamps
-              scratch
-          UM.unsafeWrite epochStore 0 newEpoch
-          NonLinear.pure
-            (Ur result, updatedVSIDS, pins)
+analyzeConflict options currentLevel trailLength conflictClause vsids pins =
+  case move vsids of
+    Ur unrestrictedVSIDS ->
+      analyzeConflictMoved
+        options
+        currentLevel
+        trailLength
+        conflictClause
+        unrestrictedVSIDS
+        pins
 
-analyzeIO ::
+analyzeConflictMoved ::
   CDCLOptions ->
   DecideLevel ->
   Int ->
   ClauseId ->
-  Word64 ->
   VSIDSState s ->
-  MV.IOVector (Ur (U.Vector Lit)) ->
-  UM.IOVector Variable ->
-  UM.IOVector Lit ->
-  UM.IOVector Word64 ->
-  UM.IOVector Lit ->
-  NonLinear.IO (ConflictAnalysis, Word64, VSIDSState s)
-analyzeIO options currentLevel trailLength conflictClause oldEpoch vsids literals valuation trail stamps scratch = do
-  Ur conflictLits <- MV.unsafeRead literals (unClauseId conflictClause)
+  AnalysisPins α %1 ->
+  BO
+    α
+    ( Ur ConflictAnalysis
+    , VSIDSState s
+    , AnalysisPins α
+    )
+{-# INLINE analyzeConflictMoved #-}
+analyzeConflictMoved options currentLevel trailLength conflictClause vsids (AnalysisPins literals valuation trail epochStore stamps scratch) = Control.do
+  (Ur oldEpoch, epochStore) <-
+    Fixed.pinnedUnsafeCopyAt 0 epochStore
+  (Ur (Ur conflictLits), literals) <-
+    Boxed.pinnedBufferUnsafeCopyAt
+      (unClauseId conflictClause)
+      literals
   let !decayedVSIDS = decayActivities options vsids
   if currentLevel NonLinear.== 0
     then
-      NonLinear.pure
-        (RootConflict (U.length conflictLits), oldEpoch, decayedVSIDS)
-    else do
-      (!epoch, !epochCleared) <-
-        if oldEpoch == maxBound
-          then do
-            UM.set stamps 0
-            NonLinear.pure (1, True)
-          else NonLinear.pure (oldEpoch + 1, False)
-      !initialAcc <-
+      Control.pure
+        ( Ur (RootConflict (U.length conflictLits))
+        , decayedVSIDS
+        , AnalysisPins literals valuation trail epochStore stamps scratch
+        )
+    else Control.do
+      (Ur (epoch, epochCleared), stamps) <-
+        advanceAnalysisEpoch oldEpoch stamps
+      (Ur initialAcc, stamps, scratch, valuation) <-
         scanAnalysisClause
           currentLevel
           epoch
@@ -160,23 +148,76 @@ analyzeIO options currentLevel trailLength conflictClause oldEpoch vsids literal
           valuation
       if analysisPathCount initialAcc <= 0
         then
-          NonLinear.error
+          error
             ( "positive-level conflict has no current-level path: "
                 <> NonLinear.show (conflictClause, currentLevel)
             )
-        else
-          seek
-            options
-            currentLevel
-            (trailLength - 1)
-            initialAcc
-            epoch
             decayedVSIDS
             literals
             valuation
             trail
+            epochStore
             stamps
             scratch
+        else Control.do
+          ( Ur result
+            , updatedVSIDS
+            , literals
+            , valuation
+            , trail
+            , stamps
+            , scratch
+            ) <-
+            seek
+              options
+              currentLevel
+              (trailLength - 1)
+              initialAcc
+              epoch
+              decayedVSIDS
+              literals
+              valuation
+              trail
+              stamps
+              scratch
+          epochStore <-
+            Fixed.pinnedUnsafeWrite 0 epoch epochStore
+          Control.pure
+            ( Ur result
+            , updatedVSIDS
+            , AnalysisPins
+                literals
+                valuation
+                trail
+                epochStore
+                stamps
+                scratch
+            )
+
+advanceAnalysisEpoch ::
+  Word64 ->
+  Fixed.Pinned α Word64 %1 ->
+  BO α (Ur (Word64, Bool), Fixed.Pinned α Word64)
+{-# INLINE advanceAnalysisEpoch #-}
+advanceAnalysisEpoch oldEpoch stamps =
+  if oldEpoch NonLinear.== maxBound
+    then Control.do
+      stamps <- clearStamps 0 stamps
+      Control.pure (Ur (1, True), stamps)
+    else Control.pure (Ur (oldEpoch + 1, False), stamps)
+
+clearStamps ::
+  Int ->
+  Fixed.Pinned α Word64 %1 ->
+  BO α (Fixed.Pinned α Word64)
+{-# INLINE clearStamps #-}
+clearStamps !index stamps =
+  case Fixed.pinnedSize stamps of
+    (Ur length_, stamps)
+      | index NonLinear.>= length_ -> Control.pure stamps
+      | otherwise -> Control.do
+          stamps <- Fixed.pinnedUnsafeWrite index 0 stamps
+          clearStamps (index + 1) stamps
 
 seek ::
   CDCLOptions ->
@@ -185,21 +226,38 @@ seek ::
   AnalysisAcc ->
   Word64 ->
   VSIDSState s ->
-  MV.IOVector (Ur (U.Vector Lit)) ->
-  UM.IOVector Variable ->
-  UM.IOVector Lit ->
-  UM.IOVector Word64 ->
-  UM.IOVector Lit ->
-  NonLinear.IO (ConflictAnalysis, Word64, VSIDSState s)
+  Boxed.PinnedBuffer α (Ur (U.Vector Lit)) %1 ->
+  Fixed.Pinned α Variable %1 ->
+  Fixed.Pinned α Lit %1 ->
+  Fixed.Pinned α Word64 %1 ->
+  Fixed.Pinned α Lit %1 ->
+  BO
+    α
+    ( Ur ConflictAnalysis
+    , VSIDSState s
+    , Boxed.PinnedBuffer α (Ur (U.Vector Lit))
+    , Fixed.Pinned α Variable
+    , Fixed.Pinned α Lit
+    , Fixed.Pinned α Word64
+    , Fixed.Pinned α Lit
+    )
 seek options currentLevel cursor acc epoch vsids literals valuation trail stamps scratch
   | cursor < 0 =
-      NonLinear.error
+      error
         "first-UIP analysis exhausted the trail before finding a marked pivot"
-  | otherwise = do
-      !assignedLit <- UM.unsafeRead trail cursor
+        vsids
+        literals
+        valuation
+        trail
+        stamps
+        scratch
+  | otherwise = Control.do
+      (Ur assignedLit, trail) <-
+        Fixed.pinnedUnsafeCopyAt cursor trail
       let !accRead = noteAnalysisTrailRead acc
           !variableIndex = fromVarId (litVar assignedLit)
-      !stamp <- UM.unsafeRead stamps variableIndex
+      (Ur stamp, stamps) <-
+        Fixed.pinnedUnsafeCopyAt variableIndex stamps
       if stamp /= epoch
         then
           seek
@@ -214,50 +272,79 @@ seek options currentLevel cursor acc epoch vsids literals valuation trail stamps
             trail
             stamps
             scratch
-        else do
+        else Control.do
           let !remainingPaths = analysisPathCount accRead - 1
               !nextAcc =
                 noteAnalysisPivot
                   assignedLit
                   accRead {analysisPathCount = remainingPaths}
-          UM.unsafeWrite stamps variableIndex 0
+          stamps <- Fixed.pinnedUnsafeWrite variableIndex 0 stamps
           if remainingPaths == 0
-            then do
-              !result <-
+            then Control.do
+              (Ur result, scratch) <-
                 finishAnalysis
                   (negL assignedLit)
                   nextAcc
                   scratch
-              NonLinear.pure (result, epoch, vsids)
+              Control.pure
+                ( Ur result
+                , vsids
+                , literals
+                , valuation
+                , trail
+                , stamps
+                , scratch
+                )
             else
               if remainingPaths < 0
                 then
-                  NonLinear.error
+                  error
                     "first-UIP path counter became negative"
-                else do
-                  !variable <- UM.unsafeRead valuation variableIndex
+                    vsids
+                    literals
+                    valuation
+                    trail
+                    stamps
+                    scratch
+                else Control.do
+                  (Ur variable, valuation) <-
+                    Fixed.pinnedUnsafeCopyAt variableIndex valuation
                   case variable of
                     Indefinite ->
-                      NonLinear.error
+                      error
                         ( "marked trail pivot is unassigned: "
                             <> NonLinear.show assignedLit
                         )
+                        vsids
+                        literals
+                        valuation
+                        trail
+                        stamps
+                        scratch
                     Definite {antecedent = Nothing} ->
-                      NonLinear.error
+                      error
                         ( "reasonless decision selected before the final UIP: "
                             <> NonLinear.show assignedLit
                         )
+                        vsids
+                        literals
+                        valuation
+                        trail
+                        stamps
+                        scratch
                     Definite
                       { antecedent = Just reason
                       , decisionStep = pivotStep
-                      } -> do
-                        Ur reasonLits <-
-                          MV.unsafeRead literals (unClauseId reason)
+                      } -> Control.do
+                        (Ur (Ur reasonLits), literals) <-
+                          Boxed.pinnedBufferUnsafeCopyAt
+                            (unClauseId reason)
+                            literals
                         let !updatedVSIDS =
                               if activateResolved options
                                 then incrementActivity assignedLit vsids
                                 else vsids
-                        !scannedAcc <-
+                        (Ur scannedAcc, stamps, scratch, valuation) <-
                           scanAnalysisClause
                             currentLevel
                             epoch
@@ -286,294 +373,379 @@ scanAnalysisClause ::
   Maybe (Lit, Step) ->
   U.Vector Lit ->
   AnalysisAcc ->
-  UM.IOVector Word64 ->
-  UM.IOVector Lit ->
-  UM.IOVector Variable ->
-  NonLinear.IO AnalysisAcc
+  Fixed.Pinned α Word64 %1 ->
+  Fixed.Pinned α Lit %1 ->
+  Fixed.Pinned α Variable %1 ->
+  BO
+    α
+    ( Ur AnalysisAcc
+    , Fixed.Pinned α Word64
+    , Fixed.Pinned α Lit
+    , Fixed.Pinned α Variable
+    )
 scanAnalysisClause currentLevel epoch pivot clause initialAcc stamps scratch valuation =
-  go 0 (noteAnalysisClauseScan pivot literalCount initialAcc) 0
+  go
+    0
+    (noteAnalysisClauseScan pivot literalCount initialAcc)
+    0
+    stamps
+    scratch
+    valuation
   where
     !literalCount = U.length clause
 
-    go :: Int -> AnalysisAcc -> Int -> NonLinear.IO AnalysisAcc
-    go !index !acc !pivotOccurrences
+    go ::
+      Int ->
+      AnalysisAcc ->
+      Int ->
+      Fixed.Pinned α Word64 %1 ->
+      Fixed.Pinned α Lit %1 ->
+      Fixed.Pinned α Variable %1 ->
+      BO
+        α
+        ( Ur AnalysisAcc
+        , Fixed.Pinned α Word64
+        , Fixed.Pinned α Lit
+        , Fixed.Pinned α Variable
+        )
+    go !index !acc !pivotOccurrences stamps scratch valuation
       | index == literalCount =
           case pivot of
-            Nothing -> NonLinear.pure acc
+            Nothing -> Control.pure (Ur acc, stamps, scratch, valuation)
             Just {}
-              | pivotOccurrences == 1 -> NonLinear.pure acc
+              | pivotOccurrences == 1 ->
+                  Control.pure (Ur acc, stamps, scratch, valuation)
               | otherwise ->
-                  NonLinear.error
+                  error
                     ( "analysis reason contains its pivot "
                         <> NonLinear.show pivotOccurrences
                         <> " times"
                     )
-      | otherwise = do
+                    stamps
+                    scratch
+                    valuation
+      | otherwise =
           let !literal = U.unsafeIndex clause index
-          case pivot of
-            Just (pivotLit, _)
-              | litVar literal NonLinear.== litVar pivotLit ->
-                  if literal NonLinear.== pivotLit
-                    then go (index + 1) acc (pivotOccurrences + 1)
-                    else
-                      NonLinear.error
-                        ( "analysis reason contains the pivot with opposite polarity: "
-                            <> NonLinear.show (pivotLit, literal)
+           in case pivot of
+                Just (pivotLit, _)
+                  | litVar literal NonLinear.== litVar pivotLit ->
+                      if literal NonLinear.== pivotLit
+                        then
+                          go
+                            (index + 1)
+                            acc
+                            (pivotOccurrences + 1)
+                            stamps
+                            scratch
+                            valuation
+                        else
+                          error
+                            ( "analysis reason contains the pivot with opposite polarity: "
+                                <> NonLinear.show (pivotLit, literal)
+                            )
+                            stamps
+                            scratch
+                            valuation
+                _ -> Control.do
+                  let !variableIndex = fromVarId (litVar literal)
+                  (Ur variable, valuation) <-
+                    Fixed.pinnedUnsafeCopyAt variableIndex valuation
+                  case variable of
+                    Indefinite ->
+                      error
+                        ( "analysis clause contains an unassigned literal: "
+                            <> NonLinear.show literal
                         )
-            _ -> do
-              let !variableIndex = fromVarId (litVar literal)
-              !variable <- UM.unsafeRead valuation variableIndex
-              case variable of
-                Indefinite ->
-                  NonLinear.error
-                    ( "analysis clause contains an unassigned literal: "
-                        <> NonLinear.show literal
-                    )
-                Definite
-                  { decideLevel
-                  , decisionStep
-                  , value
-                  }
-                    | literalValue literal value ->
-                        NonLinear.error
-                          ( "analysis clause contains a true literal: "
-                              <> NonLinear.show literal
-                          )
-                    | decideLevel NonLinear.> currentLevel ->
-                        NonLinear.error
-                          ( "analysis clause literal exceeds the conflict level: "
-                              <> NonLinear.show
-                                (literal, decideLevel, currentLevel)
-                          )
-                    | otherwise -> do
-                        validateReasonPrecedence pivot literal decisionStep
-                        !stamp <- UM.unsafeRead stamps variableIndex
-                        if stamp == epoch
-                          then
-                            go
-                              (index + 1)
-                              (noteAnalysisDuplicateMark acc)
-                              pivotOccurrences
-                          else do
-                            UM.unsafeWrite stamps variableIndex epoch
-                            let !markedAcc = noteAnalysisMark acc
-                            if decideLevel NonLinear.== currentLevel
-                              then
-                                go
-                                  (index + 1)
-                                  markedAcc
-                                    { analysisPathCount =
-                                        analysisPathCount markedAcc + 1
-                                    }
-                                  pivotOccurrences
-                              else do
-                                let !scratchIndex =
-                                      analysisScratchLength markedAcc
-                                    (!targetLevel, !targetLit)
-                                      | scratchIndex
-                                          == 0
-                                          || decideLevel
-                                          NonLinear.> analysisTargetLevel markedAcc
-                                            || ( decideLevel
-                                                   NonLinear.== analysisTargetLevel markedAcc
-                                                     && literal
-                                                   NonLinear.< analysisTargetLit markedAcc
-                                               ) =
-                                          (decideLevel, literal)
-                                      | otherwise =
-                                          ( analysisTargetLevel markedAcc
-                                          , analysisTargetLit markedAcc
-                                          )
-                                UM.unsafeWrite
-                                  scratch
-                                  scratchIndex
-                                  literal
-                                go
-                                  (index + 1)
-                                  markedAcc
-                                    { analysisScratchLength =
-                                        scratchIndex + 1
-                                    , analysisTargetLevel = targetLevel
-                                    , analysisTargetLit = targetLit
-                                    }
-                                  pivotOccurrences
+                        stamps
+                        scratch
+                        valuation
+                    Definite
+                      { decideLevel
+                      , decisionStep
+                      , value
+                      }
+                        | literalValue literal value ->
+                            error
+                              ( "analysis clause contains a true literal: "
+                                  <> NonLinear.show literal
+                              )
+                              stamps
+                              scratch
+                              valuation
+                        | decideLevel NonLinear.> currentLevel ->
+                            error
+                              ( "analysis clause literal exceeds the conflict level: "
+                                  <> NonLinear.show
+                                    (literal, decideLevel, currentLevel)
+                              )
+                              stamps
+                              scratch
+                              valuation
+                        | otherwise ->
+                            case validateReasonPrecedence pivot literal decisionStep of
+                              () -> Control.do
+                                (Ur stamp, stamps) <-
+                                  Fixed.pinnedUnsafeCopyAt variableIndex stamps
+                                if stamp == epoch
+                                  then
+                                    go
+                                      (index + 1)
+                                      (noteAnalysisDuplicateMark acc)
+                                      pivotOccurrences
+                                      stamps
+                                      scratch
+                                      valuation
+                                  else Control.do
+                                    stamps <-
+                                      Fixed.pinnedUnsafeWrite
+                                        variableIndex
+                                        epoch
+                                        stamps
+                                    let !markedAcc = noteAnalysisMark acc
+                                    if decideLevel NonLinear.== currentLevel
+                                      then
+                                        go
+                                          (index + 1)
+                                          markedAcc
+                                            { analysisPathCount =
+                                                analysisPathCount markedAcc + 1
+                                            }
+                                          pivotOccurrences
+                                          stamps
+                                          scratch
+                                          valuation
+                                      else Control.do
+                                        let !scratchIndex =
+                                              analysisScratchLength markedAcc
+                                            (!targetLevel, !targetLit)
+                                              | scratchIndex
+                                                  == 0
+                                                  || decideLevel
+                                                  NonLinear.> analysisTargetLevel markedAcc
+                                                    || ( decideLevel
+                                                           NonLinear.== analysisTargetLevel markedAcc
+                                                             && literal
+                                                           NonLinear.< analysisTargetLit markedAcc
+                                                       ) =
+                                                  (decideLevel, literal)
+                                              | otherwise =
+                                                  ( analysisTargetLevel markedAcc
+                                                  , analysisTargetLit markedAcc
+                                                  )
+                                        scratch <-
+                                          Fixed.pinnedUnsafeWrite
+                                            scratchIndex
+                                            literal
+                                            scratch
+                                        go
+                                          (index + 1)
+                                          markedAcc
+                                            { analysisScratchLength =
+                                                scratchIndex + 1
+                                            , analysisTargetLevel = targetLevel
+                                            , analysisTargetLit = targetLit
+                                            }
+                                          pivotOccurrences
+                                          stamps
+                                          scratch
+                                          valuation
 
 finishAnalysis ::
   Lit ->
   AnalysisAcc ->
-  UM.IOVector Lit ->
-  NonLinear.IO ConflictAnalysis
-finishAnalysis assertingLit acc scratch = do
-  let !scratchLength = analysisScratchLength acc
-      !scratchCapacity = UM.length scratch
-  if scratchLength < 0 || scratchLength > scratchCapacity
-    then
-      NonLinear.error
-        ( "learned-literal scratch prefix is out of bounds: "
-            <> NonLinear.show (scratchLength, scratchCapacity)
-        )
-    else do
-      (!comparisons, !swaps) <- heapSortLitPrefix scratchLength scratch
-      let !metrics =
-            noteAnalysisSort comparisons swaps (analysisMetrics acc)
-          !learnedLength = scratchLength + 1
-          !hasLowerLiterals = scratchLength > 0
-          !target =
-            if hasLowerLiterals
-              then analysisTargetLevel acc
-              else 0
-      output <- UM.new learnedLength
-      UM.unsafeWrite output 0 assertingLit
-      (!copiedLength, !targetMatches) <-
-        if hasLowerLiterals
-          then do
-            UM.unsafeWrite output 1 (analysisTargetLit acc)
-            copyLowerLiterals
-              0
-              2
-              scratchLength
-              (analysisTargetLit acc)
-              0
-              scratch
-              output
-          else NonLinear.pure (1, 0)
-      if copiedLength
-        /= learnedLength
-        || targetMatches
-        /= if hasLowerLiterals then 1 else 0
-        then
-          NonLinear.error
-            ( "learned-clause copy invariant failed: "
-                <> NonLinear.show
-                  ( copiedLength
-                  , learnedLength
-                  , targetMatches
-                  , hasLowerLiterals
-                  )
-            )
-        else do
-          !learnedLits <- U.unsafeFreeze output
-          NonLinear.pure
-            ( LearnedClause
-                target
-                Clause
-                  { lits = learnedLits
-                  , watched1 = 0
-                  , watched2 =
-                      if learnedLength > 1 then 1 else -1
-                  }
-                assertingLit
-                metrics
-            )
+  Fixed.Pinned α Lit %1 ->
+  BO α (Ur ConflictAnalysis, Fixed.Pinned α Lit)
+finishAnalysis assertingLit acc scratch =
+  case Fixed.pinnedSize scratch of
+    (Ur scratchCapacity, scratch) ->
+      let !scratchLength = analysisScratchLength acc
+       in if scratchLength < 0 || scratchLength > scratchCapacity
+            then
+              error
+                ( "learned-literal scratch prefix is out of bounds: "
+                    <> NonLinear.show (scratchLength, scratchCapacity)
+                )
+                scratch
+            else Control.do
+              (Ur (comparisons, swaps), scratch) <-
+                heapSortLitPrefix scratchLength scratch
+              let !metrics =
+                    noteAnalysisSort comparisons swaps (analysisMetrics acc)
+                  !learnedLength = scratchLength + 1
+                  !hasLowerLiterals = scratchLength > 0
+                  !target =
+                    if hasLowerLiterals
+                      then analysisTargetLevel acc
+                      else 0
+              (Ur (lowerLiterals, targetMatches), scratch) <-
+                if hasLowerLiterals
+                  then
+                    collectLowerLiterals
+                      (scratchLength - 1)
+                      scratchLength
+                      (analysisTargetLit acc)
+                      []
+                      0
+                      scratch
+                  else Control.pure (Ur ([], 0), scratch)
+              let !copiedLength =
+                    1
+                      + if hasLowerLiterals
+                        then 1 + scratchLength - targetMatches
+                        else 0
+              if copiedLength
+                /= learnedLength
+                || targetMatches
+                /= if hasLowerLiterals then 1 else 0
+                then
+                  error
+                    ( "learned-clause copy invariant failed: "
+                        <> NonLinear.show
+                          ( copiedLength
+                          , learnedLength
+                          , targetMatches
+                          , hasLowerLiterals
+                          )
+                    )
+                    scratch
+                else
+                  let !learnedLits =
+                        U.fromListN
+                          learnedLength
+                          if hasLowerLiterals
+                            then
+                              assertingLit
+                                : analysisTargetLit acc
+                                : lowerLiterals
+                            else [assertingLit]
+                   in Control.pure
+                        ( Ur
+                            ( LearnedClause
+                                target
+                                Clause
+                                  { lits = learnedLits
+                                  , watched1 = 0
+                                  , watched2 =
+                                      if learnedLength > 1 then 1 else -1
+                                  }
+                                assertingLit
+                                metrics
+                            )
+                        , scratch
+                        )
 
-copyLowerLiterals ::
-  Int ->
+collectLowerLiterals ::
   Int ->
   Int ->
   Lit ->
+  [Lit] ->
   Int ->
-  UM.IOVector Lit ->
-  UM.IOVector Lit ->
-  NonLinear.IO (Int, Int)
-copyLowerLiterals index outputIndex count targetLit targetMatches scratch output
-  | index == count =
-      NonLinear.pure (outputIndex, targetMatches)
-  | otherwise = do
-      !literal <- UM.unsafeRead scratch index
+  Fixed.Pinned α Lit %1 ->
+  BO α (Ur ([Lit], Int), Fixed.Pinned α Lit)
+collectLowerLiterals !index count targetLit lowerLiterals targetMatches scratch
+  | index < 0 =
+      Control.pure (Ur (lowerLiterals, targetMatches), scratch)
+  | index >= count =
+      error
+        "learned-clause scratch index exceeded its prefix"
+        scratch
+  | otherwise = Control.do
+      (Ur literal, scratch) <- Fixed.pinnedUnsafeCopyAt index scratch
       if literal NonLinear.== targetLit
         then
-          copyLowerLiterals
-            (index + 1)
-            outputIndex
+          collectLowerLiterals
+            (index - 1)
             count
             targetLit
+            lowerLiterals
             (targetMatches + 1)
             scratch
-            output
-        else do
-          if outputIndex <= count
-            then UM.unsafeWrite output outputIndex literal
-            else
-              NonLinear.error
-                "learned-clause output index exceeded its exact allocation"
-          copyLowerLiterals
-            (index + 1)
-            (outputIndex + 1)
+        else
+          collectLowerLiterals
+            (index - 1)
             count
             targetLit
+            (literal : lowerLiterals)
             targetMatches
             scratch
-            output
 
 heapSortLitPrefix ::
   Int ->
-  UM.IOVector Lit ->
-  NonLinear.IO (Int, Int)
+  Fixed.Pinned α Lit %1 ->
+  BO α (Ur (Int, Int), Fixed.Pinned α Lit)
 heapSortLitPrefix count heap
-  | count <= 1 = NonLinear.pure (0, 0)
-  | otherwise = buildHeap (count `quot` 2 - 1) 0 0
+  | count <= 1 = Control.pure (Ur (0, 0), heap)
+  | otherwise = buildHeap (count `quot` 2 - 1) 0 0 heap
   where
-    buildHeap !root !comparisons !swaps
-      | root < 0 = drainHeap (count - 1) comparisons swaps
-      | otherwise = do
-          (!comparisons', !swaps') <-
+    buildHeap !root !comparisons !swaps heap
+      | root < 0 = drainHeap (count - 1) comparisons swaps heap
+      | otherwise = Control.do
+          (Ur (comparisons', swaps'), heap) <-
             siftDownLit root (count - 1) comparisons swaps heap
-          buildHeap (root - 1) comparisons' swaps'
+          buildHeap (root - 1) comparisons' swaps' heap
 
-    drainHeap !end !comparisons !swaps
-      | end <= 0 = NonLinear.pure (comparisons, swaps)
-      | otherwise = do
-          swapLit 0 end heap
-          (!comparisons', !swaps') <-
+    drainHeap !end !comparisons !swaps heap
+      | end <= 0 = Control.pure (Ur (comparisons, swaps), heap)
+      | otherwise = Control.do
+          heap <- swapLit 0 end heap
+          (Ur (comparisons', swaps'), heap) <-
             siftDownLit 0 (end - 1) comparisons (swaps + 1) heap
-          drainHeap (end - 1) comparisons' swaps'
+          drainHeap (end - 1) comparisons' swaps' heap
 
 siftDownLit ::
   Int ->
   Int ->
   Int ->
   Int ->
-  UM.IOVector Lit ->
-  NonLinear.IO (Int, Int)
-siftDownLit root end comparisons swaps heap = do
+  Fixed.Pinned α Lit %1 ->
+  BO α (Ur (Int, Int), Fixed.Pinned α Lit)
+siftDownLit root end comparisons swaps heap = Control.do
   let !leftChild = 2 * root + 1
   if leftChild > end
-    then NonLinear.pure (comparisons, swaps)
-    else do
-      !leftLit <- UM.unsafeRead heap leftChild
+    then Control.pure (Ur (comparisons, swaps), heap)
+    else Control.do
+      (Ur leftLit, heap) <- Fixed.pinnedUnsafeCopyAt leftChild heap
       let !rightChild = leftChild + 1
-      (!child, !childLit, !comparisons') <-
+      (Ur (child, childLit, comparisons'), heap) <-
         if rightChild > end
-          then NonLinear.pure (leftChild, leftLit, comparisons)
-          else do
-            !rightLit <- UM.unsafeRead heap rightChild
-            NonLinear.pure
-              ( if leftLit NonLinear.< rightLit
-                  then (rightChild, rightLit, comparisons + 1)
-                  else (leftChild, leftLit, comparisons + 1)
+          then Control.pure (Ur (leftChild, leftLit, comparisons), heap)
+          else Control.do
+            (Ur rightLit, heap) <-
+              Fixed.pinnedUnsafeCopyAt rightChild heap
+            Control.pure
+              ( Ur
+                  ( if leftLit NonLinear.< rightLit
+                      then (rightChild, rightLit, comparisons + 1)
+                      else (leftChild, leftLit, comparisons + 1)
+                  )
+              , heap
               )
-      !rootLit <- UM.unsafeRead heap root
+      (Ur rootLit, heap) <- Fixed.pinnedUnsafeCopyAt root heap
       let !comparisons'' = comparisons' + 1
       if rootLit NonLinear.< childLit
-        then do
-          UM.unsafeWrite heap root childLit
-          UM.unsafeWrite heap child rootLit
+        then Control.do
+          heap <- Fixed.pinnedUnsafeWrite root childLit heap
+          heap <- Fixed.pinnedUnsafeWrite child rootLit heap
           siftDownLit
             child
             end
             comparisons''
             (swaps + 1)
             heap
-        else NonLinear.pure (comparisons'', swaps)
+        else Control.pure (Ur (comparisons'', swaps), heap)
 
-swapLit :: Int -> Int -> UM.IOVector Lit -> NonLinear.IO ()
+swapLit ::
+  Int ->
+  Int ->
+  Fixed.Pinned α Lit %1 ->
+  BO α (Fixed.Pinned α Lit)
 swapLit left right array
-  | left == right = NonLinear.pure ()
-  | otherwise = do
-      !leftLit <- UM.unsafeRead array left
-      !rightLit <- UM.unsafeRead array right
-      UM.unsafeWrite array left rightLit
-      UM.unsafeWrite array right leftLit
+  | left == right = Control.pure array
+  | otherwise = Control.do
+      (Ur leftLit, array) <- Fixed.pinnedUnsafeCopyAt left array
+      (Ur rightLit, array) <- Fixed.pinnedUnsafeCopyAt right array
+      array <- Fixed.pinnedUnsafeWrite left rightLit array
+      Fixed.pinnedUnsafeWrite right leftLit array
 
 literalValue :: Lit -> Bool -> Bool
 literalValue literal variableValue =
@@ -711,11 +883,11 @@ validateReasonPrecedence ::
   Maybe (Lit, Step) ->
   Lit ->
   Step ->
-  NonLinear.IO ()
+  ()
 #ifdef HERBRAND_CDCL_INSTRUMENTED
-validateReasonPrecedence Nothing _ _ = NonLinear.pure ()
+validateReasonPrecedence Nothing _ _ = ()
 validateReasonPrecedence (Just (pivot, pivotStep)) literal introducedAt
-  | introducedAt NonLinear.< pivotStep = NonLinear.pure ()
+  | introducedAt NonLinear.< pivotStep = ()
   | otherwise =
       NonLinear.error
         ( "reason literal does not precede its pivot: "
@@ -724,7 +896,7 @@ validateReasonPrecedence (Just (pivot, pivotStep)) literal introducedAt
         )
 #else
 {-# INLINE validateReasonPrecedence #-}
-validateReasonPrecedence _ _ _ = NonLinear.pure ()
+validateReasonPrecedence _ _ _ = ()
 #endif
 
 decayActivities :: CDCLOptions -> VSIDSState s -> VSIDSState s

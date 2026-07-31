@@ -42,9 +42,6 @@ import Logic.Propositional.Classical.SAT.CDCL.Types hiding (
   tryRestart,
  )
 import Prelude.Linear
-#ifdef HERBRAND_CDCL_INSTRUMENTED
-import Unsafe.Linear qualified as Unsafe
-#endif
 import Prelude qualified as NonLinear
 
 #ifdef HERBRAND_CDCL_INSTRUMENTED
@@ -376,9 +373,10 @@ updateStats ::
   (SolverStats -> SolverStats) ->
   Instrumentation %1 ->
   Instrumentation
-updateStats function =
-  Unsafe.toLinear \(Instrumentation stats) ->
-    Instrumentation (function stats)
+updateStats function (Instrumentation stats) =
+  case move stats of
+    Ur unrestrictedStats ->
+      Instrumentation (function unrestrictedStats)
 
 bumpSeedScanI,
   bumpPostDrainScanI,
