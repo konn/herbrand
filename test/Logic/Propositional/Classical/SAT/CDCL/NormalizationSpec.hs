@@ -10,6 +10,7 @@ each clause's watched pair and fixes both BCP order and clause identity.
 module Logic.Propositional.Classical.SAT.CDCL.NormalizationSpec (
   test_matchesReference,
   test_shapes,
+  test_generatorCoverage,
 ) where
 
 import Data.List (nub)
@@ -86,9 +87,15 @@ injections arity clause@(CNFClause lits) = do
   pure $
     concat
       [ [clause | duplicate]
-      , -- a repeated literal appended after its own first occurrence
-        [CNFClause (lits <> [last lits]) | repeated, not (null lits)]
-      , [CNFClause (lits <> [negateLiteral (head lits)]) | tautology, not (null lits)]
+      , -- A repeated literal appended *after* its own existing occurrence.
+        -- Prepending would leave first-occurrence order unchanged and so would
+        -- not discriminate first- from last-occurrence retention.
+        case reverse lits of
+          final : _ | repeated -> [CNFClause (lits <> [final])]
+          _ -> []
+      , case lits of
+          leading : _ | tautology -> [CNFClause (lits <> [negateLiteral leading])]
+          _ -> []
       , [CNFClause (reverse lits) | permuted]
       , [CNFClause (lits <> [extra])]
       ]
@@ -107,6 +114,32 @@ test_matchesReference =
     collect
       "has a clause with repeated literals"
       [any (\c -> length (nub c) /= length c) encoded]
+    assert $
+      P.eq
+        .$ ("reference", reference cnf)
+        .$ ("normalizedClausesForTest", normalizedClausesForTest cnf)
+
+{- | The property above reports its shape census with 'collect', which cannot
+fail a test — and the suite runs with @--hide-successes@, so on a green run the
+census is not even printed. That would let the property pass having never
+generated a duplicate, which is precisely the blindness this module exists to
+remove. Assert the census instead of reporting it.
+-}
+test_generatorCoverage :: TestTree
+test_generatorCoverage =
+  testProperty "the generator actually produces the shapes it claims" $ do
+    cnf@(CNF cls) <- gen normalizationGen
+    let encoded = map (map encodeLit . clauseLits) cls
+        duplicateClauses = length (nub encoded) /= length encoded
+        repeatedLiterals = any (\c -> length (nub c) /= length c) encoded
+    collect "shape" [(duplicateClauses, repeatedLiterals)]
+    -- Every generated CNF must exercise at least one of the two dedup paths;
+    -- otherwise `normalizedClausesForTest` is the identity and the differential
+    -- assertion in `test_matchesReference` proves nothing about deduplication.
+    assert $
+      P.satisfies
+        ("exercises deduplication", id)
+        .$ ("duplicateClauses || repeatedLiterals", duplicateClauses || repeatedLiterals)
     assert $
       P.eq
         .$ ("reference", reference cnf)

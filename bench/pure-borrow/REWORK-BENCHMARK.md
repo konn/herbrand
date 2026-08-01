@@ -43,8 +43,16 @@ protocol-incomparable with this campaign and are cited only as history.
 
 - Results matched: true. Per-case elapsed gates **14/14**. Aggregate UCB gates
   **3/3**. Memory gates **14/14**.
-- The port is faster than `main` on aggregate and allocates less in **every**
-  stratum.
+- **Allocated bytes** are lower than `main` in every one of the 14 strata
+  (0.2006×–0.9522×). That is not the same as "lower memory everywhere":
+  *copied* bytes are higher on two strata (`all-binary-2` nonmoving 1.0187,
+  `implication-chain-12` nonmoving 1.0210) and *residency* is higher on two
+  (`php-7-6` copying 1.0956, nonmoving 1.0029). All four pass because the gate
+  carries an allowance; the ratios are stated here so the gate count is not read
+  as a stronger claim than it is.
+- Elapsed is above 1.0 on four strata, all at the process floor: `all-binary-2`
+  nonmoving 1.0579, `implication-chain-12` nonmoving 1.0270 / copying 1.0128,
+  `uf20-01` copying 1.0055.
 
 | Case | GC | Alloc ratio | MUT ratio | Elapsed ratio | M median | P2 median |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
@@ -63,10 +71,17 @@ protocol-incomparable with this campaign and are cited only as history.
 | `implication-chain-12` | copying | 0.9146 | n/a | 1.0128 | 0.013 | 0.013 |
 | `php-7-6` | copying | 0.2006 | 0.3404 | 0.4449 | 0.057 | 0.025 |
 
-The two cases above 1.0 are `all-binary-2` (4 clauses) and
-`implication-chain-12` (13 clauses); both sit at the ~0.013 s process floor
-where mutator time is below the RTS's printed resolution, and both pass their
-per-case gate.
+Six of the fourteen strata — `uf20-01`, `all-binary-2` and
+`implication-chain-12` under both collectors — sit at the ~0.013 s process floor
+with mutator time at or below the RTS's 1 ms print resolution, so their ratios
+are ~1.0 by construction. The analyzer weights all 448 pair log-ratios equally,
+so those six **dilute** the aggregate rather than dominate it: restricted to the
+eight strata with measurable mutator time the figure is **0.5995** against
+`main` and **0.4655** against P0. The 0.7493 headline is therefore conservative,
+but it is a spawn-floor-contaminated number rather than a solver-time one, and
+the per-stratum rows above are the better evidence. `PURE-BORROW-REWORK-PLAN.md`
+§6.5 demotes this aggregate to a regression screen for exactly this reason:
+none of the three aggregate UCB booleans is a binding criterion.
 
 ### Against the previous parity campaign
 
@@ -87,11 +102,58 @@ Per-case elapsed gates 14/14; aggregate UCB gates 3/3; memory gates 11/14.
 `3blocks` elapsed ratio is 0.1221 (nonmoving) and 0.0880 (copying); mutator
 time falls from 0.400 s to 0.016 s.
 
-The three memory-strata failures are the cost of the fix and were predeclared:
-`3blocks` allocated is 109,426,872 against a limit of 108,677,581 — a 2.7%
-increase from the `Data.Set` the replacement fold builds — plus two copied-byte
-strata within 0.4% of their limits. Against `main`, `3blocks` still allocates
-0.6594×.
+This comparison bundles **S0 + S1 + S2** — the accessor, the pin bump and the
+normalization fix — not S2 alone.
+
+### Attribution: S2 alone
+
+| Aggregate | Pairs | Geomean ratio | 95% UCB |
+| --- | ---: | ---: | ---: |
+| nonmoving | 224 | 0.6643 | 0.6773 |
+| copying | 224 | 0.6400 | 0.6552 |
+| **all** | **448** | **0.6520** | **0.6620** |
+
+P2 against P1 (`848f312`, = S0+S1) is 0.6520 where P2 against P0 is 0.6458.
+The accessor and the pin bump together account for essentially none of the
+improvement; S2 owns it.
+
+### The three memory-strata failures, named
+
+| stratum | sub-gate | baseline | candidate | limit |
+| --- | --- | ---: | ---: | ---: |
+| `3blocks` / nonmoving | allocated | 106,542,632 | 109,426,872 | 108,677,581 |
+| `3blocks` / copying | allocated | 106,542,632 | 109,426,872 | 108,677,581 |
+| `flat200-1` / copying | **copied** | 4,747,760 | 4,870,488 | 4,846,811 |
+
+An earlier revision of this document described these as "`3blocks` allocated
+plus two copied-byte strata". That was wrong: two of the three are `3blocks`'s
+allocated gate under each collector, and there is exactly one copied-byte
+failure. MADs are zero, so these are deterministic, not noise.
+
+**They are attributed, not waived.** A normalize-only driver
+(`bench/pure-borrow/stats-probe/NormalizeOnly.hs`) parses a CNF, deep-forces
+only the normalized clause list, and exits; run at P1 and P2 under `+RTS -s` it
+isolates the fold's true cost:
+
+| case | P1 | P2 | Δ (normalization) | whole-program P0→P2 |
+| --- | ---: | ---: | ---: | ---: |
+| `3blocks` | 51,351,504 | 54,235,744 | **+2,884,240** | **+2,884,240** |
+| `flat200-1` | 10,727,808 | 11,233,632 | **+505,824** | **+505,824** |
+| `php-7-6` | 826,520 | 834,408 | **+7,888** | **+7,888** |
+| `uf100-01` | 2,512,040 | 2,550,120 | +38,080 | +40,440 |
+| `uf20-01` | 653,152 | 653,408 | +256 | −624 |
+
+On the three cases that matter the whole-program increase equals the measured
+normalization cost **to the byte**. Nothing outside the fold allocates more.
+`3blocks`'s 2.7% rise buys a 25× mutator-time drop, and the port still allocates
+0.6594× of `main` on that case. The fold is a net allocation *win* on small
+inputs (`uf20-01` −624 B, `all-binary-2` −752 B, `implication-chain-12`
+−1,272 B).
+
+The `flat200-1`/copying **copied**-bytes failure is a genuine un-waived gate
+failure: it exceeds its limit by 23,677 bytes (0.5%). It is a second-order
+consequence of allocating 505,824 more bytes in the same solve, and it is
+recorded here as a failure rather than argued away.
 
 ## 4. Supplementary corpus
 
@@ -111,8 +173,18 @@ observations, mutator seconds:
 | `flat200-1-dup` (fixture) | 4,474 | 0.027 | 0.038 | 0.017 | 0.447 | 0.630 | 0.499 |
 
 The reworked port is faster than **both** baselines on every instance and
-allocates 30–64% of `main`. These are single observations and are reported as
-indicative, not as gated acceptance evidence.
+allocates 30–64% of `main`.
+
+**These are single observations, and the planned gate on them was not run.**
+`workspace/PURE-BORROW-REWORK-PLAN.md` §6.4/§6.5 froze these seven cases as
+14 *binding* supplementary strata, to be measured by a `run-holdout.mjs` /
+`analyze-holdout.mjs` pair copied verbatim from the acceptance scripts. Those
+runners were never written, so no paired campaign, no medians, no MADs and no
+bootstrap bounds exist for this corpus. `mut_elapsed_s` is quantized to 1 ms, so
+the ratios for the three `uf100` rows (0.003–0.011 s) carry little information.
+One third of the plan's binding acceptance criteria is therefore **unmet, not
+passed** — the table above is indicative only and should not be read as
+acceptance evidence.
 
 ## 5. Why the previous regression was not Pure Borrow
 
@@ -135,10 +207,24 @@ is unchanged.
 `MAIN-OPTIMIZATION-PARITY.md` localized the residual to "the broader
 propagation path". That localization was wrong, and this supersedes it.
 
+**Read this control only in the negative direction.** Once the quadratic is
+gone, `root-chain-4096` is dominated by clause construction and store setup —
+`buildClause` over 4,097 clauses, `V.fromList`/`U.fromList`, seeding 8,192 watch
+occurrences, eleven owners in `newCDCLStore` — against roughly 4,096
+assignments. Those construction paths are implemented completely differently on
+the two sides. The reasoning that makes a *high* residual uninterpretable makes
+the measured 0.693× equally uninterpretable as a propagation result, and the
+0.693× also bundles S1. What this control does support is the negative claim it
+is used for here: the 12.55× was clause preparation, because removing 68.6 ms of
+predicted `nub` cost removes 70.4 ms of measured time. It does **not** support
+"the port's propagation is faster than `main`", and the workload's name should
+no longer be taken at face value.
+
 ## 6. Correctness evidence
 
-- Production suite **25,224** tests (25,214 previously, plus 10 new
-  normalization tests); focused Pure Borrow suite **14**.
+- Production suite **25,225** tests (25,214 previously, plus 11 new
+  normalization tests); instrumented suite **25,236**; focused Pure Borrow suite
+  **14**. Run logs retained under `workspace/rework-evidence/tests/`.
 - **Full trajectory oracle** — all 39 integral `SolverStats` counters, all three
   list-valued fields including the complete ordered per-conflict learned-clause
   transcript, and the returned model — is **byte-identical between P0 and P2**
@@ -160,7 +246,49 @@ propagation path". That localization was wrong, and this supersedes it.
 - All 896 acceptance observations per campaign returned the expected SAT/UNSAT
   answer; no timeouts, no parse failures, no discarded samples.
 
-## 7. Artifact hashes
+**What the oracle does and does not cover.** The retained probe
+(`bench/pure-borrow/stats-probe/StatsProbe.hs`) emits the 39 counters, the three
+list fields, the model, and — added after the first post-implementation review —
+the normalized clause list, variable count and clause count via
+`normalizedClausesForTest`. It does **not** implement the plan's trail-contents
+rolling hash. The clause list cannot be compared against `main`, which has no
+equivalent accessor, so that item is P-side only; against `main` the oracle is
+items 1–3. On `implication-chain-12` and `all-binary-2` — low-conflict and
+UNSAT — `analysisLearnedTrace` is empty and there is no model, so the cross-side
+oracle there reduces to counters alone.
+
+## 7. Between-campaign dispersion
+
+The identical P2 binary (`8c9e68ca…`) was measured in three campaigns. Its
+allocated bytes agree to the byte across all 14 strata, but elapsed medians do
+not:
+
+| stratum | P2-vs-P0 draw | P2-vs-M draw | \|Δ\| | drift limit |
+| --- | ---: | ---: | ---: | ---: |
+| `3blocks` / nonmoving | 0.050 s | 0.060 s | 0.0100 | 0.0045 |
+
+The plan's §7 drift rule is `|mᵢ − mⱼ| ≤ MADᵢ + MADⱼ + 0.001 s`, and this
+**violates it**. `3blocks`/copying MUT is marginal at the same boundary
+(0.016 vs 0.017, limit 0.0010). No gate verdict flips — both campaigns give
+14/14 elapsed gates and the geomeans reproduce exactly from the raw CSVs — but
+between-campaign dispersion of ~20% on `3blocks`/nonmoving against a
+within-stratum MAD of 0.002 s means the bootstrap, which resamples only within
+strata, **understates uncertainty on the single case this rework is about**.
+§2's `3blocks` row quotes the slower draw (0.060 s, ratio 0.8685); the other
+draw of the same binary gives 0.050/0.068 = 0.735. Both are far below the 6.82×
+this case previously showed, so the conclusion is unaffected, but the figure
+should be read as ≈0.74–0.87 rather than as a point estimate.
+
+A note on evidence timestamps: every file under
+`workspace/rework-evidence/campaigns/` carries an identical mtime because the
+directories were copied there with `cp -r` (no `-p`) after both campaigns
+finished. The campaigns themselves were run sequentially, not concurrently. The
+two `run.log` files are byte-identical because the runner logs only
+`collector case n/32` progress lines, which are identical by construction; they
+carry no run identity and are not adequate provenance on their own — the
+manifests and CSV hashes are.
+
+## 8. Artifact hashes
 
 Executables:
 
@@ -185,7 +313,7 @@ c9303484e5ee952957941bb4655ac8d06e28e71fefa0abd51a200b1a85cc1dbb  all-binary-2-u
 ea1c7697c4b2be671c51d340e207a71d6de0ccb7e2e5009c23bb8020d2075950  php-7-6-unsat.cnf
 ```
 
-## 8. Not done
+## 9. Not done
 
 Three planned slices were specified and adversarially reviewed but not
 implemented, because the measured result made them non-load-bearing for any
