@@ -24,6 +24,7 @@ module Logic.Propositional.Classical.SAT.CDCL (
   solveWith,
   solveVarIdWith,
   solveVarIdWithStats,
+  normalizedClausesForTest,
 
   -- * Re-exports
   CNF (..),
@@ -46,6 +47,7 @@ import Data.Hashable (Hashable)
 import Data.Unrestricted.Linear (UrT (..), liftUrT, runUrT)
 import Data.Unrestricted.Linear qualified as Ur
 import Linear.Token.Linearly (besides)
+import Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Runtime.Internal (normalizedClausesForTest)
 import Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Solver.Internal qualified as PureBorrow
 import Logic.Propositional.Classical.SAT.CDCL.Types
 import Logic.Propositional.Classical.SAT.Types

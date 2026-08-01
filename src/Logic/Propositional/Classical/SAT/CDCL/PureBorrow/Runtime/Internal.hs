@@ -23,6 +23,8 @@ module Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Runtime.Internal (
   SolverMeta (..),
   prepareCDCL,
   preparedMeta,
+  preparedClauseLiterals,
+  normalizedClausesForTest,
   newCDCLStore,
   finishValuation,
   disposeCDCLStore,
@@ -169,6 +171,31 @@ prepareCDCL (CNF rawClauses)
               , preparedWatchTails = tails
               , preparedWatchNexts = nexts
               }
+
+{- | Test-support accessor for the normalized clause list.
+
+The normalization performed by 'prepareCDCL' fixes clause identity, and clause
+identity fixes watch layout, BCP order, and the antecedents recorded for
+conflict analysis.  Nothing else exposes it, so differential tests and the
+trajectory oracle have no way to observe it.  This returns the variable count,
+the initial clause count, and the normalized clauses in their exact retained
+order, including the retained literal order within each clause.
+
+Returns 'Nothing' when preparation short-circuits, which happens only for an
+empty formula or a formula containing an empty clause.
+-}
+normalizedClausesForTest :: CNF VarId -> NonLinear.Maybe (Int, Int, [[Lit]])
+normalizedClausesForTest cnf =
+  case prepareCDCL cnf of
+    Left (Ur _) -> NonLinear.Nothing
+    Right prepared ->
+      NonLinear.Just
+        ( numVariables (preparedMeta prepared)
+        , numInitialClauses (preparedMeta prepared)
+        , NonLinear.fmap
+            (\(Ur clause) -> U.toList clause)
+            (V.toList (preparedClauseLiterals prepared))
+        )
 
 literalVariable :: Literal VarId -> VarId
 literalVariable (Positive variable) = variable

@@ -286,6 +286,7 @@ test-suite herbrand-test
   main-is: Spec.hs
   -- cabal-gild: discover test --exclude=test/Spec.hs
   other-modules:
+    Logic.Propositional.Classical.SAT.CDCL.NormalizationSpec
     Logic.Propositional.Classical.SAT.CDCLSpec
     Logic.Propositional.Classical.SAT.DPLLSpec
     Logic.Propositional.Classical.SAT.TableauxSpec
