@@ -45,12 +45,12 @@ module Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Runtime.Internal (
   watchNextsField,
 ) where
 
+import Control.Foldl qualified as Foldl
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
 import Control.Syntax.DataFlow qualified as DataFlow
 import Data.Array.Mutable.Linear.Unboxed.Borrow.Internal qualified as Fixed
 import Data.IntPSQ qualified as PSQ
-import Data.List qualified as List
 import Data.Ord (Down (..))
 import Data.Record.Linear.Borrow.Experimental.PatternMatch (RecordLabel)
 import Data.Ref.Linear qualified as Ref
@@ -124,14 +124,12 @@ prepareCDCL (CNF rawClauses)
       Left (Ur Unsat)
   | otherwise =
       let !normalized =
-            List.nub
-              ( NonLinear.fmap
-                  ( \clause ->
-                      List.nub
-                        (NonLinear.fmap encodeLit (clauseLits clause))
-                  )
-                  rawClauses
+            Foldl.fold
+              ( Foldl.premap
+                  (Foldl.fold Foldl.nub NonLinear.. NonLinear.fmap encodeLit NonLinear.. clauseLits)
+                  Foldl.nub
               )
+              rawClauses
           !clauses = NonLinear.fmap buildClause normalized
           !maximumVariable =
             NonLinear.maximum
