@@ -213,6 +213,37 @@ jobs:
         path: ${{env.report-tarball}}
         name: ${{matrix.bench}}-report
 
+  codspeed:
+    name: CodSpeed
+    needs: [build]
+    continue-on-error: true
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      id-token: write   # tokenless OIDC upload (public repo)
+    runs-on: ubuntu-latest
+    env:
+      artifact: artifact-ghc-9.12.4
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: ${{github.event.pull_request.head.sha || github.sha}}
+    - name: Download artifacts
+      id: download
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{env.artifact}}
+    - name: Decompress
+      run: tar xaf "${{steps.download.outputs.download-path}}/${{env.artifact}}.tar.zst"
+    - name: Install CodSpeed CLI
+      run: |
+        curl -fsSL https://codspeed.io/install.sh | bash
+        echo "${HOME}/.codspeed/bin" >>"${GITHUB_PATH}"
+    - name: Run CodSpeed benchmarks
+      env:
+        CODSPEED_TOKEN: ${{secrets.CODSPEED_TOKEN}}
+      run: codspeed run --mode simulation
+
   upload-reports:
     concurrency:
       cancel-in-progress: false

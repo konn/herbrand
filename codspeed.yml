@@ -1,0 +1,41 @@
+# CodSpeed benchmark targets. Run with: codspeed run --mode simulation
+#
+# Each target is one whole-process run of the existing tasty-bench SAT suite,
+# narrowed to a single corpus group. Under the simulation instrument the RTS
+# startup and corpus-glob cost is a near-constant per-target offset, and
+# CodSpeed reports deltas, so it does not affect regression detection.
+#
+# --stdev Infinity makes tasty-bench execute each leaf exactly once. This is
+# required, not merely faster: bench/sat.hs pins a 100 s per-leaf timeout via
+# localOption (which overrides the CLI), and Valgrind runs ~20-50x slower.
+#
+# -j1 is mandatory: tasty-bench must never run benchmarks concurrently.
+#
+# The patterns are bare words (letters/digits/hyphen only), which tasty treats
+# as /word/ against the full test path. No `$0`, no `&&`, no shell quoting.
+#
+# The `CDCL` and `uf20-91-full` conjuncts used by ci/scripts/compare-with-main.js
+# are deliberately omitted: they only stop a *downloaded old baseline binary*
+# from rediscovering removed DPLL/Tableaux cases and the test-only corpus.
+# CodSpeed always runs the current checkout's binary and keeps the baseline
+# server-side, so every leaf is already CDCL and bench/sat.hs's
+# satlibBenchmarkRoots already excludes uf20-91-full.
+
+benchmarks:
+  - name: "solve/huge"
+    exec: ./artifact-ghc-9.12.4/benchs/herbrand-sat-bench -j1 --stdev Infinity --pattern huge
+
+  - name: "solve/Sudoku"
+    exec: ./artifact-ghc-9.12.4/benchs/herbrand-sat-bench -j1 --stdev Infinity --pattern Sudoku
+
+  - name: "solve/SATLIB/Bejing"
+    exec: ./artifact-ghc-9.12.4/benchs/herbrand-sat-bench -j1 --stdev Infinity --pattern Bejing
+
+  - name: "solve/SATLIB/flat200-479"
+    exec: ./artifact-ghc-9.12.4/benchs/herbrand-sat-bench -j1 --stdev Infinity --pattern flat200-479
+
+  - name: "solve/SATLIB/uf100-430"
+    exec: ./artifact-ghc-9.12.4/benchs/herbrand-sat-bench -j1 --stdev Infinity --pattern uf100-430
+
+  - name: "solve/SATLIB/uf20-91"
+    exec: ./artifact-ghc-9.12.4/benchs/herbrand-sat-bench -j1 --stdev Infinity --pattern uf20-91
