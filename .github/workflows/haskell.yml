@@ -239,9 +239,11 @@ jobs:
       run: |
         curl -fsSL https://codspeed.io/install.sh | bash
         echo "${HOME}/.codspeed/bin" >>"${GITHUB_PATH}"
+    # No CODSPEED_TOKEN: static tokens are legacy, and the CLI skips OIDC
+    # entirely whenever a token is present. `${{secrets.X}}` for an unset secret
+    # expands to the empty string, which clap still binds as Some(""), so setting
+    # it at all disables OIDC and uploads with an empty key.
     - name: Run CodSpeed benchmarks
-      env:
-        CODSPEED_TOKEN: ${{secrets.CODSPEED_TOKEN}}
       run: codspeed run --mode simulation
 
   upload-reports:
