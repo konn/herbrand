@@ -21,7 +21,7 @@ jobs:
         ref: ${{github.event.pull_request.head.sha || github.sha}}
     - name: Enumerate CI plans
       id: list-ci
-      uses: actions/github-script@v7
+      uses: actions/github-script@v8
       with:
         script: |
           const script = require('./ci/scripts/enumerate-ci.js')
@@ -52,7 +52,7 @@ jobs:
       with:
         ref: ${{github.event.pull_request.head.sha || github.sha}}
     - name: Calculate hash keys
-      uses: actions/github-script@v7
+      uses: actions/github-script@v8
       id: cache-keys
       with:
         script: |
@@ -148,7 +148,7 @@ jobs:
     - name: Decompress
       run: tar xaf "${{steps.download.outputs.download-path}}/${{env.artifact}}.tar.zst"
     - name: Run Benchmark
-      uses: actions/github-script@v7
+      uses: actions/github-script@v8
       id: benchmark
       with:
         script: |
