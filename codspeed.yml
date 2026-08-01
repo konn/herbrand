@@ -31,8 +31,22 @@ benchmarks:
   - name: "solve/SATLIB/Bejing"
     exec: ./artifact-ghc-9.12.4/benchs/herbrand-sat-bench -j1 --stdev Infinity --pattern Bejing
 
+  # flat200-10.cnf is deliberately excluded: under the simulation instrument it
+  # runs ~200x slower than native, and 3 of its 12 leaves hit the 100 s per-leaf
+  # timeout that bench/sat.hs pins via localOption. allowFailureBecause "Large
+  # input" swallows those, so the process still exits 0 and CodSpeed would record
+  # the instruction count of a truncated run. Worse, the timeout is wall-clock
+  # based, so *which* leaves get truncated varies with runner load -- injecting
+  # exactly the nondeterminism simulation mode exists to remove.
+  #
+  # flat200-1.cnf is kept: it is one of the four SAT cases in the frozen
+  # workspace/TUNING-PLAN.md corpus, and its leaves run ~16 s under simulation,
+  # a ~6x margin against the cap. It remains matched exactly -- the `.` is a
+  # regex wildcard, but "flat200-1?cnf" cannot match inside "flat200-10.cnf".
+  #
+  # flat200-10.cnf is still covered by the existing `bench` job.
   - name: "solve/SATLIB/flat200-479"
-    exec: ./artifact-ghc-9.12.4/benchs/herbrand-sat-bench -j1 --stdev Infinity --pattern flat200-479
+    exec: ./artifact-ghc-9.12.4/benchs/herbrand-sat-bench -j1 --stdev Infinity --pattern flat200-1.cnf
 
   - name: "solve/SATLIB/uf100-430"
     exec: ./artifact-ghc-9.12.4/benchs/herbrand-sat-bench -j1 --stdev Infinity --pattern uf100-430
