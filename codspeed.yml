@@ -1,13 +1,31 @@
+$schema: https://raw.githubusercontent.com/CodSpeedHQ/codspeed/refs/heads/main/schemas/codspeed.schema.json
+
 # CodSpeed benchmark targets. Run with: codspeed run --mode simulation
+#
+# `exec` (not `entrypoint`): herbrand-sat-bench has no built-in CodSpeed
+# harness, so it is measured externally by the exec-harness.
+#
+# No `options:` block -- the schema documents TargetOptions as "Walltime
+# execution options", so warmup-time/max-time/max-rounds do not apply under
+# the simulation instrument, which runs each target once deterministically.
 #
 # Each target is one whole-process run of the existing tasty-bench SAT suite,
 # narrowed to a single corpus group. Under the simulation instrument the RTS
 # startup and corpus-glob cost is a near-constant per-target offset, and
 # CodSpeed reports deltas, so it does not affect regression detection.
 #
+# Caveat: CodSpeed's own guidance is that an individual benchmark should finish
+# in "milliseconds to low seconds", with the harness providing repetition. These
+# targets bundle 12-132 tasty-bench leaves and take 46-220 s under simulation.
+# That is a deliberate tradeoff of the CLI-only approach: per-leaf targets would
+# each re-pay RTS startup plus a glob of data/satlib, which contains the
+# 1000-file uf20-91-full test corpus. Per-leaf granularity needs a real harness
+# (instrument-hooks via FFI), which is out of scope here.
+#
 # --stdev Infinity makes tasty-bench execute each leaf exactly once. This is
 # required, not merely faster: bench/sat.hs pins a 100 s per-leaf timeout via
-# localOption (which overrides the CLI), and Valgrind runs ~20-50x slower.
+# localOption (which overrides the CLI), and the simulation instrument runs
+# ~200x slower than native (measured in CI, see PR #24).
 #
 # -j1 is mandatory: tasty-bench must never run benchmarks concurrently.
 #
@@ -23,12 +41,15 @@
 
 benchmarks:
   - name: "solve/huge"
+    id: huge
     exec: ./artifact-ghc-9.12.4/benchs/herbrand-sat-bench -j1 --stdev Infinity --pattern huge
 
   - name: "solve/Sudoku"
+    id: sudoku
     exec: ./artifact-ghc-9.12.4/benchs/herbrand-sat-bench -j1 --stdev Infinity --pattern Sudoku
 
   - name: "solve/SATLIB/Bejing"
+    id: bejing
     exec: ./artifact-ghc-9.12.4/benchs/herbrand-sat-bench -j1 --stdev Infinity --pattern Bejing
 
   # flat200-10.cnf is deliberately excluded: under the simulation instrument it
@@ -46,10 +67,13 @@ benchmarks:
   #
   # flat200-10.cnf is still covered by the existing `bench` job.
   - name: "solve/SATLIB/flat200-479"
+    id: flat200
     exec: ./artifact-ghc-9.12.4/benchs/herbrand-sat-bench -j1 --stdev Infinity --pattern flat200-1.cnf
 
   - name: "solve/SATLIB/uf100-430"
+    id: uf100
     exec: ./artifact-ghc-9.12.4/benchs/herbrand-sat-bench -j1 --stdev Infinity --pattern uf100-430
 
   - name: "solve/SATLIB/uf20-91"
+    id: uf20
     exec: ./artifact-ghc-9.12.4/benchs/herbrand-sat-bench -j1 --stdev Infinity --pattern uf20-91
