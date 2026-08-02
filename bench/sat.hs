@@ -49,6 +49,12 @@ satlibBenchmarkRoots =
   , "flat200-479"
   , "uf100-430"
   , "uf20-91"
+  , -- The unsatisfiable counterpart of uf100-430: same 100 variables, same 430
+    -- clauses, same clause/variable ratio, opposite satisfiability. Refuting
+    -- one exercises conflict analysis and clause learning to exhaustion rather
+    -- than stopping at the first satisfying assignment, and pairing it with an
+    -- otherwise identical satisfiable instance is what isolates that.
+    "uuf100-430"
   ]
 
 cdclBenches ::
