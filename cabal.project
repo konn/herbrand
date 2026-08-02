@@ -7,7 +7,7 @@ allow-newer:
 source-repository-package
   type: git
   location: https://github.com/SoftwareFoundationGroupAtKyotoU/pure-borrow.git
-  tag: 06c5906e33795c7a45418b95284cefa2520f8104
+  tag: a926c5efaba3f79b5d3234c5c9ce510ba59344c8
 
 -- Per-benchmark CodSpeed measurement for tasty-bench. Pinned to a commit rather
 -- than a branch: the measured numbers are only comparable against a CodSpeed
