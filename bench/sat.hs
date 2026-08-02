@@ -20,13 +20,19 @@ main = do
       . force
       . filterFileTreeRoots (`elem` satlibBenchmarkRoots)
       =<< findCnfsIn "data/satlib"
+  -- Dropped entirely when CodSpeed is measuring: the timeout would truncate
+  -- benchmarks whose instruction counts are still reported, and
+  -- allowFailureBecause would stop the leaves being instrumented at all. See
+  -- 'unlessMeasuring'.
+  guard <- unlessMeasuring (allowFailureBecause "Large input" . timeout 100)
+  let benches = cdclBenches guard
   performGC
   defaultMain
     [ bgroup
         "solve"
-        [ withCnfs "huge" huges cdclBenches
-        , withCnfs "Sudoku" sudoku cdclBenches
-        , withCnfs "SATLIB" satlib cdclBenches
+        [ withCnfs "huge" huges benches
+        , withCnfs "Sudoku" sudoku benches
+        , withCnfs "SATLIB" satlib benches
         ]
     ]
 
@@ -38,12 +44,14 @@ satlibBenchmarkRoots =
   , "uf20-91"
   ]
 
-cdclBenches :: IO (CNF Word, Formula Full Word) -> [Benchmark]
-cdclBenches fml =
-  [ allowFailureBecause "Large input" $
-      timeout 100 $
-        bench lab $
-          nfAppIO (fmap $ CDCL.solveWith opt . fst) fml
+cdclBenches ::
+  (Benchmark -> Benchmark) ->
+  IO (CNF Word, Formula Full Word) ->
+  [Benchmark]
+cdclBenches guard fml =
+  [ guard $
+      bench lab $
+        nfAppIO (fmap $ CDCL.solveWith opt . fst) fml
   | (lab, opt) <- cdclSolvers
   ]
 

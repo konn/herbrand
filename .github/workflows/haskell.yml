@@ -243,8 +243,49 @@ jobs:
     # entirely whenever a token is present. `${{secrets.X}}` for an unset secret
     # expands to the empty string, which clap still binds as Some(""), so setting
     # it at all disables OIDC and uploads with an empty key.
+    #
+    # The binary is measured directly rather than through a codspeed.yml exec
+    # target. The suite now links haskell-codspeed, so every `bench` leaf opens
+    # its own measurement window and is reported individually. Measuring the
+    # whole process instead put ~76% of the number in performMajorGC and ~23% in
+    # startup and input loading, leaving 1-2% describing the solver.
+    #
+    # The RTS options override the stanza's baked-in set, which stays as it is
+    # for the `bench` job and workspace/TUNING-PLAN.md. -V0 silences the ticker,
+    # which fires far too often against work running ~200x slow under Valgrind;
+    # -I0 stops collections happening merely because the process paused; and
+    # --copying-gc overrides --nonmoving-gc, whose concurrent marking would land
+    # inside measured windows. -A32m -T are repeated so this line is the whole
+    # contract rather than half of it.
     - name: Run CodSpeed benchmarks
-      run: codspeed run --mode simulation
+      env:
+        # Per-benchmark allocation, written by the suite itself. Exact and
+        # deterministic, and the metric CodSpeed has no channel for.
+        CODSPEED_HS_SIDECAR: ${{github.workspace}}/allocation.csv
+      run: >
+        codspeed run --mode simulation --
+        ./${{env.artifact}}/benchs/herbrand-sat-bench
+        +RTS -A32m -T -V0 -I0 --copying-gc -RTS
+    # The suite exits zero and prints results even when nothing was reported to
+    # CodSpeed -- it just falls back to tasty-bench's own timing loop. Assert the
+    # sidecar exists and has a row per benchmark, so a silent fallback fails here
+    # rather than showing up as an empty run on the dashboard much later.
+    - name: Check the run was actually measured
+      if: always()
+      run: |
+        [ -f allocation.csv ] || {
+          echo "::error::the suite wrote no allocation sidecar"; exit 1; }
+        rows=$(($(wc -l <allocation.csv) - 1))
+        echo "sidecar rows: ${rows}"
+        [ "${rows}" -eq 432 ] || {
+          echo "::error::expected 432 benchmark rows, got ${rows}"; exit 1; }
+    - name: Upload allocation sidecar
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: allocation-csv
+        path: allocation.csv
+        if-no-files-found: warn
 
   upload-reports:
     concurrency:

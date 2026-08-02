@@ -12,3 +12,12 @@ source-repository-package
     linear-witness
     linear-array-extra
     linear-memory
+
+-- Per-benchmark CodSpeed measurement for tasty-bench. Pinned to a commit rather
+-- than a branch: the measured numbers are only comparable against a CodSpeed
+-- baseline produced by the same harness, so this moving underfoot would
+-- invalidate the history without anything failing.
+source-repository-package
+  type: git
+  location: https://github.com/konn/haskell-codspeed.git
+  tag: 2f04e8cce92932215c1c6b80f4737328ac2f2d3b
