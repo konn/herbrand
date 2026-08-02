@@ -171,8 +171,13 @@ jobs:
         path: ${{env.svg-path}}
         name: ${{matrix.bench}}.svg
     
+    # herbrand-pure-borrow-spike-bench is a bare tasty-bench `defaultMain`, not
+    # `Herbrand.Bench.defaultMain`, so it never writes bench-results/*.csv and
+    # there is nothing for bench-chart to chart. Comparing it against main is
+    # worth having; a charted report for a spike is not. The three reporting
+    # steps below are skipped for it -- and only for it.
     - name: Generate Report
-      if: always()
+      if: always() && matrix.bench != 'herbrand-pure-borrow-spike-bench'
       shell: bash
       run: |
         BASELINE=${{steps.benchmark.outputs.baseline-csv}}
@@ -200,14 +205,14 @@ jobs:
         ./${{env.artifact}}/exes/bench-chart "${ARGS[@]}"
 
     - name: Compress Report
-      if: always()
+      if: always() && matrix.bench != 'herbrand-pure-borrow-spike-bench'
       run: >
         tar
         czvf "${{env.report-tarball}}"
         --directory=bench-results
         "${{matrix.bench}}-report"
     - name: Upload Report
-      if: always()
+      if: always() && matrix.bench != 'herbrand-pure-borrow-spike-bench'
       uses: actions/upload-artifact@v4
       with:
         path: ${{env.report-tarball}}
@@ -388,6 +393,10 @@ jobs:
         ARTIFACT_DIRS=${WORKDIR}/artifact-ghc-9.12.4
         REPORT_DIR=${WORKDIR}/reports
         cat "${ARTIFACT_DIRS}/benchs.list" | while read -r BENCH; do
+          # The `bench` job uploads no report for herbrand-pure-borrow-spike-bench.
+          if [[ "${BENCH}" == "herbrand-pure-borrow-spike-bench" ]]; then
+            continue
+          fi
           DEST=${REPORT_DIR}/${BENCH}
           mkdir -p "${DEST}"
           ORIG_REPORT_NAME=${BENCH}-report
