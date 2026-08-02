@@ -8,7 +8,7 @@
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 
-module Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Propagation.Production.Internal (
+module Logic.Propositional.Classical.SAT.CDCL.Propagation.Production.Internal (
   PropagationStart (..),
   propagateFrom,
 ) where
@@ -21,9 +21,9 @@ import Data.Ref.Linear.Borrow qualified as RefBorrow
 import Data.Vector.Mutable.Linear.Boxed.Borrow.Internal qualified as Boxed
 import Data.Vector.Mutable.Linear.Unboxed.Borrow.Internal qualified as Grow
 import Data.Vector.Unboxed qualified as U
-import Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Control.Internal qualified as SolverControl
-import Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Propagation.Kernel.Internal qualified as Kernel
-import Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Runtime.Internal qualified as Runtime
+import Logic.Propositional.Classical.SAT.CDCL.Control.Internal qualified as SolverControl
+import Logic.Propositional.Classical.SAT.CDCL.Propagation.Kernel.Internal qualified as Kernel
+import Logic.Propositional.Classical.SAT.CDCL.Runtime.Internal qualified as Runtime
 import Logic.Propositional.Classical.SAT.CDCL.Types
 import Prelude.Linear
 import Prelude qualified as NonLinear

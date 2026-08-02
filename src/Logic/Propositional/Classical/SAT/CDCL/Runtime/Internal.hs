@@ -14,7 +14,7 @@ The aggregate is an ordinary strict record.  It is never placed behind a
 single reference: each array/vector is an independent owner and only VSIDS,
 whose persistent root is replaced as a value, uses 'Ref.Ref'.
 -}
-module Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Runtime.Internal (
+module Logic.Propositional.Classical.SAT.CDCL.Runtime.Internal (
   CDCLStore,
   ClauseArena,
   WatchMap,
@@ -60,7 +60,7 @@ import Data.Vector.Mutable.Linear.Unboxed.Borrow.Internal qualified as Grow
 import Data.Vector.Unboxed qualified as U
 import Data.Word (Word64)
 import GHC.Exts qualified as GHC
-import Logic.Propositional.Classical.SAT.CDCL.Types hiding (WatchMap)
+import Logic.Propositional.Classical.SAT.CDCL.Types
 import Logic.Propositional.Classical.SAT.Types (SatResult (..))
 import Logic.Propositional.Syntax.General (Literal (..))
 import Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive (

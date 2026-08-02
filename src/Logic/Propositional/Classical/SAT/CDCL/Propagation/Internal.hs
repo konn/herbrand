@@ -16,7 +16,7 @@ Borrow module. It reborrows the aggregate, performs the mandatory five-field
 split, splits the nested clause/watch records, opens all three growable roots
 and the VSIDS root once, and passes only active stores to the inner loop.
 -}
-module Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Propagation.Internal (
+module Logic.Propositional.Classical.SAT.CDCL.Propagation.Internal (
   PropagationControl (..),
   PropagationEvidence (..),
   PropagationStart (..),
@@ -36,7 +36,7 @@ import Data.Ref.Linear.Borrow qualified as RefBorrow
 import Data.Vector.Mutable.Linear.Boxed.Borrow.Internal qualified as Boxed
 import Data.Vector.Mutable.Linear.Unboxed.Borrow.Internal qualified as Grow
 import Data.Vector.Unboxed qualified as U
-import Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Store.Internal qualified as Store
+import Logic.Propositional.Classical.SAT.CDCL.Store.Internal qualified as Store
 import Prelude.Linear
 import Prelude qualified as NonLinear
 

@@ -35,32 +35,32 @@ module Logic.Propositional.Classical.SAT.CDCL (
 
 import Control.Functor.Linear qualified as Control
 import Control.Functor.Linear.State.Extra qualified as State
+import Control.Monad.Borrow.Pure (linearly)
 import Control.Optics.Linear qualified as LinearOptics
 import Data.Bifunctor.Linear qualified as Bifunctor
 import Data.Foldable qualified as Foldable
 import Data.Functor.Identity (Identity)
 import Data.Functor.Linear qualified as Linear
 import Data.Generics.Labels ()
-import Data.HashMap.Mutable.Linear.Extra qualified as HashMap
+import Data.HashMap.RobinHood.Mutable.Linear qualified as HashMap
 import Data.HashSet qualified as HashSet
 import Data.Hashable (Hashable)
 import Data.Unrestricted.Linear (UrT (..), liftUrT, runUrT)
 import Data.Unrestricted.Linear qualified as Ur
-import Linear.Token.Linearly (besides)
-import Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Runtime.Internal (normalizedClausesForTest)
-import Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Solver.Internal qualified as PureBorrow
+import Logic.Propositional.Classical.SAT.CDCL.Runtime.Internal (normalizedClausesForTest)
+import Logic.Propositional.Classical.SAT.CDCL.Solver.Internal qualified as Solver
 import Logic.Propositional.Classical.SAT.CDCL.Types
 import Logic.Propositional.Classical.SAT.Types
 import Logic.Propositional.Syntax.NormalForm.Classical.Conjunctive
 import Prelude.Linear
 import Prelude qualified as NonLinear
 
-solve :: (HashMap.Keyed variable) => CNF variable -> SatResult (Model variable)
+solve :: (Hashable variable) => CNF variable -> SatResult (Model variable)
 {-# INLINE solve #-}
 solve = solveWith defaultOptions
 
 solveWith ::
-  (HashMap.Keyed variable) =>
+  (Hashable variable) =>
   CDCLOptions ->
   CNF variable ->
   SatResult (Model variable)
@@ -71,31 +71,32 @@ solveWith options cnf =
     Just model -> Satisfiable model
     Nothing ->
       unur $
-        HashMap.empty 128 \forward ->
-          besides forward (HashMap.emptyL 128)
-            & \(reverseMap, forward) ->
-              State.runState
-                ( runUrT
-                    ( NonLinear.traverse
-                        (\variable -> liftUrT (renameCNF variable))
-                        cnf
-                    )
-                )
-                ((reverseMap, Ur 0), forward)
-                & \(Ur renamed, ((forward, Ur _), reverseMap)) ->
-                  forward `lseq`
-                    case NonLinear.fst
-                      ( PureBorrow.solveVarIdWithStats
-                          options
-                          renamed
-                      ) of
-                      Unsat ->
-                        reverseMap `lseq` Ur Unsat
-                      Satisfiable model ->
-                        Satisfiable
-                          Linear.<$> State.evalState
-                            (unrenameModel model)
-                            reverseMap
+        linearly \linear ->
+          dup linear & \(forwardLinear, reverseLinear) ->
+            HashMap.new 128 forwardLinear & \forward ->
+              HashMap.new 128 reverseLinear & \reverseMap ->
+                State.runState
+                  ( runUrT
+                      ( NonLinear.traverse
+                          (\variable -> liftUrT (renameCNF variable))
+                          cnf
+                      )
+                  )
+                  ((reverseMap, Ur 0), forward)
+                  & \(Ur renamed, ((forward, Ur _), reverseMap)) ->
+                    forward `lseq`
+                      case NonLinear.fst
+                        ( Solver.solveVarIdWithStats
+                            options
+                            renamed
+                        ) of
+                        Unsat ->
+                          reverseMap `lseq` Ur Unsat
+                        Satisfiable model ->
+                          Satisfiable
+                            Linear.<$> State.evalState
+                              (unrenameModel model)
+                              reverseMap
 
 solveSparseByPureLiterals ::
   (Hashable variable) =>
@@ -236,8 +237,19 @@ unrenameSet variables =
         )
         (HashSet.toList variables)
 
+-- | 'HashMap.insert' also hands back the displaced value, which we never want here.
+insertNew ::
+  (Hashable key) =>
+  key ->
+  value ->
+  HashMap.HashMap key value %1 ->
+  HashMap.HashMap key value
+{-# INLINE insertNew #-}
+insertNew key value dictionary =
+  HashMap.insert key value dictionary & \(Ur _, dictionary) -> dictionary
+
 renameCNF ::
-  (HashMap.Keyed variable) =>
+  (Hashable variable) =>
   variable ->
   State.State
     ( (HashMap.HashMap variable VarId, Ur VarId)
@@ -259,9 +271,9 @@ renameCNF variable = State.do
               (Ur identifier, Ur (identifier NonLinear.+ 1))
           )
       (LinearOptics._1 LinearOptics..> LinearOptics._1)
-        State.%= HashMap.insert variable identifier
+        State.%= insertNew variable identifier
       LinearOptics._2
-        State.%= HashMap.insert identifier variable
+        State.%= insertNew identifier variable
       State.pure identifier
 
 {-# RULES "solveWith/VarId" solveWith = solveVarIdWith #-}
@@ -280,7 +292,7 @@ solveVarIdWith options cnf =
     Just model -> Satisfiable model
     Nothing ->
       NonLinear.fst
-        (PureBorrow.solveVarIdWithStats options cnf)
+        (Solver.solveVarIdWithStats options cnf)
 
 solveVarIdWithStats ::
   CDCLOptions ->
@@ -291,4 +303,4 @@ solveVarIdWithStats options cnf =
     Just model ->
       (Satisfiable model, zeroSolverStats)
     Nothing ->
-      PureBorrow.solveVarIdWithStats options cnf
+      Solver.solveVarIdWithStats options cnf

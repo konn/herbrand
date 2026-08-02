@@ -15,7 +15,7 @@ Each store is split locally and pinned once for the bulk kernel. VSIDS is the
 only replaced scalar root; no aggregate solver state is placed behind a
 reference.
 -}
-module Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Analysis.Internal (
+module Logic.Propositional.Classical.SAT.CDCL.Analysis.Internal (
   analyzeConflict,
   Kernel.ConflictAnalysis (..),
 ) where
@@ -26,9 +26,9 @@ import Data.Array.Mutable.Linear.Unboxed.Borrow.Internal qualified as Fixed
 import Data.Record.Linear.Borrow.Experimental.PatternMatch ((.@))
 import Data.Ref.Linear.Borrow qualified as RefBorrow
 import Data.Vector.Mutable.Linear.Boxed.Borrow.Internal qualified as Boxed
-import Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Analysis.Kernel.Internal qualified as Kernel
-import Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Control.Internal qualified as SolverControl
-import Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Runtime.Internal qualified as Runtime
+import Logic.Propositional.Classical.SAT.CDCL.Analysis.Kernel.Internal qualified as Kernel
+import Logic.Propositional.Classical.SAT.CDCL.Control.Internal qualified as SolverControl
+import Logic.Propositional.Classical.SAT.CDCL.Runtime.Internal qualified as Runtime
 import Logic.Propositional.Classical.SAT.CDCL.Types
 import Prelude.Linear
 

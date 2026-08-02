@@ -4,7 +4,7 @@
 {-# LANGUAGE LinearTypes #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 
-module Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Control.Internal (
+module Logic.Propositional.Classical.SAT.CDCL.Control.Internal (
   SolverControl,
   initialControl,
   finishControl,
@@ -30,17 +30,7 @@ module Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Control.Internal (
   modifyStats,
 ) where
 
-import Logic.Propositional.Classical.SAT.CDCL.Types hiding (
-  bumpConflict,
-  bumpDuplicateEnqueue,
-  bumpLiteralInspections,
-  bumpPostDrainScan,
-  bumpSeedScan,
-  bumpWatchMove,
-  bumpWatchVisit,
-  recordBacktrack,
-  tryRestart,
- )
+import Logic.Propositional.Classical.SAT.CDCL.Types
 import Prelude.Linear
 import Prelude qualified as NonLinear
 

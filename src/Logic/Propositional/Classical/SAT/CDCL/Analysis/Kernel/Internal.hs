@@ -11,7 +11,7 @@
 {- |
 Canonical first-UIP analysis over locally split borrowed stores.
 -}
-module Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Analysis.Kernel.Internal (
+module Logic.Propositional.Classical.SAT.CDCL.Analysis.Kernel.Internal (
   AnalysisPins (..),
   ConflictAnalysis (..),
   analyzeConflict,

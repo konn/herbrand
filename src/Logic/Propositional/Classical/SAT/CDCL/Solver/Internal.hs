@@ -11,7 +11,7 @@
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 
-module Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Solver.Internal (
+module Logic.Propositional.Classical.SAT.CDCL.Solver.Internal (
   solveVarIdWithStats,
 ) where
 
@@ -37,10 +37,10 @@ import Data.Set qualified as Set
 import Data.Vector.Mutable.Linear.Boxed.Borrow.Internal qualified as Boxed
 import Data.Vector.Mutable.Linear.Unboxed.Borrow.Internal qualified as Grow
 import Data.Vector.Unboxed qualified as U
-import Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Analysis.Internal qualified as Analysis
-import Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Control.Internal qualified as SolverControl
-import Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Propagation.Production.Internal qualified as Propagation
-import Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Runtime.Internal qualified as Runtime
+import Logic.Propositional.Classical.SAT.CDCL.Analysis.Internal qualified as Analysis
+import Logic.Propositional.Classical.SAT.CDCL.Control.Internal qualified as SolverControl
+import Logic.Propositional.Classical.SAT.CDCL.Propagation.Production.Internal qualified as Propagation
+import Logic.Propositional.Classical.SAT.CDCL.Runtime.Internal qualified as Runtime
 import Logic.Propositional.Classical.SAT.CDCL.Types
 import Logic.Propositional.Classical.SAT.Types (
   Model (..),

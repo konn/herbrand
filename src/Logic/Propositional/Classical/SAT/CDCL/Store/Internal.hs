@@ -13,7 +13,7 @@ This is deliberately an owner record, not a reference to an aggregate state.
 Each field owns an independently borrowable store. The algorithm only receives
 typed labels, so constructors and ordinary owner selectors stay confined here.
 -}
-module Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Store.Internal (
+module Logic.Propositional.Classical.SAT.CDCL.Store.Internal (
   CDCLStore,
   ClauseArena,
   WatchMap,

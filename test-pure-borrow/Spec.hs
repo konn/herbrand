@@ -18,8 +18,8 @@ import Data.Vector qualified as V
 import Data.Vector.Mutable.Linear.Boxed.Borrow.Internal qualified as Boxed
 import Data.Vector.Mutable.Linear.Unboxed.Borrow.Internal qualified as Grow
 import Data.Vector.Unboxed qualified as U
-import Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Propagation.Internal qualified as Propagation
-import Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Store.Internal qualified as Store
+import Logic.Propositional.Classical.SAT.CDCL.Propagation.Internal qualified as Propagation
+import Logic.Propositional.Classical.SAT.CDCL.Store.Internal qualified as Store
 import Prelude.Linear
 import Test.Tasty (defaultMain, testGroup)
 import Test.Tasty.HUnit (assertBool, testCase, (@?=))

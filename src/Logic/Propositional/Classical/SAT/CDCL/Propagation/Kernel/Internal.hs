@@ -11,7 +11,7 @@ The public-operation bulk kernel for the CDCL watch loop.
 Every fixed alias is split by the caller from one locally reborrowed
 `CDCLStore`. The recurrence threads and returns each alias linearly.
 -}
-module Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Propagation.Kernel.Internal (
+module Logic.Propositional.Classical.SAT.CDCL.Propagation.Kernel.Internal (
   KernelPins (..),
   KernelDelta (..),
   KernelOutcome (..),
