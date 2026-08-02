@@ -280,15 +280,25 @@ jobs:
     # Patterns are bare regexes, so `.` is a wildcard; `/uf100-01.cnf/` still
     # cannot match uf100-010.cnf, which would need "cnf" three characters after
     # "uf100-01".
+    #
+    # The pattern goes through TASTY_PATTERN, not --pattern, and it has to. The
+    # runner re-joins the command it is given and re-runs it through a shell, so
+    # the quotes this step wrote are already gone by then and `||` is read as a
+    # shell operator. The observed result was `bench --pattern /uf20-01.cnf/`
+    # succeeding and short-circuiting everything after it -- 12 benchmarks
+    # instead of 48, and the whole +RTS block silently never applied, which
+    # preflight caught as --nonmoving-gc still being on. An environment variable
+    # never reaches a shell. Keep it that way: no argument here may contain
+    # shell metacharacters.
     - name: Run CodSpeed benchmarks
       env:
         # Per-benchmark allocation, written by the suite itself. Exact and
         # deterministic, and the metric CodSpeed has no channel for.
         CODSPEED_HS_SIDECAR: ${{github.workspace}}/allocation.csv
+        TASTY_PATTERN: /uf20-01.cnf/ || /uf100-01.cnf/ || /flat200-1.cnf/ || /3blocks/
       run: >
         codspeed run --mode simulation --
         ./${{env.artifact}}/benchs/herbrand-sat-bench
-        --pattern '/uf20-01.cnf/ || /uf100-01.cnf/ || /flat200-1.cnf/ || /3blocks/'
         +RTS -A32m -T -V0 -I0 --copying-gc -RTS
     # The suite exits zero and prints results even when nothing was reported to
     # CodSpeed -- it just falls back to tasty-bench's own timing loop. Assert the
