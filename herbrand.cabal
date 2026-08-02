@@ -93,15 +93,8 @@ library
   import: defaults
   -- cabal-gild: discover src --exclude=src/**/Internal.hs --exclude=src/**/Internal/**/*.hs
   exposed-modules:
-    Control.Foldl.Linear
     Control.Functor.Linear.State.Extra
-    Data.HashMap.Mutable.Linear.Extra
-    Data.Matrix.Mutable.Linear.Unboxed
-    Data.Monoid.Linear.Orphans
-    Data.Set.Mutable.Linear.Extra
     Data.Unrestricted.Linear.Orphans
-    Data.Vector.Mutable.Linear.Helpers
-    Debug.Trace.Lienar.Extra
     Logic.Propositional.Classical.SAT.BruteForce
     Logic.Propositional.Classical.SAT.CDCL
     Logic.Propositional.Classical.SAT.CDCL.Types
@@ -119,15 +112,15 @@ library
     Data.Array.Mutable.Linear.Unboxed.Borrow.Internal
     Data.Vector.Mutable.Linear.Boxed.Borrow.Internal
     Data.Vector.Mutable.Linear.Unboxed.Borrow.Internal
-    Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Analysis.Internal
-    Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Analysis.Kernel.Internal
-    Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Control.Internal
-    Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Propagation.Internal
-    Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Propagation.Kernel.Internal
-    Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Propagation.Production.Internal
-    Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Runtime.Internal
-    Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Solver.Internal
-    Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Store.Internal
+    Logic.Propositional.Classical.SAT.CDCL.Analysis.Internal
+    Logic.Propositional.Classical.SAT.CDCL.Analysis.Kernel.Internal
+    Logic.Propositional.Classical.SAT.CDCL.Control.Internal
+    Logic.Propositional.Classical.SAT.CDCL.Propagation.Internal
+    Logic.Propositional.Classical.SAT.CDCL.Propagation.Kernel.Internal
+    Logic.Propositional.Classical.SAT.CDCL.Propagation.Production.Internal
+    Logic.Propositional.Classical.SAT.CDCL.Runtime.Internal
+    Logic.Propositional.Classical.SAT.CDCL.Solver.Internal
+    Logic.Propositional.Classical.SAT.CDCL.Store.Internal
 
   hs-source-dirs:
     src
@@ -139,11 +132,8 @@ library
     bitvec,
     derive-storable,
     derive-storable-plugin,
-    linear-array-extra,
     linear-base,
     linear-generics,
-    linear-memory,
-    linear-witness,
     pure-borrow ==0.0.0.0,
     vector-th-unbox,
 
@@ -330,8 +320,8 @@ test-suite herbrand-pure-borrow-test
     Data.Array.Mutable.Linear.Unboxed.Borrow.Internal
     Data.Vector.Mutable.Linear.Boxed.Borrow.Internal
     Data.Vector.Mutable.Linear.Unboxed.Borrow.Internal
-    Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Propagation.Internal
-    Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Store.Internal
+    Logic.Propositional.Classical.SAT.CDCL.Propagation.Internal
+    Logic.Propositional.Classical.SAT.CDCL.Store.Internal
 
   hs-source-dirs:
     bench/pure-borrow
@@ -358,8 +348,8 @@ benchmark herbrand-pure-borrow-spike-bench
     Data.Array.Mutable.Linear.Unboxed.Borrow.Internal
     Data.Vector.Mutable.Linear.Boxed.Borrow.Internal
     Data.Vector.Mutable.Linear.Unboxed.Borrow.Internal
-    Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Propagation.Internal
-    Logic.Propositional.Classical.SAT.CDCL.PureBorrow.Store.Internal
+    Logic.Propositional.Classical.SAT.CDCL.Propagation.Internal
+    Logic.Propositional.Classical.SAT.CDCL.Store.Internal
 
   hs-source-dirs:
     bench/pure-borrow
@@ -370,9 +360,7 @@ benchmark herbrand-pure-borrow-spike-bench
 
   build-depends:
     deepseq,
-    linear-array-extra,
     linear-base,
-    linear-witness,
     pure-borrow ==0.0.0.0,
     tasty-bench,
     vector,
