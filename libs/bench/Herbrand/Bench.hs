@@ -21,7 +21,7 @@ module Herbrand.Bench (
   FileTrie (..),
   timeout,
   isMeasuring,
-  unlessMeasuring,
+  allowFailureUnlessMeasuring,
 ) where
 
 import CodSpeed.Instrument (Mode (..), detectMode)
@@ -182,27 +182,19 @@ isMeasuring = do
     mode /= NotInstrumented
       || maybe False (\v -> v /= "" && v /= "0") deterministic
 
-{- | Apply a benchmark wrapper only when CodSpeed is /not/ measuring.
+{- | 'allowFailureBecause' must never be applied when CodSpeed is measuring.
 
-Both of the wrappers this suite uses have to be dropped under measurement, for
-different reasons, and dropping only one of them is worse than dropping neither.
-
-'timeout' is a wall-clock cap, and simulation runs roughly 200x slower than
-native — so a 100-second timeout is reached by half a second of real work. The
-benchmark is cut short and the instrument still reports the instruction count of
-the truncated run; because the cap is wall-clock, /which/ benchmarks get
-truncated shifts with runner load. That is why "Test.Tasty.Bench.CodSpeed"
-installs no default timeout when instrumented, but an explicit 'localOption' is
-still honoured, so a suite setting its own has to opt out itself.
-
-'allowFailureBecause' is the sharper problem, because it fails silently.
 @instrumentTree@ finds benchmarks by @cast@ing each leaf to @Benchmarkable@, and
 @wrapTest@ replaces the leaf with @tasty-expected-failure@'s own test type. The
 cast then fails, the leaf is left alone, and __nothing is reported to CodSpeed__
-— while the suite still runs, still prints results and still exits zero. The
-only symptom is an empty run on the dashboard.
+— while the suite still runs, still prints results and still exits zero. The only
+symptom is an empty run on the dashboard.
+
+Keeping it off under measurement has a second benefit: a 'timeout' that does fire
+then surfaces as a test failure and a non-zero exit, rather than as a truncated
+instruction count quietly recorded as if it were a real measurement.
 -}
-unlessMeasuring :: (Benchmark -> Benchmark) -> IO (Benchmark -> Benchmark)
-unlessMeasuring f = do
+allowFailureUnlessMeasuring :: String -> IO (Benchmark -> Benchmark)
+allowFailureUnlessMeasuring reason = do
   measuring <- isMeasuring
-  pure $ if measuring then id else f
+  pure $ if measuring then id else allowFailureBecause reason

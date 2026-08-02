@@ -20,12 +20,19 @@ main = do
       . force
       . filterFileTreeRoots (`elem` satlibBenchmarkRoots)
       =<< findCnfsIn "data/satlib"
-  -- Dropped entirely when CodSpeed is measuring: the timeout would truncate
-  -- benchmarks whose instruction counts are still reported, and
-  -- allowFailureBecause would stop the leaves being instrumented at all. See
-  -- 'unlessMeasuring'.
-  guard <- unlessMeasuring (allowFailureBecause "Large input" . timeout 100)
-  let benches = cdclBenches guard
+  -- allowFailureBecause is dropped under measurement or nothing is instrumented
+  -- at all; see 'allowFailureUnlessMeasuring'.
+  --
+  -- The timeout stays, but only as a safety net. Measured, the slowest selected
+  -- leaf is ~1.5 s, so 120 s is ~24x headroom and fires only on a genuine hang.
+  -- It must never be the thing that enforces a time budget: a wall-clock cap
+  -- that actually fires under simulation truncates the benchmark while the
+  -- instrument still reports the truncated count, and which leaves get cut
+  -- shifts with runner load. Budget is controlled by case selection instead --
+  -- see the --pattern in the codspeed job.
+  allowFailure <- allowFailureUnlessMeasuring "Large input"
+  measuring <- isMeasuring
+  let benches = cdclBenches (allowFailure . timeout (if measuring then 120 else 100))
   performGC
   defaultMain
     [ bgroup

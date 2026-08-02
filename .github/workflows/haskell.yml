@@ -257,6 +257,29 @@ jobs:
     # --copying-gc overrides --nonmoving-gc, whose concurrent marking would land
     # inside measured windows. -A32m -T are repeated so this line is the whole
     # contract rather than half of it.
+    #
+    # Only four of the 36 corpus files are measured, because the whole suite
+    # took 29 min. The measured windows were just 140 s of that: at ~3.6 s of
+    # Valgrind overhead per leaf, wall time tracks the *number* of leaves far
+    # more than the work in them, so cutting cases is the only lever that
+    # matters. 48 leaves projects to ~4.5 min.
+    #
+    # The four are workspace/TUNING-PLAN.md's own frozen SAT corpus, so this is
+    # the project's existing notion of a representative case rather than a new
+    # one. They span uniform-random small (uf20-91), uniform-random medium
+    # (uf100-430), phase-transition hard (flat200-479) and structured/crafted
+    # (Bejing/3blocks). TUNING-PLAN's three UNSAT cases live under the gitignored
+    # workspace/ and are not available here.
+    #
+    # flat200-10.cnf is the one to keep out: on its own it was 58% of all
+    # measured time, with a single leaf at 23 s.
+    #
+    # Coverage is not lost -- the `bench` job still runs all 432 leaves. What
+    # narrows is the CodSpeed regression gate.
+    #
+    # Patterns are bare regexes, so `.` is a wildcard; `/uf100-01.cnf/` still
+    # cannot match uf100-010.cnf, which would need "cnf" three characters after
+    # "uf100-01".
     - name: Run CodSpeed benchmarks
       env:
         # Per-benchmark allocation, written by the suite itself. Exact and
@@ -265,6 +288,7 @@ jobs:
       run: >
         codspeed run --mode simulation --
         ./${{env.artifact}}/benchs/herbrand-sat-bench
+        --pattern '/uf20-01.cnf/ || /uf100-01.cnf/ || /flat200-1.cnf/ || /3blocks/'
         +RTS -A32m -T -V0 -I0 --copying-gc -RTS
     # The suite exits zero and prints results even when nothing was reported to
     # CodSpeed -- it just falls back to tasty-bench's own timing loop. Assert the
@@ -277,8 +301,10 @@ jobs:
           echo "::error::the suite wrote no allocation sidecar"; exit 1; }
         rows=$(($(wc -l <allocation.csv) - 1))
         echo "sidecar rows: ${rows}"
-        [ "${rows}" -eq 432 ] || {
-          echo "::error::expected 432 benchmark rows, got ${rows}"; exit 1; }
+        # 4 corpus files x 12 solver configurations. Exact, not a lower bound:
+        # a pattern that silently stops matching is the failure this catches.
+        [ "${rows}" -eq 48 ] || {
+          echo "::error::expected 48 benchmark rows, got ${rows}"; exit 1; }
     - name: Upload allocation sidecar
       if: always()
       uses: actions/upload-artifact@v4
