@@ -163,6 +163,8 @@ library herbrand-bench
     Glob,
     directory,
     filepath,
+    haskell-codspeed,
+    haskell-codspeed:tasty-bench-codspeed,
     herbrand,
     safe-exceptions,
     tasty,
@@ -410,10 +412,22 @@ benchmark herbrand-sat-bench
   hs-source-dirs:
     bench
 
+  -- The baked-in RTS options are deliberately unchanged: they are the existing
+  -- measurement contract for the `bench` CI job and for
+  -- workspace/TUNING-PLAN.md, and -A in particular shifts results exactly as a
+  -- code change would.
+  --
+  -- -rtsopts is new, so the CodSpeed job can override them at run time without
+  -- moving that contract. CodSpeed.RTS.Preflight wants -V0 (the RTS ticker
+  -- fires far too often against work running ~200x slow under Valgrind), -I0
+  -- (no collection merely because the process paused) and no --nonmoving-gc
+  -- (concurrent marking would land inside measured windows). See the codspeed
+  -- job in .github/workflows/haskell.yml.
   ghc-options:
     "-with-rtsopts=-A32m -T --nonmoving-gc"
     -fproc-alignment=64
     -O2
+    -rtsopts
 
   build-tool-depends:
     tasty-discover:tasty-discover

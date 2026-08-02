@@ -77,16 +77,23 @@ interleave [] ys = ys
 interleave xs [] = xs
 interleave (x : xs) (y : ys) = x : y : interleave xs ys
 
+{- | The duplicate is emitted unconditionally, so every generated CNF contains
+at least one duplicate clause and 'test_generatorCoverage' holds by
+construction rather than by luck. Making it conditional left the coverage
+assertion true only most of the time -- falsify found
+@[[0],[0, -0]]@, a CNF with no duplicate clause and no repeated literal, on
+which the differential assertion is vacuous because normalization is the
+identity. The remaining injections stay random so the other shapes vary.
+-}
 injections :: Word -> CNFClause VarId -> Gen [CNFClause VarId]
 injections arity clause@(CNFClause lits) = do
-  duplicate <- F.bool False
   repeated <- F.bool False
   tautology <- F.bool False
   permuted <- F.bool False
   extra <- literalGen arity
   pure $
     concat
-      [ [clause | duplicate]
+      [ [clause]
       , -- A repeated literal appended *after* its own existing occurrence.
         -- Prepending would leave first-occurrence order unchanged and so would
         -- not discriminate first- from last-occurrence retention.

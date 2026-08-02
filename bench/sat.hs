@@ -20,13 +20,26 @@ main = do
       . force
       . filterFileTreeRoots (`elem` satlibBenchmarkRoots)
       =<< findCnfsIn "data/satlib"
+  -- allowFailureBecause is dropped under measurement or nothing is instrumented
+  -- at all; see 'allowFailureUnlessMeasuring'.
+  --
+  -- The timeout stays, but only as a safety net. Measured, the slowest selected
+  -- leaf is ~1.5 s, so 120 s is ~24x headroom and fires only on a genuine hang.
+  -- It must never be the thing that enforces a time budget: a wall-clock cap
+  -- that actually fires under simulation truncates the benchmark while the
+  -- instrument still reports the truncated count, and which leaves get cut
+  -- shifts with runner load. Budget is controlled by case selection instead --
+  -- see the --pattern in the codspeed job.
+  allowFailure <- allowFailureUnlessMeasuring "Large input"
+  measuring <- isMeasuring
+  let benches = cdclBenches (allowFailure . timeout (if measuring then 120 else 100))
   performGC
   defaultMain
     [ bgroup
         "solve"
-        [ withCnfs "huge" huges cdclBenches
-        , withCnfs "Sudoku" sudoku cdclBenches
-        , withCnfs "SATLIB" satlib cdclBenches
+        [ withCnfs "huge" huges benches
+        , withCnfs "Sudoku" sudoku benches
+        , withCnfs "SATLIB" satlib benches
         ]
     ]
 
@@ -36,14 +49,22 @@ satlibBenchmarkRoots =
   , "flat200-479"
   , "uf100-430"
   , "uf20-91"
+  , -- The unsatisfiable counterpart of uf100-430: same 100 variables, same 430
+    -- clauses, same clause/variable ratio, opposite satisfiability. Refuting
+    -- one exercises conflict analysis and clause learning to exhaustion rather
+    -- than stopping at the first satisfying assignment, and pairing it with an
+    -- otherwise identical satisfiable instance is what isolates that.
+    "uuf100-430"
   ]
 
-cdclBenches :: IO (CNF Word, Formula Full Word) -> [Benchmark]
-cdclBenches fml =
-  [ allowFailureBecause "Large input" $
-      timeout 100 $
-        bench lab $
-          nfAppIO (fmap $ CDCL.solveWith opt . fst) fml
+cdclBenches ::
+  (Benchmark -> Benchmark) ->
+  IO (CNF Word, Formula Full Word) ->
+  [Benchmark]
+cdclBenches guard fml =
+  [ guard $
+      bench lab $
+        nfAppIO (fmap $ CDCL.solveWith opt . fst) fml
   | (lab, opt) <- cdclSolvers
   ]
 

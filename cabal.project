@@ -17,3 +17,12 @@ source-repository-package
   type: git
   location: https://github.com/SoftwareFoundationGroupAtKyotoU/pure-borrow.git
   tag: d58e0d14842e7b7b95a7934baf595a79be4953b8
+
+-- Per-benchmark CodSpeed measurement for tasty-bench. Pinned to a commit rather
+-- than a branch: the measured numbers are only comparable against a CodSpeed
+-- baseline produced by the same harness, so this moving underfoot would
+-- invalidate the history without anything failing.
+source-repository-package
+  type: git
+  location: https://github.com/konn/haskell-codspeed.git
+  tag: 2f04e8cce92932215c1c6b80f4737328ac2f2d3b
