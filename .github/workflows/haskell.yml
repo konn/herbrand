@@ -21,7 +21,7 @@ jobs:
         ref: ${{github.event.pull_request.head.sha || github.sha}}
     - name: Enumerate CI plans
       id: list-ci
-      uses: actions/github-script@v7
+      uses: actions/github-script@v8
       with:
         script: |
           const script = require('./ci/scripts/enumerate-ci.js')
@@ -52,7 +52,7 @@ jobs:
       with:
         ref: ${{github.event.pull_request.head.sha || github.sha}}
     - name: Calculate hash keys
-      uses: actions/github-script@v7
+      uses: actions/github-script@v8
       id: cache-keys
       with:
         script: |
@@ -148,7 +148,7 @@ jobs:
     - name: Decompress
       run: tar xaf "${{steps.download.outputs.download-path}}/${{env.artifact}}.tar.zst"
     - name: Run Benchmark
-      uses: actions/github-script@v7
+      uses: actions/github-script@v8
       id: benchmark
       with:
         script: |
@@ -212,6 +212,131 @@ jobs:
       with:
         path: ${{env.report-tarball}}
         name: ${{matrix.bench}}-report
+
+  codspeed:
+    name: CodSpeed
+    needs: [build]
+    continue-on-error: true
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      id-token: write   # tokenless OIDC upload (public repo)
+    runs-on: ubuntu-latest
+    env:
+      artifact: artifact-ghc-9.12.4
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: ${{github.event.pull_request.head.sha || github.sha}}
+    - name: Download artifacts
+      id: download
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{env.artifact}}
+    - name: Decompress
+      run: tar xaf "${{steps.download.outputs.download-path}}/${{env.artifact}}.tar.zst"
+    - name: Install CodSpeed CLI
+      run: |
+        curl -fsSL https://codspeed.io/install.sh | bash
+        echo "${HOME}/.codspeed/bin" >>"${GITHUB_PATH}"
+    # No CODSPEED_TOKEN: static tokens are legacy, and the CLI skips OIDC
+    # entirely whenever a token is present. `${{secrets.X}}` for an unset secret
+    # expands to the empty string, which clap still binds as Some(""), so setting
+    # it at all disables OIDC and uploads with an empty key.
+    #
+    # The binary is measured directly rather than through a codspeed.yml exec
+    # target. The suite now links haskell-codspeed, so every `bench` leaf opens
+    # its own measurement window and is reported individually. Measuring the
+    # whole process instead put ~76% of the number in performMajorGC and ~23% in
+    # startup and input loading, leaving 1-2% describing the solver.
+    #
+    # The RTS options override the stanza's baked-in set, which stays as it is
+    # for the `bench` job and workspace/TUNING-PLAN.md. -V0 silences the ticker,
+    # which fires far too often against work running ~200x slow under Valgrind;
+    # -I0 stops collections happening merely because the process paused; and
+    # --copying-gc overrides --nonmoving-gc, whose concurrent marking would land
+    # inside measured windows. -A32m -T are repeated so this line is the whole
+    # contract rather than half of it.
+    #
+    # Only four of the 36 corpus files are measured, because the whole suite
+    # took 29 min. The measured windows were just 140 s of that: at ~3.6 s of
+    # Valgrind overhead per leaf, wall time tracks the *number* of leaves far
+    # more than the work in them, so cutting cases is the only lever that
+    # matters. 48 leaves projects to ~4.5 min.
+    #
+    # Four of the six are workspace/TUNING-PLAN.md's own frozen SAT corpus, so
+    # this is largely the project's existing notion of a representative case
+    # rather than a new one. They span uniform-random small (uf20-91),
+    # uniform-random medium (uf100-430), phase-transition hard (flat200-479) and
+    # structured/crafted (Bejing/3blocks).
+    #
+    # Sudoku/9x9/1 adds a second, differently-structured family; 9x9/2 is three
+    # times the cost for the same kind of coverage.
+    #
+    # uuf100-430/uuf100-01 is the unsatisfiable counterpart of uf100-430: same
+    # 100 variables, same 430 clauses, same ratio, opposite satisfiability.
+    # Refuting one drives conflict analysis and clause learning to exhaustion
+    # rather than stopping at the first satisfying assignment, so without it a
+    # regression confined to that path could pass this gate. Pairing it with an
+    # otherwise identical satisfiable instance is what isolates the difference.
+    # TUNING-PLAN's own three UNSAT cases could not be used: they lived under the
+    # gitignored workspace/tuning-corpus/ and no longer exist anywhere.
+    #
+    # The uf100 terms are directory-qualified on purpose. Plain /uf100-01.cnf/ is
+    # a substring of uuf100-01.cnf and silently selects both.
+    #
+    # flat200-10.cnf is the one to keep out: on its own it was 58% of all
+    # measured time, with a single leaf at 23 s.
+    #
+    # Coverage is not lost -- the `bench` job still runs all 432 leaves. What
+    # narrows is the CodSpeed regression gate.
+    #
+    # Patterns are bare regexes, so `.` is a wildcard; `/uf100-01.cnf/` still
+    # cannot match uf100-010.cnf, which would need "cnf" three characters after
+    # "uf100-01".
+    #
+    # The pattern goes through TASTY_PATTERN, not --pattern, and it has to. The
+    # runner re-joins the command it is given and re-runs it through a shell, so
+    # the quotes this step wrote are already gone by then and `||` is read as a
+    # shell operator. The observed result was `bench --pattern /uf20-01.cnf/`
+    # succeeding and short-circuiting everything after it -- 12 benchmarks
+    # instead of 48, and the whole +RTS block silently never applied, which
+    # preflight caught as --nonmoving-gc still being on. An environment variable
+    # never reaches a shell. Keep it that way: no argument here may contain
+    # shell metacharacters.
+    - name: Run CodSpeed benchmarks
+      env:
+        # Per-benchmark allocation, written by the suite itself. Exact and
+        # deterministic, and the metric CodSpeed has no channel for.
+        CODSPEED_HS_SIDECAR: ${{github.workspace}}/allocation.csv
+        TASTY_PATTERN: /uf20-01.cnf/ || /uf100-430.uf100-01.cnf/ || /uuf100-430.uuf100-01.cnf/ || /flat200-1.cnf/ || /3blocks/ || /9x9.1.cnf/
+      run: >
+        codspeed run --mode simulation --
+        ./${{env.artifact}}/benchs/herbrand-sat-bench
+        +RTS -A32m -T -V0 -I0 --copying-gc -RTS
+    # The suite exits zero and prints results even when nothing was reported to
+    # CodSpeed -- it just falls back to tasty-bench's own timing loop. Assert the
+    # sidecar exists and has a row per benchmark, so a silent fallback fails here
+    # rather than showing up as an empty run on the dashboard much later.
+    - name: Check the run was actually measured
+      if: always()
+      run: |
+        [ -f allocation.csv ] || {
+          echo "::error::the suite wrote no allocation sidecar"; exit 1; }
+        rows=$(($(wc -l <allocation.csv) - 1))
+        echo "sidecar rows: ${rows}"
+        # 6 corpus files x 12 solver configurations. Exact, not a lower bound:
+        # a pattern that silently stops matching is the failure this catches,
+        # and it has caught it once already.
+        [ "${rows}" -eq 72 ] || {
+          echo "::error::expected 72 benchmark rows, got ${rows}"; exit 1; }
+    - name: Upload allocation sidecar
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: allocation-csv
+        path: allocation.csv
+        if-no-files-found: warn
 
   upload-reports:
     concurrency:
