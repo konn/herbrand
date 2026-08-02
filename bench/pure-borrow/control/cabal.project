@@ -1,0 +1,5 @@
+import: ../../../cabal.project
+
+packages:
+  ../../../herbrand.cabal
+  pure-borrow-production-controls.cabal

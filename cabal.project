@@ -13,6 +13,11 @@ source-repository-package
     linear-array-extra
     linear-memory
 
+source-repository-package
+  type: git
+  location: https://github.com/SoftwareFoundationGroupAtKyotoU/pure-borrow.git
+  tag: d58e0d14842e7b7b95a7934baf595a79be4953b8
+
 -- Per-benchmark CodSpeed measurement for tasty-bench. Pinned to a commit rather
 -- than a branch: the measured numbers are only comparable against a CodSpeed
 -- baseline produced by the same harness, so this moving underfoot would

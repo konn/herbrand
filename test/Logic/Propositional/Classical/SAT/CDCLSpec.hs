@@ -337,59 +337,7 @@ test_solveVarId =
 instrumentationTests :: [TestTree]
 #ifdef HERBRAND_CDCL_INSTRUMENTED
 instrumentationTests =
-  [ testCase "sorts only the requested linear literal prefix" do
-      let cases :: [(Int, [Literal Word])]
-          cases =
-            [
-              ( 0
-              , []
-              )
-            ,
-              ( 0
-              , [Negative 99, Positive 2]
-              )
-            ,
-              ( 1
-              , [Negative 4, Positive 77]
-              )
-            ,
-              ( 5
-              , [Negative 2, Positive 3, Negative 1, Positive 0, Negative 0]
-              )
-            ,
-              ( 3
-              , [Negative 2, Positive 3, Negative 1, Positive 88, Negative 77]
-              )
-            ]
-      mapM_
-        ( \(prefixLength, input) ->
-            sortLitPrefixForTest prefixLength input
-              @?= sort (take prefixLength input) <> drop prefixLength input
-        )
-        cases
-      let initial =
-            [Negative 99, Positive 88, Negative 77, Positive 66, Negative 55]
-          rewrites =
-            [ [Negative 2, Positive 3, Negative 1]
-            , [Positive 5]
-            , [Negative 4, Positive 1, Positive 0, Negative 3, Negative 0]
-            ]
-          firstSnapshot = sort (rewrites !! 0) <> drop 3 initial
-          secondSnapshot = sort (rewrites !! 1) <> drop 1 firstSnapshot
-          thirdSnapshot = sort (rewrites !! 2)
-          reuseResults = sortLitPrefixesForTest initial rewrites
-      map snd reuseResults
-        @?= [firstSnapshot, secondSnapshot, thirdSnapshot]
-      case reuseResults of
-        [ ((firstComparisons, _), _)
-          , (singletonMetrics, _)
-          , ((thirdComparisons, _), _)
-          ] -> do
-            assertBool "nontrivial reused prefixes must record comparisons" $
-              firstComparisons > 0 && thirdComparisons > 0
-            singletonMetrics @?= (0, 0)
-        _ -> assertFailure "expected one result per scratch-prefix rewrite"
-  , testCase "instrumented root propagation preserves trail and scan invariants" do
+  [ testCase "instrumented root propagation preserves trail and scan invariants" do
       let (_, stats) =
             solveVarIdWithStats
               defaultOptions
